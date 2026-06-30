@@ -12,3 +12,34 @@ http:
 mcp:
   serverName: "platform-lifecycle-orchestrator"
   serverVersion: "1.0.0"
+
+github:
+  apiBase: "https://api.github.com"   # override per-app for GitHub Enterprise
+  defaultOwner: "Avatansh-GitHub"    # convention fallback: org/user that owns target repos
+  defaultBranch: "main"             # fallback only; ARM/GitHub/registry/request can override
+  
+naming:                            # convention used when an app is NOT in the registry
+  repoEqualsAppName: "true"       # repo = appName
+  appPathAtRoot: "true"          # app module sits at repo root ("." )
+  
+anypoint:
+  apiBase: "https://anypoint.mulesoft.com"
+  defaultOrgId: "2e14f8c6-4d60-481b-bfb6-798695efc8f4"  # used if ARM lookup not run
+  
+slack:    { channel: "#java17-upgrades" }
+
+jira:     { baseUrl: "https://your-org.atlassian.net", host: "your-org.atlassian.net" }
+
+matrix:   { path: "matrix/compatibility-matrix.yaml" }
+
+registry:                          # OPTIONAL — see governance note
+  path: "registry/app-registry.yaml"   # appName → repo coordinates
+  enforceAllowList: "false"      # true = ONLY registered apps may be upgraded (governance)
+  
+osv2:     { jobTtlSeconds: "2592000" }   # 30d rolling
+
+job:      { maxConcurrentPerApp: "1" }     # single-flight
+
+reconcile:                                 # self-healing sweep
+  frequencyMillis: "300000"               # run every 5 minutes
+  staleSeconds:    "900"                  # job is stale after 15 minutes without updatedAt change

@@ -26,6 +26,38 @@ types:
         type: boolean
       hasLookupFunction:
         type: boolean
+      headSha:
+        type: string
+        required: false
+        description: Git commit SHA of the HEAD used to derive this plan
+      topology:
+        type: string
+        required: false
+        description: Deployment topology descriptor (e.g. blue-green, rolling, canary)
+      fileEdits:
+        type: FileEdit[]
+        required: false
+        description: List of individual file-level edits included in this plan
+
+  FileEdit:
+    type: object
+    description: Describes a single file-level change within a ChangePlan
+    properties:
+      path:
+        type: string
+        description: Repository-relative path of the file being changed
+      operation:
+        type: string
+        enum: [ADD, MODIFY, DELETE, RENAME]
+        description: Type of edit operation
+      previousPath:
+        type: string
+        required: false
+        description: Original path, populated only when operation is RENAME
+      patchSummary:
+        type: string
+        required: false
+        description: Brief description of what changed within the file
 
   AssessmentResult:
     type: object
@@ -49,7 +81,15 @@ types:
         type: string
       status:
         type: string
-        enum: [PROCESSING, COMMITTED, PR_OPEN, DEPLOYED, FAILED]
+        enum: [PROCESSING, ASSESSING, COMMITTING, COMMITTED, PR_OPEN, DEPLOYING, DEPLOYED, ROLLED_BACK, FAILED_ASSESS, FAILED_COMMIT, FAILED_CI, FAILED_DEPLOY]
+      message:
+        type: string
+        required: false
+        description: Human-readable detail or error description for the current status
+      nextPollSeconds:
+        type: integer
+        required: false
+        description: Suggested number of seconds to wait before polling again
       prUrl:
         type: string
         required: false
@@ -136,3 +176,13 @@ types:
     responses:
       200:
         description: Webhook event received and acknowledged.
+
+  /cd-result:
+    post:
+      description: Receive CD pipeline result callbacks and update job status.
+      body:
+        application/json:
+          type: object
+      responses:
+        200:
+          description: CD result received and acknowledged.

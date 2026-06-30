@@ -1,149 +1,572 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<mule xmlns:os="http://www.mulesoft.org/schema/mule/os"
+<mule xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:os="http://www.mulesoft.org/schema/mule/os"
       xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
       xmlns="http://www.mulesoft.org/schema/mule/core"
       xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
       xsi:schemaLocation="
         http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
         http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
         http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd">
 
     <!--
         Implementation flow for POST /webhook.
-        Receives raw GitHub pull_request webhook events and updates the corresponding
-        migration job status in the Object Store when a migration PR is merged.
+        Receives GitHub pull_request webhook events.
 
-        Expected GitHub pull_request event shape (relevant fields):
-          payload.action  = "closed"
-          payload.pull_request.merged = true
-          payload.pull_request.html_url = "https://github.com/..."
-          payload.pull_request.head.ref = "migrate/..."   (branch name)
+        Security:   HMAC-SHA256 signature verified before any state change.
+        Idempotency: delivery UUID de-duplicated via Object Store.
 
         Job status transitions triggered here:
-          PR_OPEN → DEPLOYED  (on successful merge)
-          PR_OPEN → FAILED    (if we detect a closed-but-not-merged PR on a known job)
+          PR_OPEN → DEPLOYING  (on successful merge — CI/CD outcome handled by /webhook/cd-result)
     -->
     <flow name="mf-impl-post-webhook" doc:id="b8c9d0e1-0008-0008-0008-000000000001">
 
-        <logger level="DEBUG"
-                doc:name="LOG DEBUG Webhook Received"
-                doc:id="b8c9d0e1-0008-0008-0008-000000000002"
-                message="#['LOG DEBUG | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | webhook action=' ++ (payload.action default 'unknown')]" />
+        <!-- ── HMAC signature validation ─────────────────────────────────────────────────
+             Compute expected = "sha256=" ++ HMAC-SHA256(webhookSecret, rawBody).
+             vars.rawBody and vars.ghSignature were captured in the main flow BEFORE APIkit
+             parsed the payload, so rawBody is the exact bytes GitHub signed.
+             ──────────────────────────────────────────────────────────────────────────────── -->
+        <ee:transform doc:name="DW Compute Expected HMAC Signature"
+                      doc:id="b8c9d0e1-0008-0008-0008-000000000020"
+                      doc:description="Compute sha256=HEX(HMAC-SHA256(webhookSecret, rawBody)) for comparison with x-hub-signature-256">
+            <ee:variables>
+                <ee:set-variable variableName="expectedSig"><![CDATA[%dw 2.0
+import dw::Crypto
+output text/plain
+---
+"sha256=" ++ Crypto::HMACWith(p('secure::github.webhookSecret') as Binary, vars.rawBody, "HmacSHA256")]]></ee:set-variable>
+            </ee:variables>
+        </ee:transform>
 
-        <!--
-            Only process pull_request events where the PR was merged (action=closed AND merged=true).
-            All other event types (opened, synchronize, labeled, push, etc.) are acknowledged
-            and discarded without state changes.
-        -->
-        <choice doc:name="Is PR Merge Event?" doc:id="b8c9d0e1-0008-0008-0008-000000000003">
+        <choice doc:name="CHOICE signature valid?"
+                doc:id="b8c9d0e1-0008-0008-0008-000000000022"
+                doc:description="Reject any delivery whose x-hub-signature-256 header does not match the computed HMAC">
+            <when expression="#[vars.ghSignature == '' or vars.ghSignature != vars.expectedSig]"
+                  doc:name="signature missing or invalid"
+                  doc:id="b8c9d0e1-0008-0008-0008-000000000023">
 
-            <when expression="#[payload.action == 'closed' and payload.pull_request.merged == true]">
+                <logger level="WARN"
+                        doc:name="LOG WARN Invalid Webhook Signature"
+                        doc:id="b8c9d0e1-0008-0008-0008-000000000024"
+                        message="#['LOG WARN | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | INVALID webhook signature | delivery=' ++ vars.ghDelivery ++ ' | event=' ++ vars.ghEvent]" />
 
-                <!-- Extract the branch name to look up the associated job -->
-                <set-variable variableName="mergedBranch"
-                              value="#[payload.pull_request.head.ref default '']"
-                              doc:name="PV SET mergedBranch"
-                              doc:id="b8c9d0e1-0008-0008-0008-000000000004" />
+                <set-variable variableName="httpStatus"
+                              value="401"
+                              doc:name="PV SET httpStatus 401"
+                              doc:id="b8c9d0e1-0008-0008-0008-000000000025" />
 
-                <set-variable variableName="prUrl"
-                              value="#[payload.pull_request.html_url default '']"
-                              doc:name="PV SET prUrl"
-                              doc:id="b8c9d0e1-0008-0008-0008-000000000005" />
+                <ee:transform doc:name="DW Set 401 Error Body"
+                              doc:id="b8c9d0e1-0008-0008-0008-000000000026">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{ error: "invalid signature", correlationId: correlationId }]]></ee:set-payload>
+                    </ee:message>
+                </ee:transform>
 
-                <logger level="INFO"
-                        doc:name="LOG INFO PR Merged"
-                        doc:id="b8c9d0e1-0008-0008-0008-000000000006"
-                        message="#['LOG INFO | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | PR merged | branch=' ++ vars.mergedBranch ++ ' | prUrl=' ++ vars.prUrl]" />
+            </when>
+            <otherwise doc:name="signature valid — proceed"
+                       doc:id="b8c9d0e1-0008-0008-0008-000000000027">
 
-                <!--
-                    Derive jobId from the branch name.
-                    Migration branches follow the pattern: migrate/{appName}-{runtime}-java{version}
-                    The jobId is stored as a branch-to-jobId mapping in the Object Store
-                    under the key "branch::{branchName}".
-                    If no mapping exists the webhook is silently acknowledged.
-                -->
-                <os:retrieve
-                    key="#['branch::' ++ vars.mergedBranch]"
-                    objectStore="_defaultPersistentObjectStore"
-                    target="jobIdFromBranch"
-                    doc:name="OS Retrieve jobId by Branch"
-                    doc:id="b8c9d0e1-0008-0008-0008-000000000007">
-                    <os:default-value><![CDATA[null]]></os:default-value>
+                <!-- ── Idempotency: de-duplicate by GitHub delivery UUID ───────────────────── -->
+                <os:retrieve key="#['delivery::' ++ vars.ghDelivery]"
+                             objectStore="jobStore"
+                             target="seenDelivery"
+                             doc:name="OS Retrieve delivery idempotency key"
+                             doc:id="b8c9d0e1-0008-0008-0008-000000000028">
+                    <os:default-value>#[null]</os:default-value>
                 </os:retrieve>
 
-                <choice doc:name="Is Branch Mapped to a Job?" doc:id="b8c9d0e1-0008-0008-0008-000000000008">
+                <choice doc:name="CHOICE duplicate delivery?"
+                        doc:id="b8c9d0e1-0008-0008-0008-000000000029"
+                        doc:description="Skip processing if this delivery UUID was already handled">
+                    <when expression="#[vars.seenDelivery != null]"
+                          doc:name="duplicate delivery — skip"
+                          doc:id="b8c9d0e1-0008-0008-0008-000000000030">
 
-                    <when expression="#[vars.jobIdFromBranch != null]">
+                        <logger level="INFO"
+                                doc:name="LOG INFO Duplicate Delivery Skipped"
+                                doc:id="b8c9d0e1-0008-0008-0008-000000000031"
+                                message="#['LOG INFO | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | duplicate delivery, skipping | delivery=' ++ vars.ghDelivery]" />
 
-                        <!-- Retrieve the current job record -->
-                        <os:retrieve
-                            key="#[vars.jobIdFromBranch]"
-                            objectStore="_defaultPersistentObjectStore"
-                            doc:name="OS Retrieve Job Record"
-                            doc:id="b8c9d0e1-0008-0008-0008-000000000009" />
-
-                        <!-- Update the job record to DEPLOYED -->
-                        <ee:transform doc:name="DW Update Job Status to DEPLOYED"
-                                      doc:id="b8c9d0e1-0008-0008-0008-000000000010">
+                        <ee:transform doc:name="DW Set 200 Duplicate Acknowledgement"
+                                      doc:id="b8c9d0e1-0008-0008-0008-000000000032">
                             <ee:message>
                                 <ee:set-payload><![CDATA[%dw 2.0
 output application/json
 ---
-payload ++ {
-    status:      "DEPLOYED",
-    completedAt: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
-    prUrl:       vars.prUrl,
-    branchName:  vars.mergedBranch
-}]]></ee:set-payload>
+{ acknowledged: true, duplicate: true, correlationId: correlationId }]]></ee:set-payload>
                             </ee:message>
                         </ee:transform>
 
-                        <!-- Persist the updated job record -->
-                        <os:store
-                            key="#[vars.jobIdFromBranch]"
-                            objectStore="_defaultPersistentObjectStore"
-                            doc:name="OS Update Job to DEPLOYED"
-                            doc:id="b8c9d0e1-0008-0008-0008-000000000011">
-                            <os:value>#[payload]</os:value>
+                    </when>
+                    <otherwise doc:name="new delivery — process"
+                               doc:id="b8c9d0e1-0008-0008-0008-000000000033">
+
+                        <!-- Mark this delivery as processed before touching any job state -->
+                        <os:store key="#['delivery::' ++ vars.ghDelivery]"
+                                  objectStore="jobStore"
+                                  doc:name="OS Store delivery idempotency key"
+                                  doc:id="b8c9d0e1-0008-0008-0008-000000000034">
+                            <os:value>#[true]</os:value>
                         </os:store>
 
-                        <logger level="INFO"
-                                doc:name="LOG INFO Job Deployed"
-                                doc:id="b8c9d0e1-0008-0008-0008-000000000012"
-                                message="#['LOG INFO | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobIdFromBranch ++ ' | status=DEPLOYED']" />
-
-                    </when>
-
-                    <otherwise>
                         <logger level="DEBUG"
-                                doc:name="LOG DEBUG Branch Not Tracked"
-                                doc:id="b8c9d0e1-0008-0008-0008-000000000013"
-                                message="#['LOG DEBUG | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | branch not tracked, ignoring | branch=' ++ vars.mergedBranch]" />
-                    </otherwise>
+                                doc:name="LOG DEBUG Webhook Received"
+                                doc:id="b8c9d0e1-0008-0008-0008-000000000002"
+                                message="#['LOG DEBUG | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | webhook event=' ++ vars.ghEvent ++ ' | action=' ++ (payload.action default 'unknown') ++ ' | delivery=' ++ vars.ghDelivery]" />
 
-                </choice>
+                        <!--
+                            Only process pull_request events where the PR was merged.
+                            All other events are acknowledged without state changes.
+                        -->
+                        <choice doc:name="Is PR Merge Event?"
+                                doc:id="b8c9d0e1-0008-0008-0008-000000000003">
 
-            </when>
+                            <when expression="#[payload.action == 'closed' and payload.pull_request.merged == true]"
+                                  doc:name="PR merged">
 
-            <otherwise>
-                <logger level="DEBUG"
-                        doc:name="LOG DEBUG Non-Merge Event Ignored"
-                        doc:id="b8c9d0e1-0008-0008-0008-000000000014"
-                        message="#['LOG DEBUG | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | webhook event ignored | action=' ++ (payload.action default 'unknown')]" />
-            </otherwise>
+                                <set-variable variableName="mergedBranch"
+                                              value="#[payload.pull_request.head.ref default '']"
+                                              doc:name="PV SET mergedBranch"
+                                              doc:id="b8c9d0e1-0008-0008-0008-000000000004" />
 
-        </choice>
+                                <set-variable variableName="prUrl"
+                                              value="#[payload.pull_request.html_url default '']"
+                                              doc:name="PV SET prUrl"
+                                              doc:id="b8c9d0e1-0008-0008-0008-000000000005" />
 
-        <!-- Always return 200 to GitHub regardless of processing outcome -->
-        <ee:transform doc:name="DW Set 200 Acknowledgement" doc:id="b8c9d0e1-0008-0008-0008-000000000015">
-            <ee:message>
-                <ee:set-payload><![CDATA[%dw 2.0
+                                <logger level="INFO"
+                                        doc:name="LOG INFO PR Merged"
+                                        doc:id="b8c9d0e1-0008-0008-0008-000000000006"
+                                        message="#['LOG INFO | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | PR merged | branch=' ++ vars.mergedBranch ++ ' | prUrl=' ++ vars.prUrl]" />
+
+                                <os:retrieve key="#['branch::' ++ vars.mergedBranch]"
+                                             objectStore="jobStore"
+                                             target="jobIdFromBranch"
+                                             doc:name="OS Retrieve jobId by Branch"
+                                             doc:id="b8c9d0e1-0008-0008-0008-000000000007">
+                                    <os:default-value>#[null]</os:default-value>
+                                </os:retrieve>
+
+                                <choice doc:name="Is Branch Mapped to a Job?"
+                                        doc:id="b8c9d0e1-0008-0008-0008-000000000008">
+
+                                    <when expression="#[vars.jobIdFromBranch != null]"
+                                          doc:name="branch mapped to job">
+
+                                        <os:retrieve key="#[vars.jobIdFromBranch]"
+                                                     objectStore="jobStore"
+                                                     doc:name="OS Retrieve Job Record"
+                                                     doc:id="b8c9d0e1-0008-0008-0008-000000000009" />
+
+                                        <!--
+                                            Transition to DEPLOYING — the final DEPLOYED/FAILED_DEPLOY
+                                            transition is set by the CD pipeline via /webhook/cd-result.
+                                            completedAt is NOT set here; it belongs to the terminal state.
+                                        -->
+                                        <ee:transform doc:name="DW Update Job Status to DEPLOYING"
+                                                      doc:id="b8c9d0e1-0008-0008-0008-000000000010">
+                                            <ee:message>
+                                                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+payload ++ {
+    status:     "DEPLOYING",
+    prUrl:      vars.prUrl,
+    branchName: vars.mergedBranch,
+    updatedAt:  now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+}]]></ee:set-payload>
+                                            </ee:message>
+                                        </ee:transform>
+
+                                        <os:store key="#[vars.jobIdFromBranch]"
+                                                  objectStore="jobStore"
+                                                  doc:name="OS Update Job to DEPLOYING"
+                                                  doc:id="b8c9d0e1-0008-0008-0008-000000000011">
+                                            <os:value>#[payload]</os:value>
+                                        </os:store>
+
+                                        <logger level="INFO"
+                                                doc:name="LOG INFO Job DEPLOYING"
+                                                doc:id="b8c9d0e1-0008-0008-0008-000000000012"
+                                                message="#['LOG INFO | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobIdFromBranch ++ ' | status=DEPLOYING | awaiting CD pipeline callback']" />
+
+                                    </when>
+
+                                    <otherwise>
+                                        <logger level="DEBUG"
+                                                doc:name="LOG DEBUG Branch Not Tracked"
+                                                doc:id="b8c9d0e1-0008-0008-0008-000000000013"
+                                                message="#['LOG DEBUG | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | branch not tracked, ignoring | branch=' ++ vars.mergedBranch]" />
+                                    </otherwise>
+
+                                </choice>
+
+                            </when>
+
+                            <otherwise>
+                                <logger level="DEBUG"
+                                        doc:name="LOG DEBUG Non-Merge Event Ignored"
+                                        doc:id="b8c9d0e1-0008-0008-0008-000000000014"
+                                        message="#['LOG DEBUG | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | webhook event ignored | event=' ++ vars.ghEvent ++ ' | action=' ++ (payload.action default 'unknown')]" />
+                            </otherwise>
+
+                        </choice>
+
+                        <!-- Return 200 to GitHub for all valid, non-duplicate events -->
+                        <ee:transform doc:name="DW Set 200 Acknowledgement"
+                                      doc:id="b8c9d0e1-0008-0008-0008-000000000015">
+                            <ee:message>
+                                <ee:set-payload><![CDATA[%dw 2.0
 output application/json
 ---
 { acknowledged: true, correlationId: correlationId }]]></ee:set-payload>
-            </ee:message>
-        </ee:transform>
+                            </ee:message>
+                        </ee:transform>
+
+                    </otherwise>
+                </choice>
+
+            </otherwise>
+        </choice>
+
+    </flow>
+
+    <!--
+        mf-impl-post-cd-result — POST /webhook/cd-result
+        Called by the GitHub Actions CD pipeline after deployment.
+        Body: { jobId: String, result: "success"|"failure", deployUrl?: String }
+        Auth: X-CD-Token header must match secure::github.webhookSecret (shared secret).
+        Finalizes the job: DEPLOYED (success) or FAILED_DEPLOY (failure).
+    -->
+    <flow name="mf-impl-post-cd-result"
+          doc:id="b8c9d0e1-0008-0008-0008-000000000016"
+          doc:name="mf-impl-post-cd-result"
+          doc:description="Receive CD pipeline result callback; authenticate, finalize job status, release lock.">
+
+        <!-- ── Step 1: Shared-token authentication ──────────────────────────────────────── -->
+        <choice doc:name="CHOICE X-CD-Token valid?"
+                doc:id="b9c0d1e2-0009-0009-0009-000000000001"
+                doc:description="Reject requests whose X-CD-Token header does not match the shared webhook secret">
+            <when expression="#[attributes.headers['x-cd-token'] default '' != p('secure::github.webhookSecret')]"
+                  doc:name="token missing or invalid"
+                  doc:id="b9c0d1e2-0009-0009-0009-000000000002">
+
+                <logger level="WARN"
+                        doc:name="LOG WARN Invalid CD Token"
+                        doc:id="b9c0d1e2-0009-0009-0009-000000000003"
+                        message="#['LOG WARN | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | invalid X-CD-Token — rejecting']" />
+
+                <set-variable variableName="httpStatus"
+                              value="401"
+                              doc:name="PV SET httpStatus 401"
+                              doc:id="b9c0d1e2-0009-0009-0009-000000000004" />
+
+                <ee:transform doc:name="DW Set 401 Error Body"
+                              doc:id="b9c0d1e2-0009-0009-0009-000000000005">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{ error: "invalid cd token", correlationId: correlationId }]]></ee:set-payload>
+                    </ee:message>
+                </ee:transform>
+
+            </when>
+            <otherwise doc:name="token valid — proceed"
+                       doc:id="b9c0d1e2-0009-0009-0009-000000000006">
+
+                <!-- ── Step 2: Parse CD callback body ─────────────────────────────────────── -->
+                <set-variable variableName="jobId"
+                              value="#[payload.jobId]"
+                              doc:name="PV SET vars.jobId"
+                              doc:id="b9c0d1e2-0009-0009-0009-000000000007" />
+                <set-variable variableName="cdResult"
+                              value="#[payload.result default '']"
+                              doc:name="PV SET vars.cdResult"
+                              doc:id="b9c0d1e2-0009-0009-0009-000000000008" />
+                <set-variable variableName="deployUrl"
+                              value="#[payload.deployUrl default null]"
+                              doc:name="PV SET vars.deployUrl"
+                              doc:id="b9c0d1e2-0009-0009-0009-000000000009" />
+                <set-variable variableName="cdError"
+                              value="#[payload.error default null]"
+                              doc:name="PV SET vars.cdError"
+                              doc:id="b9c0d1e2-0009-0009-0009-000000000010" />
+
+                <!-- ── Step 3: Load job record (throws OS:KEY_NOT_FOUND → 404 if missing) ── -->
+                <os:retrieve key="#[vars.jobId]"
+                             objectStore="jobStore"
+                             doc:name="OS Retrieve Job Record"
+                             doc:id="b9c0d1e2-0009-0009-0009-000000000011" />
+
+                <!-- ── Step 4: Capture record fields before any transform overwrites payload ─ -->
+                <set-variable variableName="appName"
+                              value="#[payload.appName]"
+                              doc:name="PV SET vars.appName (from record)"
+                              doc:id="b9c0d1e2-0009-0009-0009-000000000012" />
+                <set-variable variableName="coords"
+                              value="#[payload.coords]"
+                              doc:name="PV SET vars.coords (from record)"
+                              doc:id="b9c0d1e2-0009-0009-0009-000000000013" />
+                <set-variable variableName="branchName"
+                              value="#[payload.branchName]"
+                              doc:name="PV SET vars.branchName (from record)"
+                              doc:id="b9c0d1e2-0009-0009-0009-000000000014" />
+                <set-variable variableName="commitSha"
+                              value="#[payload.commitSha]"
+                              doc:name="PV SET vars.commitSha (from record)"
+                              doc:id="b9c0d1e2-0009-0009-0009-000000000015" />
+                <set-variable variableName="prNumber"
+                              value="#[payload.prNumber]"
+                              doc:name="PV SET vars.prNumber (from record)"
+                              doc:id="b9c0d1e2-0009-0009-0009-000000000016" />
+                <set-variable variableName="curStatus"
+                              value="#[payload.status default '']"
+                              doc:name="PV SET vars.curStatus (from record)"
+                              doc:id="b9c0d1e2-0009-0009-0009-000000000017" />
+
+                <!-- ── Step 5: Idempotency / terminal guard ─────────────────────────────────
+                     If the job is already in a terminal state, return 200 and skip re-processing.
+                     ──────────────────────────────────────────────────────────────────────────── -->
+                <choice doc:name="CHOICE already terminal?"
+                        doc:id="b9c0d1e2-0009-0009-0009-000000000018"
+                        doc:description="Skip if the job was already finalized by a previous cd-result callback">
+                    <when expression="#[vars.curStatus == 'DEPLOYED' or vars.curStatus == 'FAILED_DEPLOY']"
+                          doc:name="job already terminal"
+                          doc:id="b9c0d1e2-0009-0009-0009-000000000019">
+
+                        <logger level="INFO"
+                                doc:name="LOG INFO CD Result Already Final"
+                                doc:id="b9c0d1e2-0009-0009-0009-000000000020"
+                                message="#['LOG INFO | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | cd-result already final, skipping | jobId=' ++ vars.jobId ++ ' | status=' ++ vars.curStatus]" />
+
+                        <ee:transform doc:name="DW Set 200 Idempotent Acknowledgement"
+                                      doc:id="b9c0d1e2-0009-0009-0009-000000000021">
+                            <ee:message>
+                                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{ acknowledged: true, idempotent: true, jobId: vars.jobId, status: vars.curStatus }]]></ee:set-payload>
+                            </ee:message>
+                        </ee:transform>
+
+                    </when>
+                    <otherwise doc:name="job not yet terminal — proceed"
+                               doc:id="b9c0d1e2-0009-0009-0009-000000000022">
+
+                        <!-- ── Step 6: Outcome branch ────────────────────────────────────────── -->
+                        <choice doc:name="CHOICE cdResult success|failure|unknown?"
+                                doc:id="b9c0d1e2-0009-0009-0009-000000000023"
+                                doc:description="Finalize job as DEPLOYED (success) or FAILED_DEPLOY (failure)">
+
+                            <!-- ── 6a: SUCCESS ──────────────────────────────────────────────── -->
+                            <when expression="#[vars.cdResult == 'success']"
+                                  doc:name="success"
+                                  doc:id="b9c0d1e2-0009-0009-0009-000000000024">
+
+                                <ee:transform doc:name="DW Update Job Status to DEPLOYED"
+                                              doc:id="b9c0d1e2-0009-0009-0009-000000000025">
+                                    <ee:message>
+                                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+payload ++ {
+    status:      "DEPLOYED",
+    deployUrl:   vars.deployUrl,
+    completedAt: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
+    updatedAt:   now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+}]]></ee:set-payload>
+                                    </ee:message>
+                                </ee:transform>
+
+                                <os:store key="#[vars.jobId]"
+                                          objectStore="jobStore"
+                                          doc:name="OS Store DEPLOYED Job Record"
+                                          doc:id="b9c0d1e2-0009-0009-0009-000000000026">
+                                    <os:value>#[payload]</os:value>
+                                </os:store>
+
+                                <!-- Release single-flight lock — non-fatal -->
+                                <try doc:name="TRY release lock (non-fatal)"
+                                     doc:id="b9c0d1e2-0009-0009-0009-000000000027">
+                                    <os:remove key="#['lock::' ++ vars.appName]"
+                                               objectStore="jobStore"
+                                               doc:name="OS Remove upgrade lock (deployed)"
+                                               doc:id="b9c0d1e2-0009-0009-0009-000000000028" />
+                                    <error-handler>
+                                        <on-error-continue type="ANY"
+                                                           doc:id="b9c0d1e2-0009-0009-0009-000000000029">
+                                            <logger level="DEBUG"
+                                                    doc:name="LOG DEBUG lock already released"
+                                                    doc:id="b9c0d1e2-0009-0009-0009-000000000030"
+                                                    message="#['LOG DEBUG | flow=' ++ flow.name ++ ' | lock release skipped (already removed) | app=' ++ (vars.appName default '?')]" />
+                                        </on-error-continue>
+                                    </error-handler>
+                                </try>
+
+                                <!-- Slack success notification — non-fatal -->
+                                <try doc:name="TRY Slack DEPLOYED notification (non-fatal)"
+                                     doc:id="b9c0d1e2-0009-0009-0009-000000000031">
+                                    <ee:transform doc:name="DW Build Slack DEPLOYED message"
+                                                  doc:id="b9c0d1e2-0009-0009-0009-000000000032">
+                                        <ee:message>
+                                            <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    channel: p('slack.channel'),
+    text: (":white_check_mark: *Java 17 upgrade DEPLOYED* — " ++ vars.appName
+           ++ "\nJob " ++ vars.jobId
+           ++ (if (vars.deployUrl != null) ("\n" ++ vars.deployUrl) else ""))
+}]]></ee:set-payload>
+                                        </ee:message>
+                                    </ee:transform>
+                                    <set-variable variableName="slackPath"
+                                                  value="#[p('secure::slack.webhookUrl') replace 'https://hooks.slack.com' with '']"
+                                                  doc:name="PV SET slackPath"
+                                                  doc:id="b9c0d1e2-0009-0009-0009-000000000033" />
+                                    <http:request method="POST"
+                                                  config-ref="Slack_Request"
+                                                  path="#[vars.slackPath]"
+                                                  doc:name="POST Slack DEPLOYED notification"
+                                                  doc:id="b9c0d1e2-0009-0009-0009-000000000034" />
+                                    <error-handler>
+                                        <on-error-continue type="ANY"
+                                                           doc:id="b9c0d1e2-0009-0009-0009-000000000035">
+                                            <logger level="WARN"
+                                                    doc:name="LOG WARN Slack DEPLOYED notification failed"
+                                                    doc:id="b9c0d1e2-0009-0009-0009-000000000036"
+                                                    message="#['LOG WARN | flow=' ++ flow.name ++ ' | Slack DEPLOYED notification error swallowed: ' ++ (error.description default 'unknown')]" />
+                                        </on-error-continue>
+                                    </error-handler>
+                                </try>
+
+                                <logger level="INFO"
+                                        doc:name="LOG INFO Job DEPLOYED"
+                                        doc:id="b9c0d1e2-0009-0009-0009-000000000037"
+                                        message="#['LOG INFO | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | status=DEPLOYED' ++ (if (vars.deployUrl != null) (' | deployUrl=' ++ vars.deployUrl) else '')]" />
+
+                                <ee:transform doc:name="DW Set 200 DEPLOYED Acknowledgement"
+                                              doc:id="b9c0d1e2-0009-0009-0009-000000000038">
+                                    <ee:message>
+                                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{ acknowledged: true, jobId: vars.jobId, status: "DEPLOYED" }]]></ee:set-payload>
+                                    </ee:message>
+                                </ee:transform>
+
+                            </when>
+
+                            <!-- ── 6b: FAILURE ──────────────────────────────────────────────── -->
+                            <when expression="#[vars.cdResult == 'failure']"
+                                  doc:name="failure"
+                                  doc:id="b9c0d1e2-0009-0009-0009-000000000039">
+
+                                <flow-ref name="pf-rollback"
+                                          doc:name="pf-rollback (best-effort)"
+                                          doc:id="b9c0d1e2-0009-0009-0009-000000000040" />
+
+                                <ee:transform doc:name="DW Update Job Status to FAILED_DEPLOY"
+                                              doc:id="b9c0d1e2-0009-0009-0009-000000000041">
+                                    <ee:message>
+                                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+payload ++ {
+    status:      "FAILED_DEPLOY",
+    error:       (vars.cdError default "CD pipeline reported failure"),
+    rolledBack:  true,
+    completedAt: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
+    updatedAt:   now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+}]]></ee:set-payload>
+                                    </ee:message>
+                                </ee:transform>
+
+                                <os:store key="#[vars.jobId]"
+                                          objectStore="jobStore"
+                                          doc:name="OS Store FAILED_DEPLOY Job Record"
+                                          doc:id="b9c0d1e2-0009-0009-0009-000000000042">
+                                    <os:value>#[payload]</os:value>
+                                </os:store>
+
+                                <!-- Release single-flight lock — non-fatal -->
+                                <try doc:name="TRY release lock on failure (non-fatal)"
+                                     doc:id="b9c0d1e2-0009-0009-0009-000000000043">
+                                    <os:remove key="#['lock::' ++ vars.appName]"
+                                               objectStore="jobStore"
+                                               doc:name="OS Remove upgrade lock (failed deploy)"
+                                               doc:id="b9c0d1e2-0009-0009-0009-000000000044" />
+                                    <error-handler>
+                                        <on-error-continue type="ANY"
+                                                           doc:id="b9c0d1e2-0009-0009-0009-000000000045">
+                                            <logger level="DEBUG"
+                                                    doc:name="LOG DEBUG lock already released (failure)"
+                                                    doc:id="b9c0d1e2-0009-0009-0009-000000000046"
+                                                    message="#['LOG DEBUG | flow=' ++ flow.name ++ ' | lock release skipped (already removed) | app=' ++ (vars.appName default '?')]" />
+                                        </on-error-continue>
+                                    </error-handler>
+                                </try>
+
+                                <flow-ref name="pf-notify-failure"
+                                          doc:name="pf-notify-failure (FAILED_DEPLOY)"
+                                          doc:id="b9c0d1e2-0009-0009-0009-000000000047" />
+
+                                <logger level="WARN"
+                                        doc:name="LOG WARN Job FAILED_DEPLOY"
+                                        doc:id="b9c0d1e2-0009-0009-0009-000000000048"
+                                        message="#['LOG WARN | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | status=FAILED_DEPLOY']" />
+
+                                <ee:transform doc:name="DW Set 200 FAILED_DEPLOY Acknowledgement"
+                                              doc:id="b9c0d1e2-0009-0009-0009-000000000049">
+                                    <ee:message>
+                                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{ acknowledged: true, jobId: vars.jobId, status: "FAILED_DEPLOY" }]]></ee:set-payload>
+                                    </ee:message>
+                                </ee:transform>
+
+                            </when>
+
+                            <!-- ── 6c: UNKNOWN result ───────────────────────────────────────── -->
+                            <otherwise doc:name="unknown result — reject"
+                                       doc:id="b9c0d1e2-0009-0009-0009-000000000050">
+
+                                <logger level="WARN"
+                                        doc:name="LOG WARN Unknown CD Result"
+                                        doc:id="b9c0d1e2-0009-0009-0009-000000000051"
+                                        message="#['LOG WARN | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | unknown cdResult=' ++ vars.cdResult]" />
+
+                                <set-variable variableName="httpStatus"
+                                              value="400"
+                                              doc:name="PV SET httpStatus 400"
+                                              doc:id="b9c0d1e2-0009-0009-0009-000000000052" />
+
+                                <ee:transform doc:name="DW Set 400 Unknown Result Body"
+                                              doc:id="b9c0d1e2-0009-0009-0009-000000000053">
+                                    <ee:message>
+                                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{ error: "invalid result (expected success|failure)", correlationId: correlationId }]]></ee:set-payload>
+                                    </ee:message>
+                                </ee:transform>
+
+                            </otherwise>
+
+                        </choice>
+
+                    </otherwise>
+                </choice>
+
+            </otherwise>
+        </choice>
 
     </flow>
 

@@ -51,6 +51,35 @@
             doc:id="d4e5f6a7-0004-0004-0004-000000000005"
             message="#['LOG INFO REQUEST RECEIVED | flow=' ++ vars.flowName ++ ' | correlationId=' ++ correlationId ++ ' | externalTranId=' ++ vars.externalTranId ++ ' | method=' ++ attributes.method ++ ' | path=' ++ attributes.requestPath]" />
 
+        <!--
+            Capture raw body bytes and GitHub webhook headers BEFORE the APIkit router
+            parses the payload. These are cheap set-variable steps that are harmless for
+            non-webhook routes; repeatable streams ensure APIkit can still read the body.
+        -->
+        <set-variable variableName="rawBody"
+                      value="#[payload as Binary]"
+                      doc:name="PV SET rawBody"
+                      doc:id="d4e5f6a7-0004-0004-0004-000000000020"
+                      doc:description="Raw request bytes used for GitHub HMAC signature verification" />
+
+        <set-variable variableName="ghSignature"
+                      value="#[attributes.headers['x-hub-signature-256'] default '']"
+                      doc:name="PV SET ghSignature"
+                      doc:id="d4e5f6a7-0004-0004-0004-000000000021"
+                      doc:description="GitHub HMAC-SHA256 signature header sent with every webhook delivery" />
+
+        <set-variable variableName="ghDelivery"
+                      value="#[attributes.headers['x-github-delivery'] default '']"
+                      doc:name="PV SET ghDelivery"
+                      doc:id="d4e5f6a7-0004-0004-0004-000000000022"
+                      doc:description="GitHub unique delivery UUID — used as idempotency key" />
+
+        <set-variable variableName="ghEvent"
+                      value="#[attributes.headers['x-github-event'] default '']"
+                      doc:name="PV SET ghEvent"
+                      doc:id="d4e5f6a7-0004-0004-0004-000000000023"
+                      doc:description="GitHub event type (e.g. pull_request, push, ping)" />
+
         <apikit:router
             config-ref="platform-lifecycle-orchestrator-config"
             doc:name="APIkit Router"
@@ -99,6 +128,14 @@
         <flow-ref name="mf-impl-post-webhook"
                   doc:name="mf-impl-post-webhook"
                   doc:id="d4e5f6a7-0004-0004-0004-000000000016" />
+    </flow>
+
+    <!-- POST /webhook/cd-result -->
+    <flow name="post:\webhook\cd-result:application\json:platform-lifecycle-orchestrator-config"
+          doc:id="d4e5f6a7-0004-0004-0004-000000000017">
+        <flow-ref name="mf-impl-post-cd-result"
+                  doc:name="mf-impl-post-cd-result"
+                  doc:id="d4e5f6a7-0004-0004-0004-000000000018" />
     </flow>
 
 </mule>

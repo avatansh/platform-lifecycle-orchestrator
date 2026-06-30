@@ -16,6 +16,12 @@
           doc:name="mf-impl-post-jobs-assess"
           doc:description="REST entry: maps HTTP body to vars, then calls shared pf-assess-app sub-flow">
 
+        <!-- Snapshot inbound HTTP body FIRST — before any sub-flow call overwrites payload.
+             vars.requestBody is read by pf-resolve-coordinates for Tier-2 coordinate overrides. -->
+        <set-variable variableName="requestBody"
+                      value="#[payload]"
+                      doc:name="PV SET requestBody"
+                      doc:id="e5f6a7b8-0005-0005-0005-000000000009" />
         <logger level="DEBUG"
                 doc:name="LOG DEBUG Request"
                 doc:id="e5f6a7b8-0005-0005-0005-000000000002"

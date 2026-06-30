@@ -2,6 +2,7 @@
 <mule xmlns:api-gateway="http://www.mulesoft.org/schema/mule/api-gateway"
       xmlns:apikit="http://www.mulesoft.org/schema/mule/mule-apikit"
       xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:os="http://www.mulesoft.org/schema/mule/os"
       xmlns:mcp="http://www.mulesoft.org/schema/mule/mcp"
       xmlns="http://www.mulesoft.org/schema/mule/core"
       xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
@@ -9,9 +10,27 @@
       xsi:schemaLocation="
         http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
         http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd
         http://www.mulesoft.org/schema/mule/mule-apikit http://www.mulesoft.org/schema/mule/mule-apikit/current/mule-apikit.xsd
         http://www.mulesoft.org/schema/mule/api-gateway http://www.mulesoft.org/schema/mule/api-gateway/current/mule-api-gateway.xsd
         http://www.mulesoft.org/schema/mule/mcp http://www.mulesoft.org/schema/mule/mcp/current/mule-mcp.xsd">
+
+    <!-- ===== Object Store v2 — explicit TTL-rolling job store ===== -->
+    <!--
+        Single named store for all pipeline state: job records, single-flight locks,
+        branch-to-jobId indices, and delivery de-duplication keys.
+        entryTtl = 30 days (osv2.jobTtlSeconds). Each os:store call on an existing key
+        resets the TTL, giving active jobs a rolling 30-day retention window.
+    -->
+    <os:object-store name="jobStore"
+                     doc:name="Job Store"
+                     doc:id="a1b2c3d4-0001-0001-0001-000000000012"
+                     persistent="true"
+                     entryTtl="${osv2.jobTtlSeconds}"
+                     entryTtlUnit="SECONDS"
+                     maxEntries="10000"
+                     expirationInterval="1"
+                     expirationIntervalUnit="HOURS" />
 
     <!-- ===== Property Sources ===== -->
     <!-- Environment-specific non-sensitive properties: config-dev.yaml, config-prod.yaml, etc. -->
@@ -71,5 +90,77 @@
         doc:name="API Autodiscovery"
         doc:id="a1b2c3d4-0001-0001-0001-000000000005"
         flowRef="platform-lifecycle-orchestrator-main" />
+
+    <!-- ===== Outbound HTTP Request Configs ===== -->
+
+    <!--
+        GitHub_Request: HTTPS client for all GitHub REST API calls (api.github.com).
+        Default headers sent on every request:
+          Authorization  — Bearer token from the secure property store (secure::github.token)
+          Accept         — GitHub v3 JSON media type
+          User-Agent     — required by GitHub; identifies this service
+        Override any header per-request via http:headers on http:request if needed.
+    -->
+    <http:request-config
+        name="GitHub_Request"
+        doc:name="GitHub API Request Config"
+        doc:id="a1b2c3d4-0001-0001-0001-000000000008"
+        basePath="/">
+        <http:request-connection host="api.github.com" port="443" protocol="HTTPS" />
+        <http:default-headers>
+            <http:default-header key="Authorization" value="#['Bearer ' ++ p('secure::github.token')]" />
+            <http:default-header key="Accept"        value="application/vnd.github+json" />
+            <http:default-header key="User-Agent"    value="platform-lifecycle-orchestrator" />
+        </http:default-headers>
+    </http:request-config>
+
+    <!--
+        Anypoint_Request: HTTPS client for Anypoint Platform REST APIs (ARM, API Manager, etc.).
+        Base host: anypoint.mulesoft.com port 443 HTTPS.
+        Authentication headers (e.g. Authorization: Bearer <access-token>) are added
+        per-request in the calling sub-flow after the token has been obtained.
+    -->
+    <http:request-config
+        name="Anypoint_Request"
+        doc:name="Anypoint Platform Request Config"
+        doc:id="a1b2c3d4-0001-0001-0001-000000000009"
+        basePath="/">
+        <http:request-connection host="anypoint.mulesoft.com" port="443" protocol="HTTPS" />
+    </http:request-config>
+
+    <!--
+        Slack_Request: HTTPS client for Slack incoming webhook calls (hooks.slack.com).
+        The webhook secret is embedded in the path at call time — no Authorization header needed.
+        Default header: Content-Type = application/json (required by Slack webhooks).
+    -->
+    <http:request-config
+        name="Slack_Request"
+        doc:name="Slack Webhook Request Config"
+        doc:id="a1b2c3d4-0001-0001-0001-000000000010"
+        basePath="/">
+        <http:request-connection host="hooks.slack.com" port="443" protocol="HTTPS" />
+        <http:default-headers>
+            <http:default-header key="Content-Type" value="application/json" />
+        </http:default-headers>
+    </http:request-config>
+
+    <!--
+        Jira_Request: HTTPS client for the Jira Cloud REST API.
+        Base host driven by ${jira.host} so it works for any Jira Cloud tenant without code change.
+        Authorization uses HTTP Basic with email + API token from the secure properties store.
+        Default headers: Authorization (Basic), Accept and Content-Type (both application/json).
+    -->
+    <http:request-config
+        name="Jira_Request"
+        doc:name="Jira Cloud Request Config"
+        doc:id="a1b2c3d4-0001-0001-0001-000000000011"
+        basePath="/">
+        <http:request-connection host="${jira.host}" port="443" protocol="HTTPS" />
+        <http:default-headers>
+            <http:default-header key="Authorization" value="#['Basic ' ++ toBase64(p('secure::jira.email') ++ ':' ++ p('secure::jira.apiToken'))]" />
+            <http:default-header key="Accept"        value="application/json" />
+            <http:default-header key="Content-Type"  value="application/json" />
+        </http:default-headers>
+    </http:request-config>
 
 </mule>

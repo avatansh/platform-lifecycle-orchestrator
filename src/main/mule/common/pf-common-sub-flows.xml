@@ -1,0 +1,309 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+    <!-- ===== Global Caching Strategies ===== -->
+
+    <!--
+        matrixCachingStrategy: constant cache key — the compatibility-matrix.yaml is a
+        classpath resource that does not change between requests. A single cached read
+        serves the entire lifetime of the Mule application instance.
+    -->
+    <ee:object-store-caching-strategy
+        name="matrixCachingStrategy"
+        doc:name="Matrix Caching Strategy"
+        doc:id="pfcs0001-0001-0001-0001-000000000001"
+        keyGenerationExpression="#['compatibility-matrix-static']" />
+
+    <!--
+        registryCachingStrategy: constant cache key — the app-registry.yaml is also a
+        classpath resource. Cache once per application restart.
+    -->
+    <ee:object-store-caching-strategy
+        name="registryCachingStrategy"
+        doc:name="Registry Caching Strategy"
+        doc:id="pfcs0002-0002-0002-0002-000000000001"
+        keyGenerationExpression="#['app-registry-static']" />
+
+    <!-- ==========================================================================
+         pf-load-matrix
+         ──────────────────────────────────────────────────────────────────────────
+         Reads classpath://matrix/compatibility-matrix.yaml using DataWeave readUrl
+         and caches the parsed YAML object so subsequent callers pay no I/O cost.
+
+         Sets:    vars.matrix  (application/java — parsed YAML object)
+         Reads:   classpath://matrix/compatibility-matrix.yaml
+         Caches:  yes — matrixCachingStrategy (constant key, JVM-lifetime cache)
+
+         Transport-agnostic — no HTTP listener, no request/response contract.
+         Callers: pf-assess-app (and any future sub-flow that needs upgrade rules).
+         ========================================================================== -->
+    <sub-flow name="pf-load-matrix"
+              doc:id="pflm0001-0001-0001-0001-000000000001"
+              doc:name="pf-load-matrix"
+              doc:description="Load and cache the compatibility matrix YAML into vars.matrix">
+
+        <logger level="DEBUG"
+                doc:name="LOG DEBUG pf-load-matrix enter"
+                doc:id="pflm0001-0001-0001-0001-000000000002"
+                message="#['LOG DEBUG | flow=pf-load-matrix | correlationId=' ++ correlationId ++ ' | loading compatibility matrix']" />
+
+        <!--
+            Cache scope — key 'compatibility-matrix-static' is constant.
+            First call: executes the inner ee:transform, reads the YAML, caches the resulting event.
+            Subsequent calls: returns the cached event, skipping the transform entirely.
+            Payload after this scope = parsed compatibility matrix object.
+        -->
+        <ee:cache cachingStrategy-ref="matrixCachingStrategy"
+                  doc:name="CACHE Read Compatibility Matrix YAML"
+                  doc:id="pflm0001-0001-0001-0001-000000000003">
+            <ee:transform doc:name="DW readUrl compatibility-matrix.yaml"
+                          doc:id="pflm0001-0001-0001-0001-000000000004"
+                          doc:description="Read and parse compatibility-matrix.yaml from the classpath using DataWeave readUrl">
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+output application/java
+---
+readUrl("classpath://matrix/compatibility-matrix.yaml", "application/yaml")]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
+        </ee:cache>
+
+        <!-- Promote cached payload to vars.matrix so downstream sub-flows access it by name -->
+        <set-variable variableName="matrix"
+                      value="#[payload]"
+                      doc:name="PV SET vars.matrix"
+                      doc:id="pflm0001-0001-0001-0001-000000000005"
+                      doc:description="Store parsed matrix object in vars.matrix for downstream use" />
+
+        <logger level="DEBUG"
+                doc:name="LOG DEBUG pf-load-matrix done"
+                doc:id="pflm0001-0001-0001-0001-000000000006"
+                message="#['LOG DEBUG | flow=pf-load-matrix | correlationId=' ++ correlationId ++ ' | matrix loaded | schemaVersion=' ++ (vars.matrix.schemaVersion default 'unknown') ++ ' | targetRuntime=' ++ (vars.matrix.target.runtime default 'unknown')]" />
+
+    </sub-flow>
+
+    <!-- ==========================================================================
+         pf-resolve-coordinates
+         ──────────────────────────────────────────────────────────────────────────
+         Resolves GitHub + Anypoint repo coordinates for vars.appName and writes the
+         fully-resolved object to vars.coords.
+
+         Required variable:
+           vars.appName        — application name to look up
+
+         Reads payload as the request body (transport-agnostic; may be null/empty):
+           { owner?, repo?, appPath?, defaultBranch?, orgId? }
+
+         Precedence — first non-null value wins for each field:
+           1. Registry entry   — classpath://registry/app-registry.yaml → apps[vars.appName]
+           2. Request override — same-named field on the request body (payload at call-time)
+           3. Convention default (property placeholders):
+                owner         → p('github.defaultOwner')
+                repo          → p('naming.repoEqualsAppName')=='true'  ? vars.appName : null
+                appPath       → p('naming.appPathAtRoot')=='true'      ? '.'           : null
+                orgId         → p('anypoint.defaultOrgId')
+                defaultBranch → p('github.defaultBranch')   [config fallback only; pf-assess-app
+                                                              may later discover the real default
+                                                              branch from the GitHub Repo API]
+
+         Governance rules (evaluated in order):
+           a) If p('registry.enforceAllowList')=='true' AND apps[vars.appName] is null
+              → raise VALIDATION:APP_NOT_REGISTERED immediately (before any resolution)
+           b) After all three tiers are applied, if owner or repo is still null
+              → raise VALIDATION:APP_NOT_REGISTERED (ask caller to supply repo coordinates)
+
+         Sets:   vars.coords  { owner, repo, appPath, orgId, defaultBranch }
+         Caches: registry read (registryCachingStrategy, constant key, JVM-lifetime)
+
+         Transport-agnostic — no HTTP listener, no request/response contract.
+         Callers: pf-assess-app, pf-start-upgrade (any flow that needs repo coordinates).
+         ========================================================================== -->
+    <sub-flow name="pf-resolve-coordinates"
+              doc:id="pfrc0001-0001-0001-0001-000000000001"
+              doc:name="pf-resolve-coordinates"
+              doc:description="Resolve repo coordinates for vars.appName (registry → override → convention). Sets vars.coords.">
+
+        <logger level="DEBUG"
+                doc:name="LOG DEBUG pf-resolve-coordinates enter"
+                doc:id="pfrc0001-0001-0001-0001-000000000002"
+                message="#['LOG DEBUG | flow=pf-resolve-coordinates | correlationId=' ++ correlationId ++ ' | app=' ++ (vars.appName default 'unknown')]" />
+
+        <!--
+            Cache scope — key 'app-registry-static' is constant.
+            First call: reads and parses app-registry.yaml; caches the resulting event.
+            Subsequent calls: returns the cached event, skipping the transform.
+            Payload after this scope = parsed registry object.
+        -->
+        <ee:cache cachingStrategy-ref="registryCachingStrategy"
+                  doc:name="CACHE Read App Registry YAML"
+                  doc:id="pfrc0001-0001-0001-0001-000000000004"
+                  doc:description="Cache the app-registry.yaml read; constant key means one I/O per JVM lifetime">
+            <ee:transform doc:name="DW readUrl app-registry.yaml"
+                          doc:id="pfrc0001-0001-0001-0001-000000000005"
+                          doc:description="Read and parse app-registry.yaml from the classpath using DataWeave readUrl">
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+output application/java
+---
+readUrl("classpath://registry/app-registry.yaml", "application/yaml")]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
+        </ee:cache>
+
+        <!--
+            Capture parsed registry as vars.registry so it is available throughout the rest
+            of the sub-flow regardless of any further payload changes.
+        -->
+        <set-variable variableName="registry"
+                      value="#[payload]"
+                      doc:name="PV SET vars.registry"
+                      doc:id="pfrc0001-0001-0001-0001-000000000006"
+                      doc:description="Store parsed registry object in vars.registry for precedence resolution" />
+
+        <!--
+            GOVERNANCE — enforceAllowList check (rule a).
+            When registry.enforceAllowList=true, only apps with an explicit registry entry
+            are permitted to proceed. Reject all others immediately, before any resolution.
+        -->
+        <choice doc:name="CHOICE enforceAllowList?"
+                doc:id="pfrc0001-0001-0001-0001-000000000007"
+                doc:description="Block unregistered apps when registry.enforceAllowList=true">
+            <when expression="#[p('registry.enforceAllowList') == 'true' and vars.registry.apps[vars.appName] == null]"
+                  doc:name="enforceAllowList=true AND app not in registry"
+                  doc:id="pfrc0001-0001-0001-0001-000000000008">
+                <logger level="WARN"
+                        doc:name="LOG WARN App Not Allow-Listed"
+                        doc:id="pfrc0001-0001-0001-0001-000000000009"
+                        message="#['LOG WARN | flow=pf-resolve-coordinates | correlationId=' ++ correlationId ++ ' | app=' ++ vars.appName ++ ' not in registry and enforceAllowList=true — rejecting']" />
+                <raise-error type="VALIDATION:APP_NOT_REGISTERED"
+                             description="#['App &quot;' ++ vars.appName ++ '&quot; is not in the allow-list registry. Add an entry to app-registry.yaml or set registry.enforceAllowList=false.']"
+                             doc:name="RAISE VALIDATION:APP_NOT_REGISTERED (allow-list)"
+                             doc:id="pfrc0001-0001-0001-0001-000000000010" />
+            </when>
+            <otherwise doc:name="Allow-list passed (registered or not enforced)"
+                       doc:id="pfrc0001-0001-0001-0001-000000000011">
+                <logger level="DEBUG"
+                        doc:name="LOG DEBUG Allow-List Check Passed"
+                        doc:id="pfrc0001-0001-0001-0001-000000000012"
+                        message="#['LOG DEBUG | flow=pf-resolve-coordinates | correlationId=' ++ correlationId ++ ' | allow-list check passed for app=' ++ vars.appName ++ ' | enforceAllowList=' ++ p('registry.enforceAllowList')]" />
+            </otherwise>
+        </choice>
+
+        <!--
+            THREE-TIER PRECEDENCE RESOLUTION
+            For each of the five coordinate fields (owner, repo, appPath, orgId, defaultBranch),
+            the first non-null value wins:
+              Tier 1: vars.registry.apps[vars.appName].<field>   (registry entry)
+              Tier 2: vars.requestBody.<field>                    (request body override)
+              Tier 3: property placeholder / convention           (config default)
+            Result written directly to vars.coords.
+        -->
+        <ee:transform doc:name="DW Resolve Coordinates (3-tier precedence)"
+                      doc:id="pfrc0001-0001-0001-0001-000000000013"
+                      doc:description="Resolve owner, repo, appPath, orgId, defaultBranch via registry → request override → convention">
+            <ee:variables>
+                <ee:set-variable variableName="coords"><![CDATA[%dw 2.0
+output application/java
+
+// ── Tier-1: registry entry (null when app is not registered) ──────────────
+var regEntry = vars.registry.apps[vars.appName]
+
+// ── Tier-2: request body overrides — set by the entry-point flow before any sub-flow call.
+// Default to empty object so field access (req.owner etc.) is null rather than a runtime error.
+var req = vars.requestBody default {}
+
+// ── owner ─────────────────────────────────────────────────────────────────
+//   Tier 3 convention: always p('github.defaultOwner') — unconditional property
+var resolvedOwner =
+    (regEntry.owner     default null)
+    default (req.owner  default null)
+    default p('github.defaultOwner')
+
+// ── repo ──────────────────────────────────────────────────────────────────
+//   Tier 3 convention: repo = appName when naming.repoEqualsAppName == 'true'
+var conventionRepo =
+    if (p('naming.repoEqualsAppName') == 'true') vars.appName
+    else null
+
+var resolvedRepo =
+    (regEntry.repo     default null)
+    default (req.repo  default null)
+    default conventionRepo
+
+// ── appPath ───────────────────────────────────────────────────────────────
+//   Tier 3 convention: appPath = '.' when naming.appPathAtRoot == 'true'
+var conventionAppPath =
+    if (p('naming.appPathAtRoot') == 'true') '.'
+    else null
+
+var resolvedAppPath =
+    (regEntry.appPath     default null)
+    default (req.appPath  default null)
+    default conventionAppPath
+
+// ── orgId ─────────────────────────────────────────────────────────────────
+//   Tier 3 convention: always p('anypoint.defaultOrgId')
+var resolvedOrgId =
+    (regEntry.orgId     default null)
+    default (req.orgId  default null)
+    default p('anypoint.defaultOrgId')
+
+// ── defaultBranch ─────────────────────────────────────────────────────────
+//   Tier 3 convention: p('github.defaultBranch') — config fallback only.
+//   pf-assess-app may later discover the real default branch via the GitHub
+//   Repo API and update vars.coords.defaultBranch with the authoritative value.
+var resolvedBranch =
+    (regEntry.defaultBranch     default null)
+    default (req.defaultBranch  default null)
+    default p('github.defaultBranch')
+---
+{
+    owner:         resolvedOwner,
+    repo:          resolvedRepo,
+    appPath:       resolvedAppPath,
+    orgId:         resolvedOrgId,
+    defaultBranch: resolvedBranch
+}]]></ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+
+        <!--
+            GOVERNANCE — post-resolution owner + repo validation (rule b).
+            Even when enforceAllowList=false, owner and repo must both be resolvable.
+            The application cannot be located on GitHub without these two fields.
+            If convention defaults also yielded null (e.g. repoEqualsAppName=false and
+            no registry / request entry), the caller must supply explicit coordinates.
+        -->
+        <choice doc:name="CHOICE owner and repo resolved?"
+                doc:id="pfrc0001-0001-0001-0001-000000000014"
+                doc:description="Validate owner and repo are non-null after all three precedence tiers">
+            <when expression="#[vars.coords.owner == null or vars.coords.repo == null]"
+                  doc:name="owner or repo is null after resolution"
+                  doc:id="pfrc0001-0001-0001-0001-000000000015">
+                <logger level="WARN"
+                        doc:name="LOG WARN Incomplete Coordinates"
+                        doc:id="pfrc0001-0001-0001-0001-000000000016"
+                        message="#['LOG WARN | flow=pf-resolve-coordinates | correlationId=' ++ correlationId ++ ' | app=' ++ vars.appName ++ ' | owner=' ++ (vars.coords.owner default 'null') ++ ' | repo=' ++ (vars.coords.repo default 'null') ++ ' — cannot locate repo without owner and repo coordinates']" />
+                <raise-error type="VALIDATION:APP_NOT_REGISTERED"
+                             description="#['Cannot resolve repo coordinates for app &quot;' ++ vars.appName ++ '&quot;. Please provide owner and repo by adding an entry to app-registry.yaml or including owner/repo in the request body.']"
+                             doc:name="RAISE VALIDATION:APP_NOT_REGISTERED (missing owner or repo)"
+                             doc:id="pfrc0001-0001-0001-0001-000000000017" />
+            </when>
+            <otherwise doc:name="All coordinates resolved"
+                       doc:id="pfrc0001-0001-0001-0001-000000000018">
+                <logger level="DEBUG"
+                        doc:name="LOG DEBUG Coordinates Resolved"
+                        doc:id="pfrc0001-0001-0001-0001-000000000019"
+                        message="#['LOG DEBUG | flow=pf-resolve-coordinates | correlationId=' ++ correlationId ++ ' | app=' ++ vars.appName ++ ' | owner=' ++ (vars.coords.owner default '') ++ ' | repo=' ++ (vars.coords.repo default '') ++ ' | appPath=' ++ (vars.coords.appPath default '') ++ ' | orgId=' ++ (vars.coords.orgId default '') ++ ' | defaultBranch=' ++ (vars.coords.defaultBranch default '')]" />
+            </otherwise>
+        </choice>
+
+    </sub-flow>
+
+</mule>

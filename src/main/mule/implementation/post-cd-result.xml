@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd">
+
+    <!--
+        mf-impl-post-cd-result is defined in post-webhook.xml.
+        This file is reserved for the full CD-result implementation
+        once it is extracted from post-webhook.xml in a later iteration.
+    -->
+
+</mule>

@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:os="http://www.mulesoft.org/schema/mule/os"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+        http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd">
+
+    <flow name="pf-reconcile"
+          doc:id="pfrc0001-0001-0001-0001-000000000001"
+          doc:name="pf-reconcile"
+          doc:description="Scheduled sweep: reconciles stale PR_OPEN and DEPLOYING jobs. Runs every reconcile.frequencyMillis.">
+
+        <scheduler doc:name="Reconcile Scheduler" doc:id="pfrc0001-0001-0001-0001-000000000002">
+            <scheduling-strategy>
+                <fixed-frequency frequency="${reconcile.frequencyMillis}" />
+            </scheduling-strategy>
+        </scheduler>
+
+        <logger level="INFO" doc:name="LOG INFO sweep start" doc:id="pfrc0001-0001-0001-0001-000000000003"
+                message="#['LOG INFO | flow=pf-reconcile | correlationId=' ++ correlationId ++ ' | reconcile sweep starting']" />
+
+        <os:retrieve-all-keys objectStore="jobStore"
+                              doc:name="OS Retrieve All Keys" doc:id="pfrc0001-0001-0001-0001-000000000004" />
+
+        <set-variable variableName="jobKeys" doc:name="PV SET jobKeys" doc:id="pfrc0001-0001-0001-0001-000000000005"
+                      value="#[(payload default []) filter ($ startsWith 'job-')]" />
+
+        <set-variable variableName="fixed" doc:name="PV INIT fixed=0" doc:id="pfrc0001-0001-0001-0001-000000000006"
+                      value="#[0]" />
+
+        <foreach collection="#[vars.jobKeys]" doc:name="FOR EACH job key" doc:id="pfrc0001-0001-0001-0001-000000000007">
+
+            <try doc:name="TRY per-job (error isolation)" doc:id="pfrc0001-0001-0001-0001-000000000008">
+
+                <set-variable variableName="k" value="#[payload]" doc:name="PV SET k" doc:id="pfrc0001-0001-0001-0001-000000000009" />
+
+                <os:retrieve key="#[vars.k]" objectStore="jobStore"
+                             target="rec" doc:name="OS Retrieve job record" doc:id="pfrc0001-0001-0001-0001-000000000010">
+                    <os:default-value>#[{}]</os:default-value>
+                </os:retrieve>
+
+                <set-variable variableName="isStale" doc:name="PV SET isStale" doc:id="pfrc0001-0001-0001-0001-000000000011"
+                              value="#[(vars.rec.updatedAt != null) and (((now() as Number) - (vars.rec.updatedAt as DateTime {format: 'yyyy-MM-dd\'T\'HH:mm:ss\'Z\''} as Number)) > (p('reconcile.staleSeconds') as Number))]" />
+
+                <choice doc:name="CHOICE reconcile action?" doc:id="pfrc0001-0001-0001-0001-000000000012">
+
+                    <when expression="#[vars.isStale and vars.rec.status == 'PR_OPEN' and vars.rec.prNumber != null]"
+                          doc:name="PR_OPEN stale" doc:id="pfrc0001-0001-0001-0001-000000000013">
+
+                        <http:request method="GET" config-ref="GitHub_Request"
+                                      path="#['/repos/' ++ vars.rec.coords.owner ++ '/' ++ vars.rec.coords.repo ++ '/pulls/' ++ vars.rec.prNumber]"
+                                      target="pr" doc:name="GET PR state" doc:id="pfrc0001-0001-0001-0001-000000000014" />
+
+                        <choice doc:name="CHOICE PR outcome?" doc:id="pfrc0001-0001-0001-0001-000000000015">
+
+                            <when expression="#[vars.pr.merged == true]" doc:name="PR merged" doc:id="pfrc0001-0001-0001-0001-000000000016">
+                                <os:retrieve key="#[vars.k]" objectStore="jobStore"
+                                             doc:name="OS Re-retrieve before DEPLOYING" doc:id="pfrc0001-0001-0001-0001-000000000017">
+                                    <os:default-value>#[{}]</os:default-value>
+                                </os:retrieve>
+                                <ee:transform doc:name="DW DEPLOYING" doc:id="pfrc0001-0001-0001-0001-000000000018">
+                                    <ee:message><ee:set-payload><![CDATA[%dw 2.0 output application/json
+--- payload ++ { status: "DEPLOYING", updatedAt: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"} }]]></ee:set-payload></ee:message>
+                                </ee:transform>
+                                <os:store key="#[vars.k]" objectStore="jobStore"
+                                          doc:name="OS Store DEPLOYING" doc:id="pfrc0001-0001-0001-0001-000000000019">
+                                    <os:value>#[payload]</os:value>
+                                </os:store>
+                                <set-variable variableName="fixed" value="#[vars.fixed + 1]"
+                                              doc:name="PV fixed++" doc:id="pfrc0001-0001-0001-0001-000000000020" />
+                                <logger level="INFO" doc:name="LOG INFO PR_OPEN→DEPLOYING" doc:id="pfrc0001-0001-0001-0001-000000000021"
+                                        message="#['LOG INFO | flow=pf-reconcile | reconciled PR_OPEN→DEPLOYING (missed merge webhook) | jobId=' ++ vars.k]" />
+                            </when>
+
+                            <when expression="#[vars.pr.state == 'closed' and vars.pr.merged == false]"
+                                  doc:name="PR closed unmerged" doc:id="pfrc0001-0001-0001-0001-000000000022">
+                                <os:retrieve key="#[vars.k]" objectStore="jobStore"
+                                             doc:name="OS Re-retrieve before FAILED_DEPLOY" doc:id="pfrc0001-0001-0001-0001-000000000023">
+                                    <os:default-value>#[{}]</os:default-value>
+                                </os:retrieve>
+                                <ee:transform doc:name="DW FAILED_DEPLOY closed-unmerged" doc:id="pfrc0001-0001-0001-0001-000000000024">
+                                    <ee:message><ee:set-payload><![CDATA[%dw 2.0 output application/json
+--- payload ++ { status: "FAILED_DEPLOY", error: "PR was closed without merging",
+    completedAt: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
+    updatedAt: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"} }]]></ee:set-payload></ee:message>
+                                </ee:transform>
+                                <os:store key="#[vars.k]" objectStore="jobStore"
+                                          doc:name="OS Store FAILED_DEPLOY" doc:id="pfrc0001-0001-0001-0001-000000000025">
+                                    <os:value>#[payload]</os:value>
+                                </os:store>
+                                <try doc:name="TRY release lock (non-fatal)" doc:id="pfrc0001-0001-0001-0001-000000000026">
+                                    <os:remove key="#['lock::' ++ (vars.rec.appName default '')]"
+                                               objectStore="jobStore"
+                                               doc:name="OS Remove lock" doc:id="pfrc0001-0001-0001-0001-000000000027" />
+                                    <error-handler>
+                                        <on-error-continue type="ANY" doc:id="pfrc0001-0001-0001-0001-000000000028">
+                                            <logger level="DEBUG" doc:name="LOG DEBUG lock skip" doc:id="pfrc0001-0001-0001-0001-000000000029"
+                                                    message="#['LOG DEBUG | flow=pf-reconcile | lock release skipped | app=' ++ (vars.rec.appName default '?')]" />
+                                        </on-error-continue>
+                                    </error-handler>
+                                </try>
+                                <set-variable variableName="fixed" value="#[vars.fixed + 1]"
+                                              doc:name="PV fixed++" doc:id="pfrc0001-0001-0001-0001-000000000030" />
+                                <logger level="INFO" doc:name="LOG INFO PR_OPEN→FAILED_DEPLOY" doc:id="pfrc0001-0001-0001-0001-000000000031"
+                                        message="#['LOG INFO | flow=pf-reconcile | reconciled PR_OPEN→FAILED_DEPLOY (closed unmerged) | jobId=' ++ vars.k]" />
+                            </when>
+
+                            <otherwise doc:name="PR still open" doc:id="pfrc0001-0001-0001-0001-000000000032">
+                                <logger level="DEBUG" doc:name="LOG DEBUG PR still open" doc:id="pfrc0001-0001-0001-0001-000000000033"
+                                        message="#['LOG DEBUG | flow=pf-reconcile | PR still open, leaving as-is | jobId=' ++ vars.k]" />
+                            </otherwise>
+
+                        </choice>
+
+                    </when>
+
+                    <when expression="#[vars.isStale and vars.rec.status == 'DEPLOYING']"
+                          doc:name="DEPLOYING stale" doc:id="pfrc0001-0001-0001-0001-000000000034">
+                        <logger level="DEBUG" doc:name="LOG DEBUG DEPLOYING awaiting cd-result" doc:id="pfrc0001-0001-0001-0001-000000000035"
+                                message="#['LOG DEBUG | flow=pf-reconcile | still DEPLOYING beyond threshold, awaiting cd-result | jobId=' ++ vars.k]" />
+                    </when>
+
+                    <otherwise doc:name="not stale or non-reconcilable" doc:id="pfrc0001-0001-0001-0001-000000000036">
+                        <logger level="DEBUG" doc:name="LOG DEBUG job not reconcilable" doc:id="pfrc0001-0001-0001-0001-000000000037"
+                                message="#['LOG DEBUG | flow=pf-reconcile | not stale or non-reconcilable | jobId=' ++ vars.k ++ ' | status=' ++ (vars.rec.status default '?') ++ ' | stale=' ++ vars.isStale]" />
+                    </otherwise>
+
+                </choice>
+
+                <error-handler>
+                    <on-error-continue type="ANY" doc:id="pfrc0001-0001-0001-0001-000000000038">
+                        <logger level="WARN" doc:name="LOG WARN per-job reconcile error" doc:id="pfrc0001-0001-0001-0001-000000000039"
+                                message="#['LOG WARN | flow=pf-reconcile | error reconciling job ' ++ (vars.k default '?') ++ ': ' ++ (error.description default 'unknown')]" />
+                    </on-error-continue>
+                </error-handler>
+            </try>
+
+        </foreach>
+
+        <logger level="INFO" doc:name="LOG INFO sweep done" doc:id="pfrc0001-0001-0001-0001-000000000040"
+                message="#['LOG INFO | flow=pf-reconcile | correlationId=' ++ correlationId ++ ' | reconcile sweep done | fixed=' ++ vars.fixed ++ ' | scanned=' ++ sizeOf(vars.jobKeys default [])]" />
+
+    </flow>
+
+</mule>

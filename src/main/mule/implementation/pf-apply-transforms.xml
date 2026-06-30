@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+    <!-- pf-apply-transforms: apply the approved changePlan to each target file, producing
+         vars.stagedFiles = [{ path, content }]. Called by the async upgrade worker (Step 6).
+         Requires vars.coords {owner,repo} and vars.changePlan {headSha,fileEdits}. -->
+    <sub-flow name="pf-apply-transforms"
+              doc:id="pf000004-0004-0004-0004-000000000001"
+              doc:name="pf-apply-transforms"
+              doc:description="Fetch each changed file and apply matrix rewrites; stage new contents.">
+
+        <logger level="DEBUG"
+                doc:name="LOG DEBUG apply-transforms enter"
+                doc:id="pf000004-0004-0004-0004-000000000002"
+                message="#['LOG DEBUG | flow=pf-apply-transforms | correlationId=' ++ correlationId ++ ' | files=' ++ sizeOf((vars.changePlan.fileEdits default []) map $.file distinctBy $)]" />
+
+        <!-- Group edits by file → [{ path, edits }]; initialise the staging accumulator. -->
+        <ee:transform doc:name="DW Group edits by file"
+                      doc:id="pf000004-0004-0004-0004-000000000003">
+            <ee:variables>
+                <ee:set-variable variableName="fileGroups"><![CDATA[%dw 2.0
+output application/java
+---
+((vars.changePlan.fileEdits default []) groupBy ((e) -> e.file))
+    pluck ((edits, path, idx) -> { path: (path as String), edits: edits })]]></ee:set-variable>
+                <ee:set-variable variableName="stagedFiles"><![CDATA[%dw 2.0
+output application/java
+---
+[]]]></ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+
+        <foreach collection="#[vars.fileGroups]"
+                 doc:name="FOR EACH changed file"
+                 doc:id="pf000004-0004-0004-0004-000000000004">
+
+            <set-variable variableName="currentPath"
+                          value="#[payload.path]"
+                          doc:name="PV SET currentPath"
+                          doc:id="pf000004-0004-0004-0004-000000000005" />
+            <set-variable variableName="currentFileEdits"
+                          value="#[payload.edits]"
+                          doc:name="PV SET currentFileEdits"
+                          doc:id="pf000004-0004-0004-0004-000000000006" />
+
+            <http:request method="GET"
+                          config-ref="GitHub_Request"
+                          path="#['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/contents/' ++ vars.currentPath]"
+                          doc:name="GET file (Contents API)"
+                          doc:id="pf000004-0004-0004-0004-000000000007">
+                <http:query-params>#[{ ref: vars.changePlan.headSha }]</http:query-params>
+            </http:request>
+
+            <ee:transform doc:name="DW Apply rewrites"
+                          doc:id="pf000004-0004-0004-0004-000000000008">
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+output text/plain
+import rewritePomProperties from dwl::rewritePomProperties
+import rewriteMunitRuntime  from dwl::rewriteMunitRuntime
+import rewriteMuleArtifact  from dwl::rewriteMuleArtifact
+import rewriteCiWorkflow    from dwl::rewriteCiWorkflow
+import fromBase64 from dw::core::Binaries
+var rawText   = (fromBase64((payload.content default "") replace /[\r\n\t ]/ with "")) as String {encoding: "UTF-8"}
+var edits     = vars.currentFileEdits default []
+var propEdits = edits filter ((e) -> e.kind == "pomProperty")
+var step1     = if (!isEmpty(propEdits)) rewritePomProperties(rawText, propEdits) else rawText
+var munitEdit = edits firstWith ((e) -> e.kind == "munitRuntimeVersion")
+var step2     = if (munitEdit != null) rewriteMunitRuntime(step1, munitEdit.to as String) else step1
+var maEdit    = edits firstWith ((e) -> e.kind == "muleArtifactJson")
+var step3     = if (maEdit != null)
+                    rewriteMuleArtifact(step2, maEdit.to.minMuleVersion as String, maEdit.to.javaSpecificationVersions)
+                else step2
+var ciEdit    = edits firstWith ((e) -> e.kind == "ciWorkflow")
+var step4     = if (ciEdit != null) rewriteCiWorkflow(step3, ciEdit.to as String) else step3
+---
+step4]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
+
+            <set-variable variableName="stagedFiles"
+                          value="#[(vars.stagedFiles default []) ++ [{ path: vars.currentPath, content: payload }]]"
+                          doc:name="PV APPEND stagedFiles"
+                          doc:id="pf000004-0004-0004-0004-000000000009" />
+        </foreach>
+
+        <ee:transform doc:name="DW Return stagedFiles"
+                      doc:id="pf000004-0004-0004-0004-000000000010">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/java
+---
+vars.stagedFiles default []]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+
+        <logger level="INFO"
+                doc:name="LOG INFO staged files"
+                doc:id="pf000004-0004-0004-0004-000000000011"
+                message="#['LOG INFO | flow=pf-apply-transforms | correlationId=' ++ correlationId ++ ' | staged=' ++ sizeOf(vars.stagedFiles default [])]" />
+
+    </sub-flow>
+</mule>
