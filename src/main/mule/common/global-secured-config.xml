@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:secure-properties="http://www.mulesoft.org/schema/mule/secure-properties"
+      xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/secure-properties http://www.mulesoft.org/schema/mule/secure-properties/current/mule-secure-properties.xsd">
+
+    <!-- ===== Secure Properties Source ===== -->
+    <!--
+        Encrypted values in config-secure-${env}.yaml are accessed via ${secure::key.path}.
+        Algorithm : AES-256 (CBC mode) — fully supported on Java 17 without JCE policy files.
+        Key size  : encrypt.key MUST be exactly 32 characters for AES-256.
+        Key source: NEVER stored in source control. Supply at runtime via:
+                      • CloudHub 2.0 → Runtime Manager app properties (mark as "hidden")
+                      • Local run    → -Dencrypt.key=<32-char-key>  (JVM arg or env var)
+                      • CI/CD        → Inject from your secrets manager (e.g. AWS SM, Vault)
+    -->
+    <secure-properties:config
+        name="secureEnvPropertiesConfig"
+        doc:name="Secure Properties Config"
+        doc:id="b2c3d4e5-0002-0002-0002-000000000001"
+        file="properties/config-secure-${env}.yaml"
+        key="${encrypt.key}">
+        <secure-properties:encrypt algorithm="AES" mode="CBC" />
+    </secure-properties:config>
+
+</mule>

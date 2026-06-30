@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd">
+
+    <!--
+        REST entry point for POST /jobs/assess.
+        Maps the HTTP request body to variables, then delegates to the shared
+        private sub-flow pf-assess-app (defined in platform-lifecycle-orchestrator-mcp.xml).
+        The same pf-assess-app sub-flow is also called by the MCP assess_app tool-listener.
+    -->
+    <flow name="mf-impl-post-jobs-assess"
+          doc:id="e5f6a7b8-0005-0005-0005-000000000001"
+          doc:name="mf-impl-post-jobs-assess"
+          doc:description="REST entry: maps HTTP body to vars, then calls shared pf-assess-app sub-flow">
+
+        <logger level="DEBUG"
+                doc:name="LOG DEBUG Request"
+                doc:id="e5f6a7b8-0005-0005-0005-000000000002"
+                message="#['LOG DEBUG | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | app=' ++ (payload.appName default 'unknown') ++ ' | env=' ++ (payload.environment default 'unknown')]" />
+
+        <!-- Map HTTP request body fields to variables expected by pf-assess-app -->
+        <set-variable variableName="appName"
+                      value="#[payload.appName]"
+                      doc:name="PV SET appName"
+                      doc:id="e5f6a7b8-0005-0005-0005-000000000003" />
+        <set-variable variableName="environment"
+                      value="#[payload.environment]"
+                      doc:name="PV SET environment"
+                      doc:id="e5f6a7b8-0005-0005-0005-000000000004" />
+        <set-variable variableName="jiraTicketId"
+                      value="#[payload.jiraTicketId default null]"
+                      doc:name="PV SET jiraTicketId"
+                      doc:id="e5f6a7b8-0005-0005-0005-000000000005" />
+
+        <!-- Delegate to the shared sub-flow (also used by MCP assess_app tool) -->
+        <flow-ref name="pf-assess-app"
+                  doc:name="pf-assess-app"
+                  doc:id="e5f6a7b8-0005-0005-0005-000000000006" />
+
+    </flow>
+
+</mule>

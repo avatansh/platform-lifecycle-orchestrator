@@ -1,0 +1,382 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:mcp="http://www.mulesoft.org/schema/mule/mcp"
+      xmlns:os="http://www.mulesoft.org/schema/mule/os"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/mcp http://www.mulesoft.org/schema/mule/mcp/current/mule-mcp.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+        http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd">
+
+    <!--
+        MCP tool-listener flows for the Platform Lifecycle Orchestrator.
+        These flows expose the same business logic as the REST API endpoints
+        as MCP tools — consumable by AI agents (Claude, GitHub Copilot, etc.)
+        via the Streamable HTTP transport configured in global-config.xml.
+
+        Each flow:
+          1. Receives parameters from the MCP client as payload
+          2. Maps parameters to variables
+          3. Delegates to a shared private sub-flow (pf-*) that also serves the REST API
+          4. Returns the sub-flow result as the MCP tool response
+
+        Shared private sub-flows are defined at the bottom of this file.
+        REST entry points call the same sub-flows from:
+          src/main/mule/implementation/post-jobs-assess.xml
+          src/main/mule/implementation/post-jobs.xml
+          src/main/mule/implementation/get-job-status.xml
+    -->
+
+    <!-- ===== Tool 1: assess_app ===== -->
+    <flow name="assess_app-mcp-tool"
+          doc:id="mc1a0001-0001-0001-0001-000000000001"
+          doc:name="MCP Tool: assess_app"
+          doc:description="MCP tool entry point for assessing a MuleSoft application's Java 17 upgrade readiness">
+
+        <mcp:tool-listener
+            config-ref="MCP_Config"
+            name="assess_app"
+            doc:name="MCP Tool Listener: assess_app"
+            doc:id="mc1a0001-0001-0001-0001-000000000002">
+            <mcp:description>
+                Assess a deployed MuleSoft application for Java 17 / Mule 4.9.x upgrade readiness.
+                Returns the current runtime version, recommended change plan, and any warnings that
+                require human review before submitting an upgrade job. Call this before start_upgrade.
+            </mcp:description>
+            <mcp:parameters-schema><![CDATA[{
+  "type": "object",
+  "required": ["appName", "environment"],
+  "properties": {
+    "appName": {
+      "type": "string",
+      "description": "Name of the MuleSoft application as it appears in Anypoint Runtime Manager."
+    },
+    "environment": {
+      "type": "string",
+      "description": "Anypoint Platform environment where the app is running (e.g. Production, Staging, Development)."
+    },
+    "jiraTicketId": {
+      "type": "string",
+      "description": "Optional Jira ticket ID to link assessment results back to a migration tracking ticket."
+    }
+  }
+}]]></mcp:parameters-schema>
+            <mcp:responses>
+                <mcp:text-tool-response-content text="#[output application/json --- payload]" />
+            </mcp:responses>
+        </mcp:tool-listener>
+
+        <!-- Map MCP tool parameters to variables consumed by the shared sub-flow -->
+        <set-variable variableName="appName"
+                      value="#[payload.appName]"
+                      doc:name="PV SET appName"
+                      doc:id="mc1a0001-0001-0001-0001-000000000003" />
+        <set-variable variableName="environment"
+                      value="#[payload.environment]"
+                      doc:name="PV SET environment"
+                      doc:id="mc1a0001-0001-0001-0001-000000000004" />
+        <set-variable variableName="jiraTicketId"
+                      value="#[payload.jiraTicketId default null]"
+                      doc:name="PV SET jiraTicketId"
+                      doc:id="mc1a0001-0001-0001-0001-000000000005" />
+
+        <flow-ref name="pf-assess-app"
+                  doc:name="pf-assess-app"
+                  doc:id="mc1a0001-0001-0001-0001-000000000006" />
+
+    </flow>
+
+    <!-- ===== Tool 2: start_upgrade ===== -->
+    <flow name="start_upgrade-mcp-tool"
+          doc:id="mc2b0002-0002-0002-0002-000000000001"
+          doc:name="MCP Tool: start_upgrade"
+          doc:description="MCP tool entry point for submitting an approved Java 17 upgrade job">
+
+        <mcp:tool-listener
+            config-ref="MCP_Config"
+            name="start_upgrade"
+            doc:name="MCP Tool Listener: start_upgrade"
+            doc:id="mc2b0002-0002-0002-0002-000000000002">
+            <mcp:description>
+                Start an asynchronous Java 17 upgrade job for a MuleSoft application after the user
+                has reviewed and approved the change plan from assess_app. Returns a jobId that can
+                be polled with get_job_status to track progress (PROCESSING → COMMITTED → PR_OPEN → DEPLOYED).
+            </mcp:description>
+            <mcp:parameters-schema><![CDATA[{
+  "type": "object",
+  "required": ["appName", "environment", "jiraTicketId", "approvedChangePlan"],
+  "properties": {
+    "appName": {
+      "type": "string",
+      "description": "Name of the MuleSoft application to upgrade."
+    },
+    "environment": {
+      "type": "string",
+      "description": "Anypoint Platform environment to upgrade the application in."
+    },
+    "jiraTicketId": {
+      "type": "string",
+      "description": "Jira ticket ID for this migration effort. Progress updates will be posted to this ticket."
+    },
+    "approvedChangePlan": {
+      "type": "object",
+      "description": "The changePlan object returned by assess_app, reviewed and approved by the user.",
+      "properties": {
+        "targetRuntime":     { "type": "string" },
+        "targetJavaVersion": { "type": "string" },
+        "filesToChange":     { "type": "array", "items": { "type": "string" } },
+        "hasApiPolicies":    { "type": "boolean" },
+        "hasCustomJavaCode": { "type": "boolean" },
+        "hasLookupFunction": { "type": "boolean" }
+      }
+    }
+  }
+}]]></mcp:parameters-schema>
+            <mcp:responses>
+                <mcp:text-tool-response-content text="#[output application/json --- payload]" />
+            </mcp:responses>
+        </mcp:tool-listener>
+
+        <!-- Map MCP tool parameters to variables consumed by the shared sub-flow -->
+        <set-variable variableName="appName"
+                      value="#[payload.appName]"
+                      doc:name="PV SET appName"
+                      doc:id="mc2b0002-0002-0002-0002-000000000003" />
+        <set-variable variableName="environment"
+                      value="#[payload.environment]"
+                      doc:name="PV SET environment"
+                      doc:id="mc2b0002-0002-0002-0002-000000000004" />
+        <set-variable variableName="jiraTicketId"
+                      value="#[payload.jiraTicketId]"
+                      doc:name="PV SET jiraTicketId"
+                      doc:id="mc2b0002-0002-0002-0002-000000000005" />
+        <set-variable variableName="approvedChangePlan"
+                      value="#[payload.approvedChangePlan]"
+                      doc:name="PV SET approvedChangePlan"
+                      doc:id="mc2b0002-0002-0002-0002-000000000006" />
+
+        <flow-ref name="pf-start-upgrade"
+                  doc:name="pf-start-upgrade"
+                  doc:id="mc2b0002-0002-0002-0002-000000000007" />
+
+    </flow>
+
+    <!-- ===== Tool 3: get_job_status ===== -->
+    <flow name="get_job_status-mcp-tool"
+          doc:id="mc3c0003-0003-0003-0003-000000000001"
+          doc:name="MCP Tool: get_job_status"
+          doc:description="MCP tool entry point for retrieving the current status of an upgrade job">
+
+        <mcp:tool-listener
+            config-ref="MCP_Config"
+            name="get_job_status"
+            doc:name="MCP Tool Listener: get_job_status"
+            doc:id="mc3c0003-0003-0003-0003-000000000002">
+            <mcp:description>
+                Retrieve the current status of a platform migration job submitted by start_upgrade.
+                Poll this tool until status reaches a terminal state: DEPLOYED (success),
+                FAILED (error — inspect the error field), or COMMITTED (changes on branch, awaiting PR merge).
+                When status is PR_OPEN the prUrl field contains the GitHub pull request link.
+            </mcp:description>
+            <mcp:parameters-schema><![CDATA[{
+  "type": "object",
+  "required": ["jobId"],
+  "properties": {
+    "jobId": {
+      "type": "string",
+      "description": "The jobId returned by start_upgrade. Format: job-{uuid}."
+    }
+  }
+}]]></mcp:parameters-schema>
+            <mcp:responses>
+                <mcp:text-tool-response-content text="#[output application/json --- payload]" />
+            </mcp:responses>
+        </mcp:tool-listener>
+
+        <!-- Map MCP tool parameters to variables consumed by the shared sub-flow -->
+        <set-variable variableName="jobId"
+                      value="#[payload.jobId]"
+                      doc:name="PV SET jobId"
+                      doc:id="mc3c0003-0003-0003-0003-000000000003" />
+
+        <flow-ref name="pf-get-job-status"
+                  doc:name="pf-get-job-status"
+                  doc:id="mc3c0003-0003-0003-0003-000000000004" />
+
+    </flow>
+
+    <!-- ==========================================================================
+         Shared Private Sub-flows
+         Called by BOTH MCP tool-listener flows (above) AND REST implementation
+         flows in src/main/mule/implementation/. Variables must be set by the
+         caller before invoking via flow-ref.
+         ========================================================================== -->
+
+    <!-- pf-assess-app: assesses application migration readiness             -->
+    <!-- Requires: vars.appName, vars.environment, vars.jiraTicketId(opt)    -->
+    <!-- Returns:  payload = AssessmentResult JSON                           -->
+    <sub-flow name="pf-assess-app"
+              doc:id="pf000001-0001-0001-0001-000000000001"
+              doc:name="pf-assess-app"
+              doc:description="Shared: assess MuleSoft app for Java 17 upgrade. Called by REST and MCP.">
+
+        <logger level="DEBUG"
+                doc:name="LOG DEBUG Assess Start"
+                doc:id="pf000001-0001-0001-0001-000000000002"
+                message="#['LOG DEBUG | flow=pf-assess-app | correlationId=' ++ correlationId ++ ' | app=' ++ (vars.appName default 'unknown') ++ ' | env=' ++ (vars.environment default 'unknown')]" />
+
+        <!--
+            TODO: Replace placeholder with real Anypoint ARM / source-control calls:
+              1. GET /armv2/applications to fetch current runtime and Java version
+              2. Read pom.xml from source control to inspect connector versions
+              3. Scan Mule XMLs for lookup() usage and custom Java references
+              4. Query API Manager for applied policies
+        -->
+        <ee:transform doc:name="DW Build AssessmentResult"
+                      doc:id="pf000001-0001-0001-0001-000000000003">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    appName:            vars.appName,
+    currentRuntime:     "4.6.9",
+    currentJavaVersion: "8",
+    changePlan: {
+        targetRuntime:     "4.9.18",
+        targetJavaVersion: "17",
+        filesToChange: [
+            "pom.xml",
+            "src/main/mule/global-config.xml"
+        ],
+        hasApiPolicies:    false,
+        hasCustomJavaCode: false,
+        hasLookupFunction: false
+    },
+    warnings: [
+        "Assessment is running in placeholder mode. Integrate with Anypoint ARM API for live data."
+    ]
+}]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+
+        <logger level="DEBUG"
+                doc:name="LOG DEBUG Assess Complete"
+                doc:id="pf000001-0001-0001-0001-000000000004"
+                message="#['LOG DEBUG | flow=pf-assess-app | correlationId=' ++ correlationId ++ ' | assessment complete for app=' ++ vars.appName]" />
+
+    </sub-flow>
+
+    <!-- pf-start-upgrade: creates and persists a migration job              -->
+    <!-- Requires: vars.appName, vars.environment, vars.jiraTicketId,        -->
+    <!--           vars.approvedChangePlan                                   -->
+    <!-- Returns:  payload = { jobId }                                       -->
+    <!-- Note:     HTTP 202 status is set by the REST caller, not here       -->
+    <sub-flow name="pf-start-upgrade"
+              doc:id="pf000002-0002-0002-0002-000000000001"
+              doc:name="pf-start-upgrade"
+              doc:description="Shared: generate jobId, store in Object Store, return jobId. Called by REST and MCP.">
+
+        <logger level="DEBUG"
+                doc:name="LOG DEBUG Upgrade Start"
+                doc:id="pf000002-0002-0002-0002-000000000002"
+                message="#['LOG DEBUG | flow=pf-start-upgrade | correlationId=' ++ correlationId ++ ' | app=' ++ (vars.appName default 'unknown')]" />
+
+        <set-variable variableName="jobId"
+                      value="#['job-' ++ uuid()]"
+                      doc:name="PV SET jobId"
+                      doc:id="pf000002-0002-0002-0002-000000000003" />
+
+        <ee:transform doc:name="DW Build Job Record"
+                      doc:id="pf000002-0002-0002-0002-000000000004">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    jobId:              vars.jobId,
+    status:             "PROCESSING",
+    appName:            vars.appName,
+    environment:        vars.environment,
+    jiraTicketId:       vars.jiraTicketId,
+    approvedChangePlan: vars.approvedChangePlan,
+    createdAt:          now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
+    prUrl:              null,
+    branchName:         null,
+    completedAt:        null,
+    error:              null
+}]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+
+        <os:store key="#[vars.jobId]"
+                  objectStore="_defaultPersistentObjectStore"
+                  doc:name="OS Store Job Record"
+                  doc:id="pf000002-0002-0002-0002-000000000005">
+            <os:value>#[payload]</os:value>
+        </os:store>
+
+        <logger level="INFO"
+                doc:name="LOG INFO Job Created"
+                doc:id="pf000002-0002-0002-0002-000000000006"
+                message="#['LOG INFO | flow=pf-start-upgrade | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | status=PROCESSING | app=' ++ vars.appName]" />
+
+        <ee:transform doc:name="DW Return jobId"
+                      doc:id="pf000002-0002-0002-0002-000000000007">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{ jobId: vars.jobId }]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+
+    </sub-flow>
+
+    <!-- pf-get-job-status: retrieves a job record from Object Store         -->
+    <!-- Requires: vars.jobId                                                -->
+    <!-- Returns:  payload = JobStatus JSON (public fields only)             -->
+    <!-- Throws:   OBJECTSTORE:KEY_NOT_FOUND → mapped to 404 by error handler-->
+    <sub-flow name="pf-get-job-status"
+              doc:id="pf000003-0003-0003-0003-000000000001"
+              doc:name="pf-get-job-status"
+              doc:description="Shared: retrieve job from Object Store by jobId. Called by REST and MCP.">
+
+        <logger level="DEBUG"
+                doc:name="LOG DEBUG Status Lookup"
+                doc:id="pf000003-0003-0003-0003-000000000002"
+                message="#['LOG DEBUG | flow=pf-get-job-status | correlationId=' ++ correlationId ++ ' | jobId=' ++ (vars.jobId default 'unknown')]" />
+
+        <os:retrieve key="#[vars.jobId]"
+                     objectStore="_defaultPersistentObjectStore"
+                     doc:name="OS Retrieve Job Record"
+                     doc:id="pf000003-0003-0003-0003-000000000003" />
+
+        <ee:transform doc:name="DW Build JobStatus Response"
+                      doc:id="pf000003-0003-0003-0003-000000000004">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    jobId:  payload.jobId,
+    status: payload.status
+}
+++ (if (payload.branchName != null) { branchName:  payload.branchName  } else {})
+++ (if (payload.prUrl      != null) { prUrl:        payload.prUrl       } else {})
+++ (if (payload.completedAt != null){ completedAt:  payload.completedAt } else {})
+++ (if (payload.error      != null) { error:        payload.error       } else {})]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+
+        <logger level="DEBUG"
+                doc:name="LOG DEBUG Status Found"
+                doc:id="pf000003-0003-0003-0003-000000000005"
+                message="#['LOG DEBUG | flow=pf-get-job-status | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | status=' ++ payload.status]" />
+
+    </sub-flow>
+
+</mule>

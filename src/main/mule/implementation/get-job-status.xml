@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd">
+
+    <!--
+        REST entry point for GET /jobs/{jobId}.
+        Extracts the jobId URI path parameter, sets it as a variable, then delegates
+        to the shared private sub-flow pf-get-job-status (defined in
+        platform-lifecycle-orchestrator-mcp.xml).
+        The same pf-get-job-status sub-flow is also called by the MCP get_job_status tool-listener.
+        OBJECTSTORE:KEY_NOT_FOUND thrown by the sub-flow is caught by the global error handler → 404.
+    -->
+    <flow name="mf-impl-get-job-status"
+          doc:id="a7b8c9d0-0007-0007-0007-000000000001"
+          doc:name="mf-impl-get-job-status"
+          doc:description="REST entry: extracts jobId from URI params, calls shared pf-get-job-status sub-flow">
+
+        <!-- Extract jobId from the URI path parameter -->
+        <set-variable variableName="jobId"
+                      value="#[attributes.uriParams.jobId]"
+                      doc:name="PV SET jobId"
+                      doc:id="a7b8c9d0-0007-0007-0007-000000000002" />
+
+        <logger level="DEBUG"
+                doc:name="LOG DEBUG Request"
+                doc:id="a7b8c9d0-0007-0007-0007-000000000003"
+                message="#['LOG DEBUG | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId]" />
+
+        <!-- Delegate to the shared sub-flow (also used by MCP get_job_status tool) -->
+        <flow-ref name="pf-get-job-status"
+                  doc:name="pf-get-job-status"
+                  doc:id="a7b8c9d0-0007-0007-0007-000000000004" />
+
+    </flow>
+
+</mule>

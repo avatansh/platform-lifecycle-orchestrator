@@ -1,0 +1,5 @@
+api:
+  id: "REPLACE_WITH_API_MANAGER_ID"
+
+http:
+  port: "8081"

@@ -1,0 +1,45 @@
+# ─────────────────────────────────────────────────────────────
+# Maven / build output
+# ─────────────────────────────────────────────────────────────
+target/
+*.class
+dependency-reduced-pom.xml
+release.properties
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+buildNumber.properties
+
+# ─────────────────────────────────────────────────────────────
+# Mule / Anypoint tooling (machine-local, regenerated)
+# ─────────────────────────────────────────────────────────────
+**/.mule/
+**/.studio/
+.tooling-project
+*.munit-resources
+.mode
+mule_*.log
+*.jar
+
+# ─────────────────────────────────────────────────────────────
+# IDEs / editors
+# ─────────────────────────────────────────────────────────────
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.classpath
+.project
+.settings/
+*.swp
+*~
+
+
+# ─────────────────────────────────────────────────────────────
+# OS cruft
+# ─────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini

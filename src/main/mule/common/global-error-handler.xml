@@ -1,0 +1,191 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+    <!--
+        Global error handler for the Platform Lifecycle Orchestrator API.
+        Maps APIkit validation errors and runtime errors to standard HTTP status codes
+        with a consistent JSON error envelope: { "code", "message", "correlationId" }.
+        Referenced by the main flow via: error-handler ref="global-error-handler"
+    -->
+    <error-handler name="global-error-handler"
+                   doc:name="Global Error Handler"
+                   doc:id="c3d4e5f6-0003-0003-0003-000000000001">
+
+        <!-- 400 Bad Request -->
+        <on-error-continue type="APIKIT:BAD_REQUEST"
+                           enableNotifications="true"
+                           logException="false"
+                           doc:name="APIKIT Bad Request"
+                           doc:id="c3d4e5f6-0003-0003-0003-000000000002">
+            <logger level="WARN"
+                    doc:name="LOG WARN Bad Request"
+                    doc:id="c3d4e5f6-0003-0003-0003-000000000003"
+                    message="#['LOG WARN | flow=' ++ (vars.flowName default 'unknown') ++ ' | correlationId=' ++ correlationId ++ ' | status=400 | ' ++ error.description]" />
+            <ee:transform doc:name="DW Set 400 Response" doc:id="c3d4e5f6-0003-0003-0003-000000000004">
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{ code: "400", message: error.description, correlationId: correlationId }]]></ee:set-payload>
+                </ee:message>
+                <ee:variables>
+                    <ee:set-variable variableName="httpStatus"><![CDATA[400]]></ee:set-variable>
+                </ee:variables>
+            </ee:transform>
+        </on-error-continue>
+
+        <!-- 404 Not Found — APIkit route not matched -->
+        <on-error-continue type="APIKIT:NOT_FOUND"
+                           enableNotifications="true"
+                           logException="false"
+                           doc:name="APIKIT Not Found"
+                           doc:id="c3d4e5f6-0003-0003-0003-000000000005">
+            <logger level="WARN"
+                    doc:name="LOG WARN Not Found"
+                    doc:id="c3d4e5f6-0003-0003-0003-000000000006"
+                    message="#['LOG WARN | flow=' ++ (vars.flowName default 'unknown') ++ ' | correlationId=' ++ correlationId ++ ' | status=404 | ' ++ error.description]" />
+            <ee:transform doc:name="DW Set 404 Response" doc:id="c3d4e5f6-0003-0003-0003-000000000007">
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{ code: "404", message: error.description, correlationId: correlationId }]]></ee:set-payload>
+                </ee:message>
+                <ee:variables>
+                    <ee:set-variable variableName="httpStatus"><![CDATA[404]]></ee:set-variable>
+                </ee:variables>
+            </ee:transform>
+        </on-error-continue>
+
+        <!-- 405 Method Not Allowed -->
+        <on-error-continue type="APIKIT:METHOD_NOT_ALLOWED"
+                           enableNotifications="true"
+                           logException="false"
+                           doc:name="APIKIT Method Not Allowed"
+                           doc:id="c3d4e5f6-0003-0003-0003-000000000008">
+            <logger level="WARN"
+                    doc:name="LOG WARN Method Not Allowed"
+                    doc:id="c3d4e5f6-0003-0003-0003-000000000009"
+                    message="#['LOG WARN | flow=' ++ (vars.flowName default 'unknown') ++ ' | correlationId=' ++ correlationId ++ ' | status=405 | ' ++ error.description]" />
+            <ee:transform doc:name="DW Set 405 Response" doc:id="c3d4e5f6-0003-0003-0003-000000000010">
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{ code: "405", message: error.description, correlationId: correlationId }]]></ee:set-payload>
+                </ee:message>
+                <ee:variables>
+                    <ee:set-variable variableName="httpStatus"><![CDATA[405]]></ee:set-variable>
+                </ee:variables>
+            </ee:transform>
+        </on-error-continue>
+
+        <!-- 406 Not Acceptable -->
+        <on-error-continue type="APIKIT:NOT_ACCEPTABLE"
+                           enableNotifications="true"
+                           logException="false"
+                           doc:name="APIKIT Not Acceptable"
+                           doc:id="c3d4e5f6-0003-0003-0003-000000000011">
+            <logger level="WARN"
+                    doc:name="LOG WARN Not Acceptable"
+                    doc:id="c3d4e5f6-0003-0003-0003-000000000012"
+                    message="#['LOG WARN | flow=' ++ (vars.flowName default 'unknown') ++ ' | correlationId=' ++ correlationId ++ ' | status=406 | ' ++ error.description]" />
+            <ee:transform doc:name="DW Set 406 Response" doc:id="c3d4e5f6-0003-0003-0003-000000000013">
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{ code: "406", message: error.description, correlationId: correlationId }]]></ee:set-payload>
+                </ee:message>
+                <ee:variables>
+                    <ee:set-variable variableName="httpStatus"><![CDATA[406]]></ee:set-variable>
+                </ee:variables>
+            </ee:transform>
+        </on-error-continue>
+
+        <!-- 415 Unsupported Media Type -->
+        <on-error-continue type="APIKIT:UNSUPPORTED_MEDIA_TYPE"
+                           enableNotifications="true"
+                           logException="false"
+                           doc:name="APIKIT Unsupported Media Type"
+                           doc:id="c3d4e5f6-0003-0003-0003-000000000014">
+            <logger level="WARN"
+                    doc:name="LOG WARN Unsupported Media Type"
+                    doc:id="c3d4e5f6-0003-0003-0003-000000000015"
+                    message="#['LOG WARN | flow=' ++ (vars.flowName default 'unknown') ++ ' | correlationId=' ++ correlationId ++ ' | status=415 | ' ++ error.description]" />
+            <ee:transform doc:name="DW Set 415 Response" doc:id="c3d4e5f6-0003-0003-0003-000000000016">
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{ code: "415", message: error.description, correlationId: correlationId }]]></ee:set-payload>
+                </ee:message>
+                <ee:variables>
+                    <ee:set-variable variableName="httpStatus"><![CDATA[415]]></ee:set-variable>
+                </ee:variables>
+            </ee:transform>
+        </on-error-continue>
+
+        <!-- 404 — job not found in Object Store -->
+        <on-error-continue type="OBJECTSTORE:KEY_NOT_FOUND"
+                           enableNotifications="true"
+                           logException="false"
+                           doc:name="Object Store Key Not Found"
+                           doc:id="c3d4e5f6-0003-0003-0003-000000000017">
+            <logger level="WARN"
+                    doc:name="LOG WARN Job Not Found"
+                    doc:id="c3d4e5f6-0003-0003-0003-000000000018"
+                    message="#['LOG WARN | flow=' ++ (vars.flowName default 'unknown') ++ ' | correlationId=' ++ correlationId ++ ' | status=404 | jobId not found: ' ++ (vars.jobId default 'unknown')]" />
+            <ee:transform doc:name="DW Set 404 Job Not Found" doc:id="c3d4e5f6-0003-0003-0003-000000000019">
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    code: "404",
+    message: "Job not found: " ++ (vars.jobId default "unknown"),
+    correlationId: correlationId
+}]]></ee:set-payload>
+                </ee:message>
+                <ee:variables>
+                    <ee:set-variable variableName="httpStatus"><![CDATA[404]]></ee:set-variable>
+                </ee:variables>
+            </ee:transform>
+        </on-error-continue>
+
+        <!-- 500 Internal Server Error — catch-all -->
+        <on-error-continue type="ANY"
+                           enableNotifications="true"
+                           logException="true"
+                           doc:name="ANY Internal Server Error"
+                           doc:id="c3d4e5f6-0003-0003-0003-000000000020">
+            <logger level="ERROR"
+                    doc:name="LOG ERROR Internal Server Error"
+                    doc:id="c3d4e5f6-0003-0003-0003-000000000021"
+                    message="#['LOG ERROR | flow=' ++ (vars.flowName default 'unknown') ++ ' | correlationId=' ++ correlationId ++ ' | status=500 | errorType=' ++ error.errorType.identifier ++ ' | ' ++ error.description]" />
+            <ee:transform doc:name="DW Set 500 Response" doc:id="c3d4e5f6-0003-0003-0003-000000000022">
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    code: "500",
+    message: "An internal server error occurred. Please contact support.",
+    correlationId: correlationId
+}]]></ee:set-payload>
+                </ee:message>
+                <ee:variables>
+                    <ee:set-variable variableName="httpStatus"><![CDATA[500]]></ee:set-variable>
+                </ee:variables>
+            </ee:transform>
+        </on-error-continue>
+
+    </error-handler>
+
+</mule>

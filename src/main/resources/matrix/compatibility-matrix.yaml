@@ -1,0 +1,42 @@
+# Java 17 upgrade rules — consumed by pf-assess-app. Versions are tunable without code changes.
+schemaVersion: "1.1"
+target:
+  runtime: "4.9.18"          # app.runtime AND app.runtime.semver
+  javaVersion: "17"
+
+# GATING — if installed < min, upgrade is REQUIRED (rule_1..rule_4)
+gating:
+  muleRuntime:        { property: "app.runtime",                       min: "4.6.0", set: "4.9.18" }
+  muleRuntimeSemver:  { property: "app.runtime.semver",                min: "4.6.0", set: "4.9.18" }
+  javaVersion:        { property: "java.version",                      in: ["1.8","8","11"], set: "17" }
+  muleMavenPlugin:    { property: "mule.maven.plugin.version",         min: "4.1.0", set: "4.10.0" }
+  munit:              { property: "munit.version",                     min: "3.1.0", set: "3.6.1" }
+  munitExtPlugin:     { property: "munit.extensions.maven.plugin.version",min: "1.2.0", set: "1.5.0" }
+  weave:              { property: "weave.version",                     min: "1.2.0", set: "1.5.0" }
+
+# COMPATIBILITY — bump to 'set' if installed < 'set' (rule_5)
+connectors:
+  - { property: "apikit.version",                       set: "1.11.8" }
+  - { property: "http.connector.version",              set: "1.11.3" }
+  - { property: "sockets.connector.version",           set: "1.2.5" }
+  - { property: "objectstore.connector.version",       set: "1.3.0" }
+  - { property: "secure.conf.prop.module.version",     set: "1.2.7" }
+  - { property: "db.connector.version",                set: "1.14.6" }
+  - { property: "validation.module.version",           set: "2.0.4" }
+  - { property: "json.module.version",                 set: "2.5.2" }
+  - { property: "xml.module.version",                  set: "1.4.2" }
+  - { property: "oauth.module.version",                set: "1.1.24" }
+  - { property: "tracing.module.version",              set: "1.0.3" }
+  # wsc/vm/sftp/file/email/mq present in BOM but unused by demo app — bump if found
+
+# HYGIENE
+removeJvmFlags: ["-XX:-UseBiasedLocking", "-M-XX:-UseBiasedLocking"]
+
+# MANUAL-REVIEW FLAGS — never auto-fix; raise warnings (rule_7, rule_8)
+manualReview:
+  customJavaCode:   { scanGlobs: ["src/main/java/**/*.java"], warn: "Custom Java — reflection/SecurityManager restricted on 17" }
+  javaPojoInDw:     { scanRegex: "as Object \\{ class:",        warn: "DataWeave Java POJO needs getters AND setters on 17" }
+  apiPolicies:      { source: "apiManager",                 warn: "App has API Manager policies — re-validate after upgrade" }
+
+# mule-artifact.json target
+muleArtifact: { minMuleVersion: "4.9.0", javaSpecificationVersions: ["17"] }

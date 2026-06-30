@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:api-gateway="http://www.mulesoft.org/schema/mule/api-gateway"
+      xmlns:apikit="http://www.mulesoft.org/schema/mule/mule-apikit"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:mcp="http://www.mulesoft.org/schema/mule/mcp"
+      xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/mule-apikit http://www.mulesoft.org/schema/mule/mule-apikit/current/mule-apikit.xsd
+        http://www.mulesoft.org/schema/mule/api-gateway http://www.mulesoft.org/schema/mule/api-gateway/current/mule-api-gateway.xsd
+        http://www.mulesoft.org/schema/mule/mcp http://www.mulesoft.org/schema/mule/mcp/current/mule-mcp.xsd">
+
+    <!-- ===== Property Sources ===== -->
+    <!-- Environment-specific non-sensitive properties: config-dev.yaml, config-prod.yaml, etc. -->
+    <configuration-properties
+        doc:name="Environment Config Properties"
+        doc:id="a1b2c3d4-0001-0001-0001-000000000001"
+        file="properties/config-${env}.yaml" />
+
+    <!-- Global non-sensitive defaults shared across all environments -->
+    <configuration-properties
+        doc:name="Global Config Properties"
+        doc:id="a1b2c3d4-0001-0001-0001-000000000002"
+        file="properties/config.yaml" />
+
+    <!-- ===== HTTP Listener ===== -->
+    <!-- Plain HTTP — TLS termination is handled by the CloudHub 2.0 shared load balancer -->
+    <http:listener-config
+        name="apiHttpListenerConfig"
+        doc:name="HTTP Listener Config"
+        doc:id="a1b2c3d4-0001-0001-0001-000000000003">
+        <http:listener-connection host="${http.host}" port="${http.port}" />
+    </http:listener-config>
+
+    <!-- ===== APIkit Router Config ===== -->
+    <!-- References the local RAML spec. Update to Exchange resource URI after publishing. -->
+    <apikit:config
+        name="platform-lifecycle-orchestrator-config"
+        api="api/platform-lifecycle-orchestrator.raml"
+        outboundHeadersMapName="outboundHeaders"
+        httpStatusVarName="httpStatus"
+        doc:name="APIkit Config"
+        doc:id="a1b2c3d4-0001-0001-0001-000000000004" />
+
+    <!-- ===== MCP Server Config ===== -->
+    <!--
+        Exposes this Mule app as an MCP server reachable by AI agents (Claude, Copilot, etc.).
+        Transport: Streamable HTTP — shares the same HTTP listener as the REST API.
+        MCP endpoint: http://<host>:<port>/mcp  (set mcp.basePath in config.yaml)
+        serverName and serverVersion are reported to MCP clients during capability negotiation.
+    -->
+    <mcp:server-config
+        name="MCP_Config"
+        doc:name="MCP Server Config"
+        doc:id="a1b2c3d4-0001-0001-0001-000000000007"
+        serverName="${mcp.serverName}"
+        serverVersion="${mcp.serverVersion}">
+        <mcp:streamable-http-server-connection
+            doc:name="MCP Streamable HTTP Connection"
+            listenerConfig="apiHttpListenerConfig" />
+    </mcp:server-config>
+
+    <!-- ===== API Autodiscovery ===== -->
+    <!-- Registers this application with Anypoint API Manager for policy enforcement -->
+    <api-gateway:autodiscovery
+        apiId="${api.id}"
+        ignoreBasePath="true"
+        doc:name="API Autodiscovery"
+        doc:id="a1b2c3d4-0001-0001-0001-000000000005"
+        flowRef="platform-lifecycle-orchestrator-main" />
+
+</mule>

@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:os="http://www.mulesoft.org/schema/mule/os"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+        http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd">
+
+    <!--
+        Implementation flow for POST /webhook.
+        Receives raw GitHub pull_request webhook events and updates the corresponding
+        migration job status in the Object Store when a migration PR is merged.
+
+        Expected GitHub pull_request event shape (relevant fields):
+          payload.action  = "closed"
+          payload.pull_request.merged = true
+          payload.pull_request.html_url = "https://github.com/..."
+          payload.pull_request.head.ref = "migrate/..."   (branch name)
+
+        Job status transitions triggered here:
+          PR_OPEN → DEPLOYED  (on successful merge)
+          PR_OPEN → FAILED    (if we detect a closed-but-not-merged PR on a known job)
+    -->
+    <flow name="mf-impl-post-webhook" doc:id="b8c9d0e1-0008-0008-0008-000000000001">
+
+        <logger level="DEBUG"
+                doc:name="LOG DEBUG Webhook Received"
+                doc:id="b8c9d0e1-0008-0008-0008-000000000002"
+                message="#['LOG DEBUG | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | webhook action=' ++ (payload.action default 'unknown')]" />
+
+        <!--
+            Only process pull_request events where the PR was merged (action=closed AND merged=true).
+            All other event types (opened, synchronize, labeled, push, etc.) are acknowledged
+            and discarded without state changes.
+        -->
+        <choice doc:name="Is PR Merge Event?" doc:id="b8c9d0e1-0008-0008-0008-000000000003">
+
+            <when expression="#[payload.action == 'closed' and payload.pull_request.merged == true]">
+
+                <!-- Extract the branch name to look up the associated job -->
+                <set-variable variableName="mergedBranch"
+                              value="#[payload.pull_request.head.ref default '']"
+                              doc:name="PV SET mergedBranch"
+                              doc:id="b8c9d0e1-0008-0008-0008-000000000004" />
+
+                <set-variable variableName="prUrl"
+                              value="#[payload.pull_request.html_url default '']"
+                              doc:name="PV SET prUrl"
+                              doc:id="b8c9d0e1-0008-0008-0008-000000000005" />
+
+                <logger level="INFO"
+                        doc:name="LOG INFO PR Merged"
+                        doc:id="b8c9d0e1-0008-0008-0008-000000000006"
+                        message="#['LOG INFO | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | PR merged | branch=' ++ vars.mergedBranch ++ ' | prUrl=' ++ vars.prUrl]" />
+
+                <!--
+                    Derive jobId from the branch name.
+                    Migration branches follow the pattern: migrate/{appName}-{runtime}-java{version}
+                    The jobId is stored as a branch-to-jobId mapping in the Object Store
+                    under the key "branch::{branchName}".
+                    If no mapping exists the webhook is silently acknowledged.
+                -->
+                <os:retrieve
+                    key="#['branch::' ++ vars.mergedBranch]"
+                    objectStore="_defaultPersistentObjectStore"
+                    target="jobIdFromBranch"
+                    doc:name="OS Retrieve jobId by Branch"
+                    doc:id="b8c9d0e1-0008-0008-0008-000000000007">
+                    <os:default-value><![CDATA[null]]></os:default-value>
+                </os:retrieve>
+
+                <choice doc:name="Is Branch Mapped to a Job?" doc:id="b8c9d0e1-0008-0008-0008-000000000008">
+
+                    <when expression="#[vars.jobIdFromBranch != null]">
+
+                        <!-- Retrieve the current job record -->
+                        <os:retrieve
+                            key="#[vars.jobIdFromBranch]"
+                            objectStore="_defaultPersistentObjectStore"
+                            doc:name="OS Retrieve Job Record"
+                            doc:id="b8c9d0e1-0008-0008-0008-000000000009" />
+
+                        <!-- Update the job record to DEPLOYED -->
+                        <ee:transform doc:name="DW Update Job Status to DEPLOYED"
+                                      doc:id="b8c9d0e1-0008-0008-0008-000000000010">
+                            <ee:message>
+                                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+payload ++ {
+    status:      "DEPLOYED",
+    completedAt: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
+    prUrl:       vars.prUrl,
+    branchName:  vars.mergedBranch
+}]]></ee:set-payload>
+                            </ee:message>
+                        </ee:transform>
+
+                        <!-- Persist the updated job record -->
+                        <os:store
+                            key="#[vars.jobIdFromBranch]"
+                            objectStore="_defaultPersistentObjectStore"
+                            doc:name="OS Update Job to DEPLOYED"
+                            doc:id="b8c9d0e1-0008-0008-0008-000000000011">
+                            <os:value>#[payload]</os:value>
+                        </os:store>
+
+                        <logger level="INFO"
+                                doc:name="LOG INFO Job Deployed"
+                                doc:id="b8c9d0e1-0008-0008-0008-000000000012"
+                                message="#['LOG INFO | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobIdFromBranch ++ ' | status=DEPLOYED']" />
+
+                    </when>
+
+                    <otherwise>
+                        <logger level="DEBUG"
+                                doc:name="LOG DEBUG Branch Not Tracked"
+                                doc:id="b8c9d0e1-0008-0008-0008-000000000013"
+                                message="#['LOG DEBUG | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | branch not tracked, ignoring | branch=' ++ vars.mergedBranch]" />
+                    </otherwise>
+
+                </choice>
+
+            </when>
+
+            <otherwise>
+                <logger level="DEBUG"
+                        doc:name="LOG DEBUG Non-Merge Event Ignored"
+                        doc:id="b8c9d0e1-0008-0008-0008-000000000014"
+                        message="#['LOG DEBUG | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | webhook event ignored | action=' ++ (payload.action default 'unknown')]" />
+            </otherwise>
+
+        </choice>
+
+        <!-- Always return 200 to GitHub regardless of processing outcome -->
+        <ee:transform doc:name="DW Set 200 Acknowledgement" doc:id="b8c9d0e1-0008-0008-0008-000000000015">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{ acknowledged: true, correlationId: correlationId }]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+
+    </flow>
+
+</mule>

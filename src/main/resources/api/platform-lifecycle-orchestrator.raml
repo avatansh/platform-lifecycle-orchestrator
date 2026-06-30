@@ -1,0 +1,138 @@
+#%RAML 1.0
+title: Platform Lifecycle Orchestrator API
+version: v1
+mediaType: application/json
+description: |
+  The Platform Lifecycle Orchestrator API enables AI agents and automation tooling to manage the full lifecycle
+  of MuleSoft application upgrades — from runtime and Java version assessments through automated code changes,
+  pull request creation, and deployment tracking. Use this API to orchestrate zero-touch or low-touch
+  platform migrations at scale.
+
+types:
+
+  ChangePlan:
+    type: object
+    properties:
+      targetRuntime:
+        type: string
+      targetJavaVersion:
+        type: string
+      filesToChange:
+        type: array
+        items: string
+      hasApiPolicies:
+        type: boolean
+      hasCustomJavaCode:
+        type: boolean
+      hasLookupFunction:
+        type: boolean
+
+  AssessmentResult:
+    type: object
+    properties:
+      appName:
+        type: string
+      currentRuntime:
+        type: string
+      currentJavaVersion:
+        type: string
+      changePlan:
+        type: ChangePlan
+      warnings:
+        type: array
+        items: string
+
+  JobStatus:
+    type: object
+    properties:
+      jobId:
+        type: string
+      status:
+        type: string
+        enum: [PROCESSING, COMMITTED, PR_OPEN, DEPLOYED, FAILED]
+      prUrl:
+        type: string
+        required: false
+      branchName:
+        type: string
+        required: false
+      completedAt:
+        type: string
+        required: false
+      error:
+        type: string
+        required: false
+
+  AssessRequest:
+    type: object
+    properties:
+      appName:
+        type: string
+      environment:
+        type: string
+      jiraTicketId:
+        type: string
+        required: false
+
+  JobRequest:
+    type: object
+    properties:
+      appName:
+        type: string
+      environment:
+        type: string
+      jiraTicketId:
+        type: string
+      approvedChangePlan:
+        type: ChangePlan
+
+/jobs:
+  /assess:
+    post:
+      description: Assess a deployed MuleSoft application for runtime and Java version upgrade readiness.
+      body:
+        application/json:
+          type: AssessRequest
+      responses:
+        200:
+          body:
+            application/json:
+              type: AssessmentResult
+
+  post:
+    description: Submit an approved migration job.
+    body:
+      application/json:
+        type: JobRequest
+    responses:
+      202:
+        body:
+          application/json:
+            type: object
+            properties:
+              jobId:
+                type: string
+
+  /{jobId}:
+    uriParameters:
+      jobId:
+        type: string
+    get:
+      description: Retrieve the current status of a migration job.
+      responses:
+        200:
+          body:
+            application/json:
+              type: JobStatus
+        404:
+          description: No job with the specified jobId exists.
+
+/webhook:
+  post:
+    description: Receive GitHub pull request webhook events.
+    body:
+      application/json:
+        type: object
+    responses:
+      200:
+        description: Webhook event received and acknowledged.
