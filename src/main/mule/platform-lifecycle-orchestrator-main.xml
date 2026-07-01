@@ -57,10 +57,10 @@
             non-webhook routes; repeatable streams ensure APIkit can still read the body.
         -->
         <set-variable variableName="rawBody"
-                      value="#[payload as Binary]"
+                      value="#[write(payload, 'application/json') as Binary]"
                       doc:name="PV SET rawBody"
                       doc:id="d4e5f6a7-0004-0004-0004-000000000020"
-                      doc:description="Raw request bytes used for GitHub HMAC signature verification" />
+                      doc:description="Raw request bytes used for GitHub HMAC signature verification. Uses write() because this runtime presents the JSON body as a parsed Object, which 'payload as Binary' cannot coerce directly." />
 
         <set-variable variableName="ghSignature"
                       value="#[attributes.headers['x-hub-signature-256'] default '']"

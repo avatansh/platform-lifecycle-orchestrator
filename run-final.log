@@ -1,0 +1,23 @@
+﻿[INFO] Scanning for projects...
+[INFO] 
+[INFO] --< 2e14f8c6-4d60-481b-bfb6-798695efc8f4:platform-lifecycle-orchestrator >--
+[INFO] Building platform-lifecycle-orchestrator 1.0.0
+[INFO]   from pom.xml
+[INFO] --------------------------[ mule-application ]--------------------------
+[INFO] 
+[INFO] --- clean:3.2.0:clean (default-clean-1) @ platform-lifecycle-orchestrator ---
+[INFO] Deleting C:\Workspaces\7.25\acb-apps\platform-lifecycle-orchestrator\target
+[INFO] 
+[INFO] --- mule:4.10.0:clean (default-clean) @ platform-lifecycle-orchestrator ---
+[WARNING] Parameter 'localRepository' is deprecated core expression; Avoid use of ArtifactRepository type. If you need access to local repository, switch to '${repositorySystemSession}' expression and get LRM from it instead.
+[INFO] 
+[INFO] --- clean:3.2.0:clean (default-clean) @ platform-lifecycle-orchestrator ---
+[INFO] 
+[INFO] --- mule:4.10.0:validate (default-validate) @ platform-lifecycle-orchestrator ---
+[WARNING] Parameter 'localRepository' is deprecated core expression; Avoid use of ArtifactRepository type. If you need access to local repository, switch to '${repositorySystemSession}' expression and get LRM from it instead.
+[INFO] 
+[INFO] --- mule:4.10.0:initialize (default-initialize) @ platform-lifecycle-orchestrator ---
+[WARNING] Parameter 'localRepository' is deprecated core expression; Avoid use of ArtifactRepository type. If you need access to local repository, switch to '${repositorySystemSession}' expression and get LRM from it instead.
+[INFO] 
+[INFO] --- mule:4.10.0:generate-sources (default-generate-sources) @ platform-lifecycle-orchestrator ---
+[WARNING] Parameter 'localRepository' is deprecated core expression; Avoid use of ArtifactRepository type. If you need access to local repository, switch to '${repositorySystemSession}' expression and get LRM from it instead.

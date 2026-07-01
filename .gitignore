@@ -21,6 +21,11 @@ buildNumber.properties
 .mode
 mule_*.log
 *.jar
+body.json
+target-test.log
+test-run.log
+.mvn/
+
 
 # ─────────────────────────────────────────────────────────────
 # IDEs / editors

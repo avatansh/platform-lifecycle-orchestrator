@@ -34,7 +34,7 @@
           · The X-CD-Token check reads attributes.headers['x-cd-token'].
             In MUnit, sub-flows called via flow-ref start with NullAttributes
             (no HTTP headers), so the token check always sees '' != secret → 401.
-          · To exercise post-authentication logic, tests 2-5 use munit-tools:set-event
+          · To exercise post-authentication logic, tests 2-5 use munit:set-event
             to inject an attributes map carrying the correct test token value
             ("test-webhook-secret-value-12345!" from config-secure-test.yaml).
 
@@ -57,7 +57,7 @@
                 description="Absent X-CD-Token header returns 401 without accessing Object Store">
 
         <munit:execution>
-            <!-- No munit-tools:set-event → NullAttributes; token check sees '' → 401 -->
+            <!-- No munit:set-event → NullAttributes; token check sees '' → 401 -->
             <set-payload
                 value='#[{ jobId: "job-test-001", result: "success" }]'
                 mimeType="application/json"
@@ -134,13 +134,12 @@
         </munit:behavior>
 
         <munit:execution>
-            <munit-tools:set-event doc:name="SET event with valid X-CD-Token">
-                <munit-tools:attributes
+            <munit:set-event doc:name="SET event with valid X-CD-Token">
+                <munit:attributes
                     value="#[{ headers: { 'x-cd-token': 'test-webhook-secret-value-12345!' } }]" />
-                <munit-tools:payload
-                    value='#[{ jobId: "job-dep-002", result: "success", deployUrl: "https://runtime.mulesoft.com/my-app" }]'
-                    mediaType="application/json" />
-            </munit-tools:set-event>
+                <munit:payload
+                    value='#[{ jobId: "job-dep-002", result: "success", deployUrl: "https://runtime.mulesoft.com/my-app" }]' />
+            </munit:set-event>
             <flow-ref name="mf-impl-post-cd-result" doc:name="invoke cd-result" />
         </munit:execution>
 
@@ -193,22 +192,11 @@
                     }]" />
                 </munit-tools:then-return>
             </munit-tools:mock-when>
-            <!-- pf-rollback + pf-notify-failure also call os:retrieve — return same record -->
-            <munit-tools:mock-when doc:name="Mock remaining OS retrieve calls (rollback/notify)"
-                                   processor="os:retrieve">
-                <munit-tools:then-return>
-                    <munit-tools:payload mediaType="application/java"
-                                         value="#[{
-                        jobId:      'job-fail-003',
-                        status:     'FAILED_DEPLOY',
-                        appName:    'my-app',
-                        branchName: 'migrate/my-app-4.9.18-java17',
-                        commitSha:  'deadbeef1234',
-                        coords:     { owner: 'myorg', repo: 'my-app', defaultBranch: 'main' },
-                        error:      'Deployment timed out'
-                    }]" />
-                </munit-tools:then-return>
-            </munit-tools:mock-when>
+            <!-- NOTE: no catch-all os:retrieve mock here. The retrieves inside pf-rollback /
+                 pf-notify-failure use distinct doc:names and each declare os:default-value #[{}],
+                 so they resolve safely on their own. A broad os:retrieve mock would shadow the
+                 primary "OS Retrieve Job Record" mock above and make the flow read a terminal
+                 record (skipping the FAILED_DEPLOY store). -->
             <!-- All GitHub calls in pf-rollback return a plausible commit/PR response -->
             <munit-tools:mock-when doc:name="Mock all GitHub HTTP calls (rollback)"
                                    processor="http:request">
@@ -238,13 +226,12 @@
         </munit:behavior>
 
         <munit:execution>
-            <munit-tools:set-event doc:name="SET event with valid X-CD-Token (failure)">
-                <munit-tools:attributes
+            <munit:set-event doc:name="SET event with valid X-CD-Token (failure)">
+                <munit:attributes
                     value="#[{ headers: { 'x-cd-token': 'test-webhook-secret-value-12345!' } }]" />
-                <munit-tools:payload
-                    value='#[{ jobId: "job-fail-003", result: "failure", error: "Deployment timed out" }]'
-                    mediaType="application/json" />
-            </munit-tools:set-event>
+                <munit:payload
+                    value='#[{ jobId: "job-fail-003", result: "failure", error: "Deployment timed out" }]' />
+            </munit:set-event>
             <flow-ref name="mf-impl-post-cd-result" doc:name="invoke cd-result" />
         </munit:execution>
 
@@ -297,13 +284,12 @@
         </munit:behavior>
 
         <munit:execution>
-            <munit-tools:set-event doc:name="SET event with valid X-CD-Token (idempotent)">
-                <munit-tools:attributes
+            <munit:set-event doc:name="SET event with valid X-CD-Token (idempotent)">
+                <munit:attributes
                     value="#[{ headers: { 'x-cd-token': 'test-webhook-secret-value-12345!' } }]" />
-                <munit-tools:payload
-                    value='#[{ jobId: "job-idem-004", result: "success" }]'
-                    mediaType="application/json" />
-            </munit-tools:set-event>
+                <munit:payload
+                    value='#[{ jobId: "job-idem-004", result: "success" }]' />
+            </munit:set-event>
             <flow-ref name="mf-impl-post-cd-result" doc:name="invoke cd-result" />
         </munit:execution>
 
@@ -355,13 +341,12 @@
         </munit:behavior>
 
         <munit:execution>
-            <munit-tools:set-event doc:name="SET event with valid X-CD-Token (unknown result)">
-                <munit-tools:attributes
+            <munit:set-event doc:name="SET event with valid X-CD-Token (unknown result)">
+                <munit:attributes
                     value="#[{ headers: { 'x-cd-token': 'test-webhook-secret-value-12345!' } }]" />
-                <munit-tools:payload
-                    value='#[{ jobId: "job-unk-005", result: "partial" }]'
-                    mediaType="application/json" />
-            </munit-tools:set-event>
+                <munit:payload
+                    value='#[{ jobId: "job-unk-005", result: "partial" }]' />
+            </munit:set-event>
             <flow-ref name="mf-impl-post-cd-result" doc:name="invoke cd-result" />
         </munit:execution>
 

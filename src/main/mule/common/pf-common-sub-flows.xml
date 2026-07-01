@@ -1,24 +1,29 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <mule xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
       xmlns="http://www.mulesoft.org/schema/mule/core"
       xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
       xsi:schemaLocation="
         http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
         http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
 
     <!-- ===== Global Caching Strategies ===== -->
 
     <!--
-        matrixCachingStrategy: constant cache key — the compatibility-matrix.yaml is a
-        classpath resource that does not change between requests. A single cached read
-        serves the entire lifetime of the Mule application instance.
+        matrixCachingStrategy:
+          • source=classpath        → constant key: one read per JVM lifetime (matrix is bundled and static).
+          • source=exchange[-latest] → time-bucketed key (floor(epochSeconds / matrix.refreshSeconds)).
+            The key changes every refresh window, so the Exchange-hosted matrix is re-fetched
+            periodically and instances pick up central changes (and, in -latest mode, newly
+            published versions) WITHOUT a redeploy.
     -->
     <ee:object-store-caching-strategy
         name="matrixCachingStrategy"
         doc:name="Matrix Caching Strategy"
         doc:id="pfcs0001-0001-0001-0001-000000000001"
-        keyGenerationExpression="#['compatibility-matrix-static']" />
+        keyGenerationExpression="#[if ((p('matrix.source') default 'classpath') startsWith 'exchange') ('compatibility-matrix-' ++ (floor((now() as Number {unit: 'seconds'}) / (p('matrix.refreshSeconds') as Number)) as String)) else 'compatibility-matrix-static']" />
 
     <!--
         registryCachingStrategy: constant cache key — the app-registry.yaml is also a
@@ -33,12 +38,28 @@
     <!-- ==========================================================================
          pf-load-matrix
          ──────────────────────────────────────────────────────────────────────────
-         Reads classpath://matrix/compatibility-matrix.yaml using DataWeave readUrl
-         and caches the parsed YAML object so subsequent callers pay no I/O cost.
+         Loads the compatibility matrix into vars.matrix, from one of three sources
+         (config property matrix.source):
+
+           • exchange  (default in dev/prod) — fetch the centrally-governed matrix
+             asset from the Anypoint Exchange Maven facade over HTTPS, authenticated
+             with the Connected App (Exchange_Request), at the PINNED version
+             matrix.exchange.version. On ANY failure (network, auth, 4xx/5xx, parse)
+             it FALLS BACK to the bundled classpath copy, so a transient Exchange
+             problem never breaks assessments. Cached for matrix.refreshSeconds so
+             central changes to that version propagate WITHOUT a redeploy.
+
+           • exchange-latest — same as exchange, but first reads maven-metadata.xml
+             for the asset and resolves the newest published version (release, else
+             latest), then downloads that. Lets you publish a new matrix version and
+             have running instances adopt it within one refresh window — no config
+             edit, no redeploy. Falls back to classpath on any failure.
+
+           • classpath (tests, or air-gapped) — read the bundled
+             classpath://matrix/compatibility-matrix.yaml only.
 
          Sets:    vars.matrix  (application/java — parsed YAML object)
-         Reads:   classpath://matrix/compatibility-matrix.yaml
-         Caches:  yes — matrixCachingStrategy (constant key, JVM-lifetime cache)
+         Caches:  yes — matrixCachingStrategy (TTL-bucketed for exchange; constant for classpath)
 
          Transport-agnostic — no HTTP listener, no request/response contract.
          Callers: pf-assess-app (and any future sub-flow that needs upgrade rules).
@@ -46,32 +67,125 @@
     <sub-flow name="pf-load-matrix"
               doc:id="pflm0001-0001-0001-0001-000000000001"
               doc:name="pf-load-matrix"
-              doc:description="Load and cache the compatibility matrix YAML into vars.matrix">
+              doc:description="Load and cache the compatibility matrix (Exchange with classpath fallback) into vars.matrix">
 
         <logger level="DEBUG"
                 doc:name="LOG DEBUG pf-load-matrix enter"
                 doc:id="pflm0001-0001-0001-0001-000000000002"
-                message="#['LOG DEBUG | flow=pf-load-matrix | correlationId=' ++ correlationId ++ ' | loading compatibility matrix']" />
+                message="#['LOG DEBUG | flow=pf-load-matrix | correlationId=' ++ correlationId ++ ' | loading compatibility matrix | source=' ++ (p('matrix.source') default 'classpath')]" />
 
         <!--
-            Cache scope — key 'compatibility-matrix-static' is constant.
-            First call: executes the inner ee:transform, reads the YAML, caches the resulting event.
-            Subsequent calls: returns the cached event, skipping the transform entirely.
+            Cache scope — key comes from matrixCachingStrategy.
+            First call in a window: resolves the matrix (Exchange or classpath) and caches it.
+            Subsequent calls in the same window: return the cached parsed object.
             Payload after this scope = parsed compatibility matrix object.
         -->
         <ee:cache cachingStrategy-ref="matrixCachingStrategy"
-                  doc:name="CACHE Read Compatibility Matrix YAML"
+                  doc:name="CACHE Resolve Compatibility Matrix"
                   doc:id="pflm0001-0001-0001-0001-000000000003">
-            <ee:transform doc:name="DW readUrl compatibility-matrix.yaml"
-                          doc:id="pflm0001-0001-0001-0001-000000000004"
-                          doc:description="Read and parse compatibility-matrix.yaml from the classpath using DataWeave readUrl">
-                <ee:message>
-                    <ee:set-payload><![CDATA[%dw 2.0
+            <choice doc:name="CHOICE matrix.source == exchange*?"
+                    doc:id="pflm0001-0001-0001-0001-000000000007">
+                <when expression="#[(p('matrix.source') default 'classpath') startsWith 'exchange']"
+                      doc:name="source = exchange / exchange-latest"
+                      doc:id="pflm0001-0001-0001-0001-000000000008">
+                    <try doc:name="TRY fetch matrix from Exchange (fallback to classpath)"
+                         doc:id="pflm0001-0001-0001-0001-000000000009">
+                        <!--
+                            Step 1 — resolve the version to download.
+                              • exchange-latest → read maven-metadata.xml and take
+                                versioning.release (else versioning.latest).
+                              • exchange        → use the pinned matrix.exchange.version.
+                            Result stored in vars.matrixVersion.
+                        -->
+                        <choice doc:name="CHOICE resolve latest version?"
+                                doc:id="pflm0001-0001-0001-0001-000000000016">
+                            <when expression="#[p('matrix.source') == 'exchange-latest']"
+                                  doc:name="source = exchange-latest"
+                                  doc:id="pflm0001-0001-0001-0001-000000000017">
+                                <http:request method="GET"
+                                              config-ref="Exchange_Request"
+                                              responseTimeout="10000"
+                                              path="#['/api/v3/maven/' ++ p('matrix.exchange.orgId') ++ '/' ++ p('matrix.exchange.assetId') ++ '/maven-metadata.xml']"
+                                              doc:name="HTTP GET maven-metadata.xml"
+                                              doc:id="pflm0001-0001-0001-0001-000000000018" />
+                                <ee:transform doc:name="DW extract release/latest version"
+                                              doc:id="pflm0001-0001-0001-0001-000000000019"
+                                              doc:description="Parse maven-metadata.xml and pick versioning.release (else latest)">
+                                    <ee:variables>
+                                        <ee:set-variable variableName="matrixVersion"><![CDATA[%dw 2.0
+output text/plain
+var meta = read(payload, "application/xml")
+---
+(meta.metadata.versioning.release default meta.metadata.versioning.latest) as String]]></ee:set-variable>
+                                    </ee:variables>
+                                </ee:transform>
+                            </when>
+                            <otherwise doc:name="source = exchange (pinned)"
+                                       doc:id="pflm0001-0001-0001-0001-000000000020">
+                                <set-variable variableName="matrixVersion"
+                                              value="#[p('matrix.exchange.version')]"
+                                              doc:name="PV SET vars.matrixVersion (pinned)"
+                                              doc:id="pflm0001-0001-0001-0001-000000000021" />
+                            </otherwise>
+                        </choice>
+
+                        <logger level="DEBUG"
+                                doc:name="LOG DEBUG resolved matrix version"
+                                doc:id="pflm0001-0001-0001-0001-000000000022"
+                                message="#['LOG DEBUG | flow=pf-load-matrix | correlationId=' ++ correlationId ++ ' | resolved matrix version=' ++ (vars.matrixVersion default 'unknown') ++ ' | source=' ++ (p('matrix.source') default 'classpath')]" />
+
+                        <!-- Step 2 — download the resolved asset version -->
+                        <http:request method="GET"
+                                      config-ref="Exchange_Request"
+                                      responseTimeout="10000"
+                                      path="#['/api/v3/maven/' ++ p('matrix.exchange.orgId') ++ '/' ++ p('matrix.exchange.assetId') ++ '/' ++ vars.matrixVersion ++ '/' ++ p('matrix.exchange.assetId') ++ '-' ++ vars.matrixVersion ++ (if ((p('matrix.exchange.classifier') default '') != '') ('-' ++ p('matrix.exchange.classifier')) else '') ++ '.' ++ p('matrix.exchange.packaging')]"
+                                      doc:name="HTTP GET Exchange matrix asset"
+                                      doc:id="pflm0001-0001-0001-0001-000000000010" />
+                        <ee:transform doc:name="DW parse Exchange YAML"
+                                      doc:id="pflm0001-0001-0001-0001-000000000011"
+                                      doc:description="Parse the fetched Exchange asset body as YAML">
+                            <ee:message>
+                                <ee:set-payload><![CDATA[%dw 2.0
+output application/java
+---
+read(payload, "application/yaml")]]></ee:set-payload>
+                            </ee:message>
+                        </ee:transform>
+                        <error-handler>
+                            <on-error-continue type="ANY"
+                                               doc:name="On Error - classpath fallback"
+                                               doc:id="pflm0001-0001-0001-0001-000000000012">
+                                <logger level="WARN"
+                                        doc:name="LOG WARN Exchange fetch failed"
+                                        doc:id="pflm0001-0001-0001-0001-000000000013"
+                                        message="#['LOG WARN | flow=pf-load-matrix | correlationId=' ++ correlationId ++ ' | Exchange matrix fetch failed (' ++ (error.description default 'unknown error') ++ ') - falling back to bundled classpath matrix']" />
+                                <ee:transform doc:name="DW readUrl classpath fallback"
+                                              doc:id="pflm0001-0001-0001-0001-000000000014">
+                                    <ee:message>
+                                        <ee:set-payload><![CDATA[%dw 2.0
 output application/java
 ---
 readUrl("classpath://matrix/compatibility-matrix.yaml", "application/yaml")]]></ee:set-payload>
-                </ee:message>
-            </ee:transform>
+                                    </ee:message>
+                                </ee:transform>
+                            </on-error-continue>
+                        </error-handler>
+                    </try>
+                </when>
+                <otherwise doc:name="source = classpath"
+                           doc:id="pflm0001-0001-0001-0001-000000000015">
+                    <ee:transform doc:name="DW readUrl compatibility-matrix.yaml"
+                                  doc:id="pflm0001-0001-0001-0001-000000000004"
+                                  doc:description="Read and parse compatibility-matrix.yaml from the classpath using DataWeave readUrl">
+                        <ee:message>
+                            <ee:set-payload><![CDATA[%dw 2.0
+output application/java
+---
+readUrl("classpath://matrix/compatibility-matrix.yaml", "application/yaml")]]></ee:set-payload>
+                        </ee:message>
+                    </ee:transform>
+                </otherwise>
+            </choice>
         </ee:cache>
 
         <!-- Promote cached payload to vars.matrix so downstream sub-flows access it by name -->

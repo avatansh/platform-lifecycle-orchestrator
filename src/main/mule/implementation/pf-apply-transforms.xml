@@ -64,22 +64,29 @@ output application/java
                 <ee:message>
                     <ee:set-payload><![CDATA[%dw 2.0
 output text/plain
-import rewritePomProperties from dwl::rewritePomProperties
-import rewriteMunitRuntime  from dwl::rewriteMunitRuntime
-import rewriteMuleArtifact  from dwl::rewriteMuleArtifact
-import rewriteCiWorkflow    from dwl::rewriteCiWorkflow
+import rewritePomProperties  from dwl::rewritePomProperties
+import rewriteDepVersions    from dwl::rewriteDepVersions
+import rewritePluginVersions from dwl::rewritePluginVersions
+import rewriteMunitRuntime   from dwl::rewriteMunitRuntime
+import rewriteMuleArtifact   from dwl::rewriteMuleArtifact
+import rewriteCiWorkflow     from dwl::rewriteCiWorkflow
 import fromBase64 from dw::core::Binaries
 var rawText   = (fromBase64((payload.content default "") replace /[\r\n\t ]/ with "")) as String {encoding: "UTF-8"}
 var edits     = vars.currentFileEdits default []
+// Inline dependency + plugin <version> rewrites first, then property rewrites (independent regions).
+var depEdits  = edits filter ((e) -> e.kind == "depVersion")
+var stepA     = if (!isEmpty(depEdits)) rewriteDepVersions(rawText, depEdits) else rawText
+var plgEdits  = edits filter ((e) -> e.kind == "pluginVersion")
+var step0     = if (!isEmpty(plgEdits)) rewritePluginVersions(stepA, plgEdits) else stepA
 var propEdits = edits filter ((e) -> e.kind == "pomProperty")
-var step1     = if (!isEmpty(propEdits)) rewritePomProperties(rawText, propEdits) else rawText
-var munitEdit = edits firstWith ((e) -> e.kind == "munitRuntimeVersion")
+var step1     = if (!isEmpty(propEdits)) rewritePomProperties(step0, propEdits) else step0
+var munitEdit = (edits filter ((e) -> e.kind == "munitRuntimeVersion"))[0]
 var step2     = if (munitEdit != null) rewriteMunitRuntime(step1, munitEdit.to as String) else step1
-var maEdit    = edits firstWith ((e) -> e.kind == "muleArtifactJson")
+var maEdit    = (edits filter ((e) -> e.kind == "muleArtifactJson"))[0]
 var step3     = if (maEdit != null)
                     rewriteMuleArtifact(step2, maEdit.to.minMuleVersion as String, maEdit.to.javaSpecificationVersions)
                 else step2
-var ciEdit    = edits firstWith ((e) -> e.kind == "ciWorkflow")
+var ciEdit    = (edits filter ((e) -> e.kind == "ciWorkflow"))[0]
 var step4     = if (ciEdit != null) rewriteCiWorkflow(step3, ciEdit.to as String) else step3
 ---
 step4]]></ee:set-payload>

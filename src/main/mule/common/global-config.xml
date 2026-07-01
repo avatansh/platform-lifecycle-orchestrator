@@ -83,13 +83,18 @@
     </mcp:server-config>
 
     <!-- ===== API Autodiscovery ===== -->
-    <!-- Registers this application with Anypoint API Manager for policy enforcement -->
+    <!-- Registers this application with Anypoint API Manager for policy enforcement.
+         LOCAL-RUN NOTE: apiId must be a NUMERIC API Manager id. Disabled below for
+         local testing (no API Manager). Re-enable and set a real numeric api.id
+         (+ -Danypoint.platform.client_id/-client_secret) before deploying to CloudHub. -->
+    <!--
     <api-gateway:autodiscovery
         apiId="${api.id}"
         ignoreBasePath="true"
         doc:name="API Autodiscovery"
         doc:id="a1b2c3d4-0001-0001-0001-000000000005"
         flowRef="platform-lifecycle-orchestrator-main" />
+    -->
 
     <!-- ===== Outbound HTTP Request Configs ===== -->
 
@@ -126,6 +131,27 @@
         doc:id="a1b2c3d4-0001-0001-0001-000000000009"
         basePath="/">
         <http:request-connection host="anypoint.mulesoft.com" port="443" protocol="HTTPS" />
+    </http:request-config>
+
+    <!--
+        Exchange_Request: HTTPS client for the Anypoint Exchange Maven facade
+        (maven.anypoint.mulesoft.com). Used at runtime by pf-load-matrix to fetch the
+        centrally-governed compatibility-matrix asset so instances pick up matrix changes
+        without a redeploy.
+        Auth: HTTP Basic in the Exchange Connected-App facade format —
+              username = ~~~Client~~~ , password = <clientId>~?~<clientSecret>
+        Credentials come from the encrypted secure property store (secure::anypoint.*).
+        The Connected App needs the Exchange Viewer scope.
+    -->
+    <http:request-config
+        name="Exchange_Request"
+        doc:name="Exchange Maven Facade Request Config"
+        doc:id="a1b2c3d4-0001-0001-0001-000000000013"
+        basePath="/">
+        <http:request-connection host="maven.anypoint.mulesoft.com" port="443" protocol="HTTPS" />
+        <http:default-headers>
+            <http:default-header key="Authorization" value="#['Basic ' ++ toBase64('~~~Client~~~:' ++ p('secure::anypoint.clientId') ++ '~?~' ++ p('secure::anypoint.clientSecret'))]" />
+        </http:default-headers>
     </http:request-config>
 
     <!--

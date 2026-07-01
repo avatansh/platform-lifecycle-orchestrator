@@ -71,19 +71,23 @@ output application/json
             <otherwise doc:name="signature valid — proceed"
                        doc:id="b8c9d0e1-0008-0008-0008-000000000027">
 
-                <!-- ── Idempotency: de-duplicate by GitHub delivery UUID ───────────────────── -->
+                <!-- ── Idempotency: de-duplicate by GitHub delivery UUID ─────────────────────
+                     NOTE: os:retrieve treats a NULL os:default-value as "no default" and throws
+                     OS:KEY_NOT_FOUND on a missing key. A brand-new delivery (the common case) has
+                     no key, so we default to `false` (not seen) — this also preserves the payload,
+                     which a null default + error handler would not. -->
                 <os:retrieve key="#['delivery::' ++ vars.ghDelivery]"
                              objectStore="jobStore"
                              target="seenDelivery"
                              doc:name="OS Retrieve delivery idempotency key"
                              doc:id="b8c9d0e1-0008-0008-0008-000000000028">
-                    <os:default-value>#[null]</os:default-value>
+                    <os:default-value>#[false]</os:default-value>
                 </os:retrieve>
 
                 <choice doc:name="CHOICE duplicate delivery?"
                         doc:id="b8c9d0e1-0008-0008-0008-000000000029"
                         doc:description="Skip processing if this delivery UUID was already handled">
-                    <when expression="#[vars.seenDelivery != null]"
+                    <when expression="#[vars.seenDelivery == true]"
                           doc:name="duplicate delivery — skip"
                           doc:id="b8c9d0e1-0008-0008-0008-000000000030">
 
@@ -117,7 +121,7 @@ output application/json
                         <logger level="DEBUG"
                                 doc:name="LOG DEBUG Webhook Received"
                                 doc:id="b8c9d0e1-0008-0008-0008-000000000002"
-                                message="#['LOG DEBUG | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | webhook event=' ++ vars.ghEvent ++ ' | action=' ++ (payload.action default 'unknown') ++ ' | delivery=' ++ vars.ghDelivery]" />
+                                message="#['LOG DEBUG | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | webhook event=' ++ vars.ghEvent ++ ' | action=' ++ ((payload.action default 'unknown') as String) ++ ' | delivery=' ++ vars.ghDelivery]" />
 
                         <!--
                             Only process pull_request events where the PR was merged.
@@ -130,12 +134,12 @@ output application/json
                                   doc:name="PR merged">
 
                                 <set-variable variableName="mergedBranch"
-                                              value="#[payload.pull_request.head.ref default '']"
+                                              value="#[(payload.pull_request.head.ref default '') as String]"
                                               doc:name="PV SET mergedBranch"
                                               doc:id="b8c9d0e1-0008-0008-0008-000000000004" />
 
                                 <set-variable variableName="prUrl"
-                                              value="#[payload.pull_request.html_url default '']"
+                                              value="#[(payload.pull_request.html_url default '') as String]"
                                               doc:name="PV SET prUrl"
                                               doc:id="b8c9d0e1-0008-0008-0008-000000000005" />
 
@@ -144,18 +148,21 @@ output application/json
                                         doc:id="b8c9d0e1-0008-0008-0008-000000000006"
                                         message="#['LOG INFO | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | PR merged | branch=' ++ vars.mergedBranch ++ ' | prUrl=' ++ vars.prUrl]" />
 
+                                <!-- get-or-empty: an untracked merged branch has no key. A null
+                                     os:default-value would throw OS:KEY_NOT_FOUND, so default to ""
+                                     (no mapping) — this also preserves the payload. -->
                                 <os:retrieve key="#['branch::' ++ vars.mergedBranch]"
                                              objectStore="jobStore"
                                              target="jobIdFromBranch"
                                              doc:name="OS Retrieve jobId by Branch"
                                              doc:id="b8c9d0e1-0008-0008-0008-000000000007">
-                                    <os:default-value>#[null]</os:default-value>
+                                    <os:default-value>#[""]</os:default-value>
                                 </os:retrieve>
 
                                 <choice doc:name="Is Branch Mapped to a Job?"
                                         doc:id="b8c9d0e1-0008-0008-0008-000000000008">
 
-                                    <when expression="#[vars.jobIdFromBranch != null]"
+                                    <when expression="#[vars.jobIdFromBranch != null and vars.jobIdFromBranch != '']"
                                           doc:name="branch mapped to job">
 
                                         <os:retrieve key="#[vars.jobIdFromBranch]"
@@ -252,7 +259,7 @@ output application/json
         <choice doc:name="CHOICE X-CD-Token valid?"
                 doc:id="b9c0d1e2-0009-0009-0009-000000000001"
                 doc:description="Reject requests whose X-CD-Token header does not match the shared webhook secret">
-            <when expression="#[attributes.headers['x-cd-token'] default '' != p('secure::github.webhookSecret')]"
+            <when expression="#[(attributes.headers['x-cd-token'] default '') != p('secure::github.webhookSecret')]"
                   doc:name="token missing or invalid"
                   doc:id="b9c0d1e2-0009-0009-0009-000000000002">
 

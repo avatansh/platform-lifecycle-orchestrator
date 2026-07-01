@@ -128,8 +128,12 @@
                     <munit-tools:with-attribute attributeName="doc:name"
                                                 whereValue="#['OS Retrieve delivery idempotency key']" />
                 </munit-tools:with-attributes>
+                <!-- os:retrieve stores its result in target=seenDelivery, so the mock
+                     must populate that variable (payload-only mocks leave targets unset). -->
                 <munit-tools:then-return>
-                    <munit-tools:payload value="#[true]" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="seenDelivery" value="#[true]" />
+                    </munit-tools:variables>
                 </munit-tools:then-return>
             </munit-tools:mock-when>
             <!-- OS store must NOT be called — duplicate is short-circuited -->
@@ -190,17 +194,13 @@ output text/plain
                 description="PR merged event for a tracked branch transitions the job to DEPLOYING">
 
         <munit:behavior>
-            <!-- Delivery key not yet seen → fresh delivery -->
-            <munit-tools:mock-when doc:name="Mock OS retrieve delivery key (new)"
-                                   processor="os:retrieve">
-                <munit-tools:with-attributes>
-                    <munit-tools:with-attribute attributeName="doc:name"
-                                                whereValue="#['OS Retrieve delivery idempotency key']" />
-                </munit-tools:with-attributes>
-                <munit-tools:then-return>
-                    <munit-tools:payload value="#[null]" />
-                </munit-tools:then-return>
-            </munit-tools:mock-when>
+            <!-- Delivery key not yet seen → fresh delivery.
+                 We deliberately do NOT mock this os:retrieve: it targets seenDelivery and declares
+                 os:default-value #[null], so the real op against the empty test store yields
+                 seenDelivery=null AND passes the webhook payload through unchanged. A mock here
+                 (payload- or variables-only) would clobber the webhook body the PR-merge logic
+                 needs immediately afterwards. -->
+
             <!-- Branch index lookup → returns the tracked jobId -->
             <munit-tools:mock-when doc:name="Mock OS retrieve branch index"
                                    processor="os:retrieve">
@@ -208,8 +208,12 @@ output text/plain
                     <munit-tools:with-attribute attributeName="doc:name"
                                                 whereValue="#['OS Retrieve jobId by Branch']" />
                 </munit-tools:with-attributes>
+                <!-- os:retrieve stores its result in target=jobIdFromBranch, so the mock
+                     must populate that variable (payload-only mocks leave targets unset). -->
                 <munit-tools:then-return>
-                    <munit-tools:payload value="#['job-tracked-004']" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="jobIdFromBranch" value="#['job-tracked-004']" />
+                    </munit-tools:variables>
                 </munit-tools:then-return>
             </munit-tools:mock-when>
             <!-- Job record retrieve -->
@@ -230,13 +234,12 @@ output text/plain
                     }]" />
                 </munit-tools:then-return>
             </munit-tools:mock-when>
-            <!-- Allow all os:store calls to succeed silently -->
-            <munit-tools:mock-when doc:name="Mock all OS store calls"
-                                   processor="os:store">
-                <munit-tools:then-return>
-                    <munit-tools:payload value="#[null]" />
-                </munit-tools:then-return>
-            </munit-tools:mock-when>
+            <!-- os:store is intentionally NOT mocked. It is a void operation that preserves
+                 the message payload; a payload-returning mock (null or #[payload]) clobbers the
+                 webhook body before the PR-merge choice evaluates payload.action/merged. Letting
+                 the real void op run against the in-memory test store keeps the payload intact,
+                 and verify-call still counts the real invocation. -->
+            
         </munit:behavior>
 
         <munit:execution>
@@ -258,17 +261,23 @@ output text/plain
             </ee:transform>
             <set-variable variableName="ghDelivery" value="delivery-004" doc:name="PV ghDelivery" />
             <set-variable variableName="ghEvent"    value="pull_request"  doc:name="PV ghEvent" />
-            <set-payload
-                value='#[{
-                    action: "closed",
-                    pull_request: {
-                        merged:   true,
-                        head:     { ref: "migrate/my-app-4.9.18-java17" },
-                        html_url: "https://github.com/myorg/my-app/pull/7"
-                    }
-                }]'
-                mimeType="application/json"
-                doc:name="SET parsed PR event payload" />
+            <!-- Produce a genuinely application/json payload (as APIkit would in production),
+                 not a Java object tagged json, so payload.* selectors parse unambiguously. -->
+            <ee:transform doc:name="SET parsed PR event payload (JSON)">
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    action: "closed",
+    pull_request: {
+        merged: true,
+        head: { ref: "migrate/my-app-4.9.18-java17" },
+        html_url: "https://github.com/myorg/my-app/pull/7"
+    }
+}]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
             <flow-ref name="mf-impl-post-webhook" doc:name="invoke post-webhook" />
         </munit:execution>
 

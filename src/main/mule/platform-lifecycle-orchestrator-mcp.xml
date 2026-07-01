@@ -348,15 +348,15 @@ var treePaths    = vars.tree.tree map $.path
 // Use nominal path when present; otherwise fall back to first blob pom.xml at any depth
 var appPomPath   =
     if (treePaths contains nominalPom) nominalPom
-    else (vars.tree.tree firstWith ((item) ->
+    else ((vars.tree.tree filter ((item) ->
             item."type" == "blob" and item.path matches /(?:^|\/)pom\.xml$/
-         )).path default nominalPom
+         ))[0].path) default nominalPom
 var maPath       = if (appPath == ".") "mule-artifact.json" else (appPath ++ "/mule-artifact.json")
 var maExists     = treePaths contains maPath
 // CI workflow: first .github/workflows/*.yml or *.yaml found in tree
-var ciPath       = (vars.tree.tree firstWith ((item) ->
+var ciPath       = ((vars.tree.tree filter ((item) ->
                        item.path matches /\.github\/workflows\/[^\/]+\.ya?ml$/
-                   )).path default null
+                   ))[0].path) default null
 // All property names from matrix gating + connectors — needed by step-6 ownerOf()
 var allProps     = ((valuesOf(vars.matrix.gating) map $.property)
                     ++ (vars.matrix.connectors map $.property))
@@ -646,6 +646,88 @@ var lookupWarning  = if (lookupInPom)
             </ee:variables>
         </ee:transform>
 
+        <!-- ── Step 5f: Fetch mule-artifact.json content (for diff-aware app-level edit) ─────
+             Only when the file exists. Parsed into vars.muleArtifactCurrent so step 7 can
+             compare current minMuleVersion / javaSpecificationVersions against the target
+             and emit the edit ONLY when it actually differs. Absent ⇒ var is null.
+             ──────────────────────────────────────────────────────────────────────────────── -->
+        <choice doc:name="CHOICE fetch mule-artifact.json?"
+                doc:id="pf000001-0001-0001-0001-0000000000a0"
+                doc:description="Fetch and parse mule-artifact.json only when present in the tree">
+            <when expression="#[vars.muleArtifactExists default false]"
+                  doc:name="mule-artifact.json exists"
+                  doc:id="pf000001-0001-0001-0001-0000000000a1">
+                <http:request method="GET"
+                              config-ref="GitHub_Request"
+                              path="#['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/contents/' ++ vars.muleArtifactPath]"
+                              doc:name="GET mule-artifact.json (Contents API)"
+                              doc:id="pf000001-0001-0001-0001-0000000000a2"
+                              doc:description="Fetch mule-artifact.json content via Contents API">
+                    <http:query-params>#[{ ref: vars.headSha }]</http:query-params>
+                </http:request>
+                <ee:transform doc:name="DW Decode mule-artifact.json"
+                              doc:id="pf000001-0001-0001-0001-0000000000a3">
+                    <ee:variables>
+                        <ee:set-variable variableName="muleArtifactCurrent"><![CDATA[%dw 2.0
+output application/java
+import fromBase64 from dw::core::Binaries
+---
+read((fromBase64((payload.content default "") replace /[\r\n\t ]/ with "")) as String {encoding: "UTF-8"}, "application/json")]]></ee:set-variable>
+                    </ee:variables>
+                </ee:transform>
+            </when>
+            <otherwise doc:name="no mule-artifact.json"
+                       doc:id="pf000001-0001-0001-0001-0000000000a4">
+                <ee:transform doc:name="DW mule-artifact null"
+                              doc:id="pf000001-0001-0001-0001-0000000000a5">
+                    <ee:variables>
+                        <ee:set-variable variableName="muleArtifactCurrent">#[null]</ee:set-variable>
+                    </ee:variables>
+                </ee:transform>
+            </otherwise>
+        </choice>
+
+        <!-- ── Step 5g: Fetch CI workflow content (for diff-aware app-level edit) ────────────
+             Only when a workflow file was located. Raw text stored in vars.ciWorkflowText so
+             step 7 can read the current java-version and emit the edit ONLY when it differs.
+             Absent ⇒ var is null.
+             ──────────────────────────────────────────────────────────────────────────────── -->
+        <choice doc:name="CHOICE fetch CI workflow?"
+                doc:id="pf000001-0001-0001-0001-0000000000b0"
+                doc:description="Fetch CI workflow text only when a workflow path was found">
+            <when expression="#[vars.ciWorkflowPath != null]"
+                  doc:name="CI workflow exists"
+                  doc:id="pf000001-0001-0001-0001-0000000000b1">
+                <http:request method="GET"
+                              config-ref="GitHub_Request"
+                              path="#['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/contents/' ++ vars.ciWorkflowPath]"
+                              doc:name="GET CI workflow (Contents API)"
+                              doc:id="pf000001-0001-0001-0001-0000000000b2"
+                              doc:description="Fetch CI workflow YAML content via Contents API">
+                    <http:query-params>#[{ ref: vars.headSha }]</http:query-params>
+                </http:request>
+                <ee:transform doc:name="DW Decode CI workflow"
+                              doc:id="pf000001-0001-0001-0001-0000000000b3">
+                    <ee:variables>
+                        <ee:set-variable variableName="ciWorkflowText"><![CDATA[%dw 2.0
+output application/java
+import fromBase64 from dw::core::Binaries
+---
+(fromBase64((payload.content default "") replace /[\r\n\t ]/ with "")) as String {encoding: "UTF-8"}]]></ee:set-variable>
+                    </ee:variables>
+                </ee:transform>
+            </when>
+            <otherwise doc:name="no CI workflow"
+                       doc:id="pf000001-0001-0001-0001-0000000000b4">
+                <ee:transform doc:name="DW CI workflow null"
+                              doc:id="pf000001-0001-0001-0001-0000000000b5">
+                    <ee:variables>
+                        <ee:set-variable variableName="ciWorkflowText">#[null]</ee:set-variable>
+                    </ee:variables>
+                </ee:transform>
+            </otherwise>
+        </choice>
+
         <!-- ── Step 6: Classify topology and build ownerByProperty map ──────────────────────
              topology   — shape of the POM chain: APP_STANDALONE | PARENT_APP | BOM_PARENT_APP | MULTI_LEVEL
              ownerByProperty — for each matrix property, the path of the POM that owns it
@@ -668,10 +750,17 @@ var topology  = if (n >= 3 and topIsBom) "BOM_PARENT_APP"
                 else if (n == 2)          "PARENT_APP"
                 else if (n == 1)          "APP_STANDALONE"
                 else                      "MULTI_LEVEL"
+// propOf(pom, prop): read a Maven <properties> value by NAME. Matches on the key
+// as a plain String so dotted names (e.g. app.runtime.semver) and XML namespace
+// Key types resolve reliably — a plain properties[prop] dynamic selector does not.
+fun propOf(pom, prop) = do {
+    var pairs = (pom.project.properties default {}) pluck ((pv, pk) -> { name: (pk as String), value: pv })
+    --- (pairs filter ($.name == prop))[0].value default null
+}
 // ownerOf(prop): first POM in the chain (nearest-first) that declares the property.
 // Falls back to the app POM so an edit always has a home (it can be ADDED there).
 fun ownerOf(prop) =
-    (vars.chain firstWith ((c) -> (c.pom.project.properties[prop]?) != null))
+    ((vars.chain filter ((c) -> propOf(c.pom, prop) != null))[0])
         .path default vars.chain[0].path
 ---
 {
@@ -711,39 +800,135 @@ fun lt(a,b) = do { var x=toNums(a)
         ((x[0] default 0)==(y[0] default 0) and (x[1] default 0) < (y[1] default 0)) or
         ((x[0] default 0)==(y[0] default 0) and (x[1] default 0)==(y[1] default 0) and (x[2] default 0)<(y[2] default 0)) }
 var m = vars.matrix
-// installedOf(prop): read the value from the POM that OWNS it (resolved in step 6)
-fun installedOf(prop) = do {
-    var ownerPath = vars.ownerByProperty[prop]
-    var ownerPom  = (vars.chain firstWith ($.path == ownerPath)) default vars.chain[0]
-    --- ownerPom.pom.project.properties[prop] default null }
-// all gating + connector rules → one list; each edit carries its OWN owner file
+// propOf(pom, prop): read a Maven <properties> value by NAME (String-key match) so
+// dotted names and XML namespace Key types resolve reliably.
+fun propOf(pom, prop) = do {
+    var pairs = (pom.project.properties default {}) pluck ((pv, pk) -> { name: (pk as String), value: pv })
+    --- (pairs filter ($.name == prop))[0].value default null
+}
+// rawProp(name): first non-null property value across the chain (nearest-first), no indirection.
+fun rawProp(name) = ((vars.chain map ((c) -> propOf(c.pom, name))) filter ($ != null))[0] default null
+// resolveProp(name): rawProp, following ONE level of Maven property-placeholder indirection when present.
+fun resolveProp(name) = do {
+    var v = rawProp(name)
+    --- if (v != null and ((v as String) matches /^\s*\$\{.+\}\s*$/))
+            rawProp((trim(v as String) replace /^\$\{/ with "" replace /\}$/ with ""))
+        else v
+}
+// ownerOfProp(name): path of the nearest chain pom that declares the property, else null.
+fun ownerOfProp(name) =
+    ((vars.chain filter ((c) -> propOf(c.pom, name) != null))[0]).path default null
+// findDep(g,a): nearest chain entry declaring dependency g:a in <dependencies> or
+// <dependencyManagement>, returned as { path, dep }, else null.
+fun findDep(g, a) =
+    (flatten(vars.chain map ((c) -> do {
+        var deps = ((c.pom.project.dependencies default {}).*dependency) default []
+        var mgmt = ((c.pom.project.dependencyManagement.dependencies default {}).*dependency) default []
+        --- (deps ++ mgmt) map ((d) -> { path: c.path, dep: d })
+    })) filter ((x) ->
+        (((x.dep.groupId default "") as String) == g) and
+        (((x.dep.artifactId default "") as String) == a)))[0] default null
+// findPlugin(g,a): nearest chain entry declaring plugin a in <build><plugins> or
+// <build><pluginManagement><plugins>, returned as { path, plugin }, else null.
+// groupId is optional (plugins are commonly identified by artifactId alone).
+fun findPlugin(g, a) =
+    (flatten(vars.chain map ((c) -> do {
+        var ps  = ((c.pom.project.build.plugins default {}).*plugin) default []
+        var pms = ((c.pom.project.build.pluginManagement.plugins default {}).*plugin) default []
+        --- (ps ++ pms) map ((p) -> { path: c.path, plugin: p })
+    })) filter ((x) ->
+        (((x.plugin.artifactId default "") as String) == a) and
+        (g == null or (((x.plugin.groupId default "") as String) == g))))[0] default null
+// resolveInline(r, ver, path, kind, coords): shared handling for an inline <version> found
+// on a dependency or plugin — null → skip; property-placeholder → resolve as pomProperty on
+// the referenced property; literal → emit `kind` carrying the given coordinate fields.
+fun resolveInline(r, ver, path, kind, coords) =
+    if (ver == null) { property: r.property, kind: null, file: null, installed: null }
+    else if ((ver as String) matches /^\s*\$\{.+\}\s*$/) do {
+        var pn = (trim(ver as String) replace /^\$\{/ with "" replace /\}$/ with "")
+        --- { property: pn, kind: "pomProperty", file: (ownerOfProp(pn) default path), installed: rawProp(pn) }
+    }
+    else
+        ({ property: r.property, kind: kind, file: path, installed: (ver as String) } ++ coords)
+// resolveRule(r): find installed value + owner file + edit kind. Resolution order:
+//   1) <properties> value (kind=pomProperty)
+//   2) inline <dependency>/<dependencyManagement> <version> (kind=depVersion)
+//   3) inline <plugin> <version> (kind=pluginVersion)
+// An inline value that is itself a property placeholder collapses back to a pomProperty edit.
+fun resolveRule(r) = do {
+    var pOwner = ownerOfProp(r.property)
+    var depHit = if ((r.groupId?) and (r.artifactId?)) findDep(r.groupId, r.artifactId) else null
+    var plgHit = if (r.pluginArtifactId?) findPlugin((r.pluginGroupId default null), r.pluginArtifactId) else null
+    ---
+    if (pOwner != null)
+        { property: r.property, kind: "pomProperty", file: pOwner, installed: rawProp(r.property) }
+    else if (depHit != null)
+        resolveInline(r, (depHit.dep.version default null), depHit.path, "depVersion",
+                      { groupId: r.groupId, artifactId: r.artifactId })
+    else if (plgHit != null)
+        resolveInline(r, (plgHit.plugin.version default null), plgHit.path, "pluginVersion",
+                      { pluginGroupId: (r.pluginGroupId default null), pluginArtifactId: r.pluginArtifactId })
+    else { property: r.property, kind: null, file: null, installed: null }
+}
+// all gating + connector rules → one list; each edit carries its OWN owner file + kind
 var allRules = (valuesOf(m.gating) ++ m.connectors)
 var propEdits = allRules
     map ((r) -> do {
-        var installed = installedOf(r.property)
-        var needs = if (installed == null) false           // not present → skip
-                    else if (r.in?)  (r.in contains installed)
-                    else lt(installed, r.set)
-        --- { property: r.property, kind: "pomProperty",
-              file: vars.ownerByProperty[r.property], from: installed, to: r.set, change: needs } })
+        var res       = resolveRule(r)
+        var installed = res.installed
+        var needs     = if (installed == null or res.kind == null) false   // not present → skip
+                        else if (r.in?)  (r.in contains installed)
+                        else lt(installed, r.set)
+        ---
+        {
+            property:         res.property,
+            kind:             res.kind,
+            file:             res.file,
+            (groupId:          res.groupId)          if (res.groupId?),
+            (artifactId:       res.artifactId)       if (res.artifactId?),
+            (pluginGroupId:    res.pluginGroupId)    if (res.pluginGroupId?),
+            (pluginArtifactId: res.pluginArtifactId) if (res.pluginArtifactId?),
+            from:             installed,
+            to:               r.set,
+            change:           needs
+        } })
     filter ($.change)
-// app-level edits — CONDITIONAL: only emit when the element/file actually exists
+// app-level edits — DIFF-AWARE: emit ONLY when the current value actually differs from target.
 var appPomText = vars.appPomText default ""
+// (1) MUnit <runtimeVersion> — literal only. A property-placeholder value is driven by a
+//     property, so it is handled by the property path above and must NOT be rewritten here.
+var munitCur         = (appPomText scan /<runtimeVersion>\s*([^<]+?)\s*<\/runtimeVersion>/)[0][1] default null
+var munitPlaceholder = (munitCur != null) and ((munitCur default "") matches /^\s*\$\{.+\}\s*$/)
+var munitNeeds       = (munitCur != null) and (!munitPlaceholder) and lt((munitCur as String), m.target.runtime)
+// (2) mule-artifact.json — bump minMuleVersion only if BELOW target (never downgrade); ensure
+//     java target support only if no current spec is already >= target (handles "1.8"/"8"/"11").
+var maCur      = vars.muleArtifactCurrent
+var maSpecs    = (maCur.javaSpecificationVersions default [])
+var maMinNeeds = (maCur != null) and lt((maCur.minMuleVersion default "0"), m.muleArtifact.minMuleVersion)
+var maJavaOk   = !isEmpty(maSpecs filter ((s) -> !lt((s as String), m.target.javaVersion)))
+var maJavaNeeds= (maCur != null) and (!maJavaOk)
+var maNeeds    = maMinNeeds or maJavaNeeds
+// Never downgrade minMuleVersion: keep current when it is already at/above target.
+var maToMin    = if (maMinNeeds) m.muleArtifact.minMuleVersion else (maCur.minMuleVersion default m.muleArtifact.minMuleVersion)
+// (3) CI workflow — bump only if the current java-version is below target (never downgrade).
+var ciCur      = ((vars.ciWorkflowText default "") scan /java-version:\s*['"]?([^'"\s]+)['"]?/)[0][1] default null
+var ciNeeds    = (ciCur != null) and lt((ciCur as String), m.target.javaVersion)
 var appEdits = []
-  ++ (if (appPomText contains "<runtimeVersion>")
-        [{ file: vars.chain[0].path, kind: "munitRuntimeVersion", to: m.target.runtime }] else [])
-  ++ (if (vars.muleArtifactExists default false)
+  ++ (if (munitNeeds)
+        [{ file: vars.chain[0].path, kind: "munitRuntimeVersion", from: munitCur, to: m.target.runtime }] else [])
+  ++ (if (maNeeds)
         [{ file: vars.muleArtifactPath, kind: "muleArtifactJson",
-           to: { minMuleVersion: m.muleArtifact.minMuleVersion,
+           from: { minMuleVersion: (maCur.minMuleVersion default null), javaSpecificationVersions: maSpecs },
+           to: { minMuleVersion: maToMin,
                  javaSpecificationVersions: m.muleArtifact.javaSpecificationVersions } }] else [])
-  ++ (if (vars.ciWorkflowPath != null)
-        [{ file: vars.ciWorkflowPath, kind: "ciWorkflow", to: m.target.javaVersion }] else [])
+  ++ (if (ciNeeds)
+        [{ file: vars.ciWorkflowPath, kind: "ciWorkflow", from: ciCur, to: m.target.javaVersion }] else [])
 var all = propEdits ++ appEdits
 ---
 {
   appName: vars.appName,
-  currentRuntime: installedOf("app.runtime") default installedOf("app.runtime.semver") default "unknown",
-  currentJavaVersion: installedOf("java.version") default "unknown",
+  currentRuntime: resolveProp("app.runtime") default resolveProp("app.runtime.semver") default "unknown",
+  currentJavaVersion: resolveProp("java.version") default resolveProp("maven.compiler.source") default resolveProp("maven.compiler.target") default "unknown",
   changePlan: {
     targetRuntime:     m.target.runtime,
     targetJavaVersion: m.target.javaVersion,
@@ -1141,17 +1326,46 @@ payload ++ {
             </otherwise>
         </choice>
 
-        <!-- ── Step 2: Compute branch name ───────────────────────────────────────────────── -->
-        <set-variable variableName="branchName"
+        <!-- ── Step 2: Compute a COLLISION-FREE branch name ─────────────────────────────────
+             Base name is deterministic: migrate/{appName}-{targetRuntime}-java{targetJavaVersion}.
+             If that (or a numbered variant) already exists on the remote, pick the first free
+             suffix (-1, -2, …) so re-runs never fail with 422 and never force-update an
+             existing branch. Existing names are discovered via the Git matching-refs API.
+             ──────────────────────────────────────────────────────────────────────────────── -->
+        <set-variable variableName="branchBase"
                       value="#['migrate/' ++ vars.appName ++ '-' ++ vars.changePlan.targetRuntime ++ '-java' ++ vars.changePlan.targetJavaVersion]"
-                      doc:name="PV SET branchName"
+                      doc:name="PV SET branchBase"
                       doc:id="pfac0001-0001-0001-0001-000000000009"
-                      doc:description="Deterministic branch name: migrate/{appName}-{targetRuntime}-java{targetJavaVersion}" />
+                      doc:description="Deterministic base branch name before collision handling" />
+
+        <!-- GET all refs whose name starts with the base — returns [] (200) when none exist. -->
+        <http:request method="GET"
+                      config-ref="GitHub_Request"
+                      path="#['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/git/matching-refs/heads/' ++ vars.branchBase]"
+                      target="existingRefs"
+                      doc:name="GET matching branch refs"
+                      doc:id="pfac0001-0001-0001-0001-00000000000d"
+                      doc:description="List existing branches sharing the base name so a free suffix can be chosen" />
+
+        <ee:transform doc:name="DW Pick free branch name"
+                      doc:id="pfac0001-0001-0001-0001-00000000000e">
+            <ee:variables>
+                <ee:set-variable variableName="branchName"><![CDATA[%dw 2.0
+output application/java
+var base       = vars.branchBase
+// names already taken on the remote (strip the refs/heads/ prefix)
+var taken      = (vars.existingRefs default []) map ((r) -> ((r.ref as String) replace /^refs\/heads\// with ""))
+// try the base first, then base-1 .. base-50
+var candidates = [base] ++ ((1 to 50) map ((n) -> base ++ "-" ++ (n as String)))
+---
+(candidates filter ((c) -> !(taken contains c)))[0] default (base ++ "-" ++ vars.jobId)]]></ee:set-variable>
+            </ee:variables>
+        </ee:transform>
 
         <logger level="INFO"
                 doc:name="LOG INFO branch name computed"
                 doc:id="pfac0001-0001-0001-0001-000000000010"
-                message="#['LOG INFO | flow=pf-atomic-commit | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | branchName=' ++ vars.branchName]" />
+                message="#['LOG INFO | flow=pf-atomic-commit | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | branchBase=' ++ vars.branchBase ++ ' | branchName=' ++ vars.branchName ++ ' | existing=' ++ sizeOf(vars.existingRefs default [])]" />
 
         <!-- ── Step 3: Create branch ref ──────────────────────────────────────────────────
              POST /repos/{owner}/{repo}/git/refs
