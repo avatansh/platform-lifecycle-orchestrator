@@ -1,0 +1,14 @@
+# Test secure properties — plain values (no encryption) used with a dummy key.
+# The Secure Configuration Properties module passes through values not wrapped in ![...].
+# These are test-only credentials — never used in production.
+
+github:
+  token: "test-github-token-placeholder"
+  webhookSecret: "test-webhook-secret-value-12345!"
+
+slack:
+  webhookUrl: "https://hooks.slack.com/services/T00/B00/test"
+
+jira:
+  email: "test@example.com"
+  apiToken: "test-jira-api-token-placeholder"

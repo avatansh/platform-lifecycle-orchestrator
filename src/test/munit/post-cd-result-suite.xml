@@ -1,0 +1,385 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+      xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns:os="http://www.mulesoft.org/schema/mule/os"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core          http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/munit         http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+        http://www.mulesoft.org/schema/mule/munit-tools   http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd
+        http://www.mulesoft.org/schema/mule/ee/core       http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+        http://www.mulesoft.org/schema/mule/os            http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd
+        http://www.mulesoft.org/schema/mule/http          http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd">
+
+    <!--
+        post-cd-result-suite.xml
+        Tests for the mf-impl-post-cd-result flow.
+
+        mf-impl-post-cd-result:
+          · Step 1 — Authenticates via X-CD-Token header == secure::github.webhookSecret
+          · Step 2 — Parses body: { jobId, result, deployUrl?, error? }
+          · Step 3 — Loads job record from OS (throws OS:KEY_NOT_FOUND when job absent)
+          · Step 4 — Captures record fields into variables
+          · Step 5 — Idempotency guard: already-terminal jobs return 200 immediately
+          · Step 6 — Outcome branch:
+              success  → DEPLOYED  + lock release + Slack notify (non-fatal)
+              failure  → pf-rollback (best-effort) + FAILED_DEPLOY + lock release + Slack
+              unknown  → 400
+
+        Authentication strategy in tests:
+          · The X-CD-Token check reads attributes.headers['x-cd-token'].
+            In MUnit, sub-flows called via flow-ref start with NullAttributes
+            (no HTTP headers), so the token check always sees '' != secret → 401.
+          · To exercise post-authentication logic, tests 2-5 use munit-tools:set-event
+            to inject an attributes map carrying the correct test token value
+            ("test-webhook-secret-value-12345!" from config-secure-test.yaml).
+
+        Test matrix:
+          1. No X-CD-Token (NullAttributes)            → 401
+          2. Valid token + result=success               → 200 { status: DEPLOYED }
+          3. Valid token + result=failure               → 200 { status: FAILED_DEPLOY }
+          4. Valid token + already-terminal (DEPLOYED)  → 200 idempotent
+          5. Valid token + unknown result value         → 400
+
+        OS and http:request (Slack / GitHub rollback) calls are mocked throughout.
+    -->
+    <munit:config name="post-cd-result-suite" doc:id="cd-suite-0001" />
+
+    <!-- ══════════════════════════════════════════════════════════════════════════
+         Test 1: No X-CD-Token → 401
+         ══════════════════════════════════════════════════════════════════════════ -->
+    <munit:test name="post-cd-result-missing-token-returns-401"
+                doc:id="cd-test-0001"
+                description="Absent X-CD-Token header returns 401 without accessing Object Store">
+
+        <munit:execution>
+            <!-- No munit-tools:set-event → NullAttributes; token check sees '' → 401 -->
+            <set-payload
+                value='#[{ jobId: "job-test-001", result: "success" }]'
+                mimeType="application/json"
+                doc:name="SET cd-result body" />
+            <flow-ref name="mf-impl-post-cd-result" doc:name="invoke cd-result" />
+        </munit:execution>
+
+        <munit:validation>
+            <munit-tools:assert-that
+                doc:name="assert httpStatus = 401"
+                expression="#[vars.httpStatus]"
+                is="#[MunitTools::equalTo('401')]" />
+            <munit-tools:assert-that
+                doc:name="assert error = invalid cd token"
+                expression="#[payload.error]"
+                is="#[MunitTools::equalTo('invalid cd token')]" />
+            <!-- OS must NOT have been accessed -->
+            <munit-tools:verify-call doc:name="verify OS retrieve NOT called"
+                                     processor="os:retrieve"
+                                     times="0" />
+        </munit:validation>
+
+    </munit:test>
+
+    <!-- ══════════════════════════════════════════════════════════════════════════
+         Test 2: Valid token + result=success → DEPLOYED
+         ══════════════════════════════════════════════════════════════════════════ -->
+    <munit:test name="post-cd-result-success-sets-DEPLOYED"
+                doc:id="cd-test-0002"
+                description="CD success result finalises the job as DEPLOYED and releases the single-flight lock">
+
+        <munit:behavior>
+            <!-- Job record in OS: DEPLOYING (not yet terminal) -->
+            <munit-tools:mock-when doc:name="Mock OS retrieve job record (DEPLOYING)"
+                                   processor="os:retrieve">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name"
+                                                whereValue="#['OS Retrieve Job Record']" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                                         value="#[{
+                        jobId:      'job-dep-002',
+                        status:     'DEPLOYING',
+                        appName:    'my-app',
+                        branchName: 'migrate/my-app-4.9.18-java17',
+                        prNumber:   5,
+                        commitSha:  'abc123def456',
+                        coords:     { owner: 'myorg', repo: 'my-app', defaultBranch: 'main' }
+                    }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <!-- Allow os:store (persists DEPLOYED record) -->
+            <munit-tools:mock-when doc:name="Mock OS store (DEPLOYED record)"
+                                   processor="os:store">
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[null]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <!-- Allow os:remove (lock release — wrapped in non-fatal try) -->
+            <munit-tools:mock-when doc:name="Mock OS remove (lock release)"
+                                   processor="os:remove">
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[null]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <!-- Mock Slack POST (non-fatal notification) -->
+            <munit-tools:mock-when doc:name="Mock Slack POST (DEPLOYED notification)"
+                                   processor="http:request">
+                <munit-tools:then-return>
+                    <munit-tools:payload value='#[{ ok: true }]' mediaType="application/json" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+
+        <munit:execution>
+            <munit-tools:set-event doc:name="SET event with valid X-CD-Token">
+                <munit-tools:attributes
+                    value="#[{ headers: { 'x-cd-token': 'test-webhook-secret-value-12345!' } }]" />
+                <munit-tools:payload
+                    value='#[{ jobId: "job-dep-002", result: "success", deployUrl: "https://runtime.mulesoft.com/my-app" }]'
+                    mediaType="application/json" />
+            </munit-tools:set-event>
+            <flow-ref name="mf-impl-post-cd-result" doc:name="invoke cd-result" />
+        </munit:execution>
+
+        <munit:validation>
+            <munit-tools:assert-that
+                doc:name="assert acknowledged = true"
+                expression="#[payload.acknowledged]"
+                is="#[MunitTools::equalTo(true)]" />
+            <munit-tools:assert-that
+                doc:name="assert status = DEPLOYED"
+                expression="#[payload.status]"
+                is="#[MunitTools::equalTo('DEPLOYED')]" />
+            <!-- DEPLOYED record must have been persisted to OS -->
+            <munit-tools:verify-call doc:name="verify OS store DEPLOYED record"
+                                     processor="os:store">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name"
+                                                whereValue="#['OS Store DEPLOYED Job Record']" />
+                </munit-tools:with-attributes>
+            </munit-tools:verify-call>
+        </munit:validation>
+
+    </munit:test>
+
+    <!-- ══════════════════════════════════════════════════════════════════════════
+         Test 3: Valid token + result=failure → FAILED_DEPLOY + rollback attempted
+         ══════════════════════════════════════════════════════════════════════════ -->
+    <munit:test name="post-cd-result-failure-sets-FAILED_DEPLOY"
+                doc:id="cd-test-0003"
+                description="CD failure result finalises the job as FAILED_DEPLOY after attempting rollback">
+
+        <munit:behavior>
+            <!-- Primary job record fetch -->
+            <munit-tools:mock-when doc:name="Mock OS retrieve job record (DEPLOYING)"
+                                   processor="os:retrieve">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name"
+                                                whereValue="#['OS Retrieve Job Record']" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                                         value="#[{
+                        jobId:      'job-fail-003',
+                        status:     'DEPLOYING',
+                        appName:    'my-app',
+                        branchName: 'migrate/my-app-4.9.18-java17',
+                        prNumber:   8,
+                        commitSha:  'deadbeef1234',
+                        coords:     { owner: 'myorg', repo: 'my-app', defaultBranch: 'main' }
+                    }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <!-- pf-rollback + pf-notify-failure also call os:retrieve — return same record -->
+            <munit-tools:mock-when doc:name="Mock remaining OS retrieve calls (rollback/notify)"
+                                   processor="os:retrieve">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                                         value="#[{
+                        jobId:      'job-fail-003',
+                        status:     'FAILED_DEPLOY',
+                        appName:    'my-app',
+                        branchName: 'migrate/my-app-4.9.18-java17',
+                        commitSha:  'deadbeef1234',
+                        coords:     { owner: 'myorg', repo: 'my-app', defaultBranch: 'main' },
+                        error:      'Deployment timed out'
+                    }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <!-- All GitHub calls in pf-rollback return a plausible commit/PR response -->
+            <munit-tools:mock-when doc:name="Mock all GitHub HTTP calls (rollback)"
+                                   processor="http:request">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                                         value="#[{
+                        sha:      'revert-commit-sha',
+                        html_url: 'https://github.com/myorg/my-app/pull/9',
+                        number:   9,
+                        parents:  [{ sha: 'base-sha' }],
+                        tree:     { sha: 'base-tree-sha' }
+                    }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="Mock all OS store calls (failure path)"
+                                   processor="os:store">
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[null]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="Mock OS remove (lock release on failure)"
+                                   processor="os:remove">
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[null]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+
+        <munit:execution>
+            <munit-tools:set-event doc:name="SET event with valid X-CD-Token (failure)">
+                <munit-tools:attributes
+                    value="#[{ headers: { 'x-cd-token': 'test-webhook-secret-value-12345!' } }]" />
+                <munit-tools:payload
+                    value='#[{ jobId: "job-fail-003", result: "failure", error: "Deployment timed out" }]'
+                    mediaType="application/json" />
+            </munit-tools:set-event>
+            <flow-ref name="mf-impl-post-cd-result" doc:name="invoke cd-result" />
+        </munit:execution>
+
+        <munit:validation>
+            <munit-tools:assert-that
+                doc:name="assert acknowledged = true"
+                expression="#[payload.acknowledged]"
+                is="#[MunitTools::equalTo(true)]" />
+            <munit-tools:assert-that
+                doc:name="assert status = FAILED_DEPLOY"
+                expression="#[payload.status]"
+                is="#[MunitTools::equalTo('FAILED_DEPLOY')]" />
+            <!-- FAILED_DEPLOY record must have been persisted -->
+            <munit-tools:verify-call doc:name="verify OS store FAILED_DEPLOY record"
+                                     processor="os:store">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name"
+                                                whereValue="#['OS Store FAILED_DEPLOY Job Record']" />
+                </munit-tools:with-attributes>
+            </munit-tools:verify-call>
+        </munit:validation>
+
+    </munit:test>
+
+    <!-- ══════════════════════════════════════════════════════════════════════════
+         Test 4: Valid token + job already DEPLOYED (terminal) → 200 idempotent
+         ══════════════════════════════════════════════════════════════════════════ -->
+    <munit:test name="post-cd-result-already-terminal-is-idempotent"
+                doc:id="cd-test-0004"
+                description="Second cd-result callback for an already-DEPLOYED job returns 200 without re-processing">
+
+        <munit:behavior>
+            <!-- Job already terminal: DEPLOYED -->
+            <munit-tools:mock-when doc:name="Mock OS retrieve job (already DEPLOYED)"
+                                   processor="os:retrieve">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name"
+                                                whereValue="#['OS Retrieve Job Record']" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                                         value="#[{
+                        jobId:       'job-idem-004',
+                        status:      'DEPLOYED',
+                        appName:     'my-app',
+                        completedAt: '2025-06-01T10:00:00Z'
+                    }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+
+        <munit:execution>
+            <munit-tools:set-event doc:name="SET event with valid X-CD-Token (idempotent)">
+                <munit-tools:attributes
+                    value="#[{ headers: { 'x-cd-token': 'test-webhook-secret-value-12345!' } }]" />
+                <munit-tools:payload
+                    value='#[{ jobId: "job-idem-004", result: "success" }]'
+                    mediaType="application/json" />
+            </munit-tools:set-event>
+            <flow-ref name="mf-impl-post-cd-result" doc:name="invoke cd-result" />
+        </munit:execution>
+
+        <munit:validation>
+            <munit-tools:assert-that
+                doc:name="assert acknowledged = true"
+                expression="#[payload.acknowledged]"
+                is="#[MunitTools::equalTo(true)]" />
+            <munit-tools:assert-that
+                doc:name="assert idempotent = true"
+                expression="#[payload.idempotent]"
+                is="#[MunitTools::equalTo(true)]" />
+            <munit-tools:assert-that
+                doc:name="assert current status echoed back"
+                expression="#[payload.status]"
+                is="#[MunitTools::equalTo('DEPLOYED')]" />
+            <!-- OS store must NOT be called when already terminal -->
+            <munit-tools:verify-call doc:name="verify OS store NOT called (idempotent)"
+                                     processor="os:store"
+                                     times="0" />
+        </munit:validation>
+
+    </munit:test>
+
+    <!-- ══════════════════════════════════════════════════════════════════════════
+         Test 5: Valid token + unknown result value → 400
+         ══════════════════════════════════════════════════════════════════════════ -->
+    <munit:test name="post-cd-result-unknown-result-returns-400"
+                doc:id="cd-test-0005"
+                description="An unrecognised result value returns 400 without modifying the job record">
+
+        <munit:behavior>
+            <!-- Job exists and is non-terminal -->
+            <munit-tools:mock-when doc:name="Mock OS retrieve job record (DEPLOYING)"
+                                   processor="os:retrieve">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name"
+                                                whereValue="#['OS Retrieve Job Record']" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                                         value="#[{
+                        jobId:   'job-unk-005',
+                        status:  'DEPLOYING',
+                        appName: 'my-app'
+                    }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+
+        <munit:execution>
+            <munit-tools:set-event doc:name="SET event with valid X-CD-Token (unknown result)">
+                <munit-tools:attributes
+                    value="#[{ headers: { 'x-cd-token': 'test-webhook-secret-value-12345!' } }]" />
+                <munit-tools:payload
+                    value='#[{ jobId: "job-unk-005", result: "partial" }]'
+                    mediaType="application/json" />
+            </munit-tools:set-event>
+            <flow-ref name="mf-impl-post-cd-result" doc:name="invoke cd-result" />
+        </munit:execution>
+
+        <munit:validation>
+            <munit-tools:assert-that
+                doc:name="assert httpStatus = 400"
+                expression="#[vars.httpStatus]"
+                is="#[MunitTools::equalTo('400')]" />
+            <munit-tools:assert-that
+                doc:name="assert error message present"
+                expression="#[payload.error]"
+                is="#[MunitTools::containsString('invalid result')]" />
+            <!-- OS store must NOT be called for an unknown result -->
+            <munit-tools:verify-call doc:name="verify OS store NOT called (unknown result)"
+                                     processor="os:store"
+                                     times="0" />
+        </munit:validation>
+
+    </munit:test>
+
+</mule>

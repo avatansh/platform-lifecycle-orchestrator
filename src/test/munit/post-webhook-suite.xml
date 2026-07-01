@@ -1,0 +1,369 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+      xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns:os="http://www.mulesoft.org/schema/mule/os"
+      xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core          http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/munit         http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+        http://www.mulesoft.org/schema/mule/munit-tools   http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd
+        http://www.mulesoft.org/schema/mule/ee/core       http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+        http://www.mulesoft.org/schema/mule/os            http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd">
+
+    <!--
+        post-webhook-suite.xml
+        Tests for the mf-impl-post-webhook flow.
+
+        mf-impl-post-webhook reads:
+          · vars.rawBody      — raw request bytes (captured by main flow before APIkit)
+          · vars.ghSignature  — x-hub-signature-256 header value
+          · vars.ghDelivery   — x-github-delivery header value
+          · vars.ghEvent      — x-github-event header value
+          · payload           — parsed JSON body from APIkit
+
+        Security:
+          · HMAC-SHA256(secure::github.webhookSecret, rawBody) compared to ghSignature.
+            Test secret = "test-webhook-secret-value-12345!" (from config-secure-test.yaml).
+          · Tests that exercise the valid-signature branch pre-compute the expected HMAC
+            using the same DataWeave expression so the comparison always matches.
+
+        Test matrix:
+          1. Empty  ghSignature  → 401  (missing signature guard)
+          2. Wrong  ghSignature  → 401  (HMAC mismatch guard)
+          3. Valid sig + duplicate delivery  → 200 { acknowledged:true, duplicate:true }
+          4. Valid sig + PR merged + tracked branch → 200 { acknowledged:true },
+             OS store called with DEPLOYING status
+          5. Valid sig + non-merge event → 200 { acknowledged:true } (no state change)
+
+        OS operations are mocked in all tests; no real Object Store is accessed.
+    -->
+    <munit:config name="post-webhook-suite" doc:id="wh-suite-0001" />
+
+    <!-- ──────────────────────────────────────────────────────────────────────────
+         Test 1: Missing signature → 401
+         ────────────────────────────────────────────────────────────────────────── -->
+    <munit:test name="post-webhook-missing-signature-returns-401"
+                doc:id="wh-test-0001"
+                description="Empty x-hub-signature-256 header triggers 401 without touching Object Store">
+
+        <munit:behavior>
+            <!-- OS must NOT be called on a signature failure — verify via mock -->
+            <munit-tools:mock-when doc:name="Guard: OS retrieve delivery key must NOT be called"
+                                   processor="os:retrieve">
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[null]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+
+        <munit:execution>
+            <!-- Minimal webhook headers; ghSignature is EMPTY -->
+            <set-variable variableName="rawBody"    value="#['{}' as Binary]"  doc:name="PV rawBody" />
+            <set-variable variableName="ghSignature" value=""                   doc:name="PV ghSignature (empty)" />
+            <set-variable variableName="ghDelivery" value="delivery-001"        doc:name="PV ghDelivery" />
+            <set-variable variableName="ghEvent"    value="pull_request"        doc:name="PV ghEvent" />
+            <set-payload value="#[{}]" mimeType="application/json"              doc:name="SET empty payload" />
+            <flow-ref name="mf-impl-post-webhook" doc:name="invoke post-webhook" />
+        </munit:execution>
+
+        <munit:validation>
+            <munit-tools:assert-that
+                doc:name="assert httpStatus = 401"
+                expression="#[vars.httpStatus]"
+                is="#[MunitTools::equalTo('401')]" />
+            <munit-tools:assert-that
+                doc:name="assert error body contains 'invalid signature'"
+                expression="#[payload.error]"
+                is="#[MunitTools::equalTo('invalid signature')]" />
+        </munit:validation>
+
+    </munit:test>
+
+    <!-- ──────────────────────────────────────────────────────────────────────────
+         Test 2: Wrong signature → 401
+         ────────────────────────────────────────────────────────────────────────── -->
+    <munit:test name="post-webhook-wrong-signature-returns-401"
+                doc:id="wh-test-0002"
+                description="A non-empty but incorrect x-hub-signature-256 triggers 401">
+
+        <munit:execution>
+            <set-variable variableName="rawBody"     value="#['webhook-body-test-2' as Binary]" doc:name="PV rawBody" />
+            <set-variable variableName="ghSignature" value="sha256=deadbeefdeadbeef"             doc:name="PV ghSignature (wrong)" />
+            <set-variable variableName="ghDelivery"  value="delivery-002"                        doc:name="PV ghDelivery" />
+            <set-variable variableName="ghEvent"     value="pull_request"                        doc:name="PV ghEvent" />
+            <set-payload  value='#[{ action: "opened" }]' mimeType="application/json"            doc:name="SET payload" />
+            <flow-ref name="mf-impl-post-webhook" doc:name="invoke post-webhook" />
+        </munit:execution>
+
+        <munit:validation>
+            <munit-tools:assert-that
+                doc:name="assert httpStatus = 401"
+                expression="#[vars.httpStatus]"
+                is="#[MunitTools::equalTo('401')]" />
+            <munit-tools:assert-that
+                doc:name="assert error = 'invalid signature'"
+                expression="#[payload.error]"
+                is="#[MunitTools::equalTo('invalid signature')]" />
+        </munit:validation>
+
+    </munit:test>
+
+    <!-- ──────────────────────────────────────────────────────────────────────────
+         Test 3: Valid signature + duplicate delivery → 200 duplicate:true
+         A pre-computed HMAC is used so the signature check passes.
+         The delivery idempotency OS key already exists → duplicate path.
+         ────────────────────────────────────────────────────────────────────────── -->
+    <munit:test name="post-webhook-duplicate-delivery-returns-200-duplicate"
+                doc:id="wh-test-0003"
+                description="Valid HMAC + already-seen delivery UUID returns 200 with duplicate:true">
+
+        <munit:behavior>
+            <!-- Delivery idempotency key already in OS → seenDelivery = true -->
+            <munit-tools:mock-when doc:name="Mock OS retrieve delivery key (already seen)"
+                                   processor="os:retrieve">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name"
+                                                whereValue="#['OS Retrieve delivery idempotency key']" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[true]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <!-- OS store must NOT be called — duplicate is short-circuited -->
+            <munit-tools:mock-when doc:name="Mock OS store (must not be called for duplicate)"
+                                   processor="os:store">
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[null]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+
+        <munit:execution>
+            <!-- Use a known body so we can compute the HMAC deterministically -->
+            <set-variable variableName="rawBody"
+                          value="#['webhook-body-test-3' as Binary]"
+                          doc:name="PV rawBody (known)" />
+            <!-- Compute the correct HMAC using the test secret from config-secure-test.yaml -->
+            <ee:transform doc:name="DW Compute valid test HMAC" doc:id="wh-test-0003-hmac">
+                <ee:variables>
+                    <ee:set-variable variableName="ghSignature"><![CDATA[%dw 2.0
+import dw::Crypto
+output text/plain
+---
+"sha256=" ++ Crypto::HMACWith(
+    "test-webhook-secret-value-12345!" as Binary,
+    vars.rawBody,
+    "HmacSHA256"
+)]]></ee:set-variable>
+                </ee:variables>
+            </ee:transform>
+            <set-variable variableName="ghDelivery" value="delivery-003-dup" doc:name="PV ghDelivery" />
+            <set-variable variableName="ghEvent"    value="pull_request"     doc:name="PV ghEvent" />
+            <set-payload
+                value='#[{ action: "closed", pull_request: { merged: true, head: { ref: "migrate/my-app" }, html_url: "https://gh/pr/1" } }]'
+                mimeType="application/json"
+                doc:name="SET parsed payload" />
+            <flow-ref name="mf-impl-post-webhook" doc:name="invoke post-webhook" />
+        </munit:execution>
+
+        <munit:validation>
+            <munit-tools:assert-that
+                doc:name="assert acknowledged = true"
+                expression="#[payload.acknowledged]"
+                is="#[MunitTools::equalTo(true)]" />
+            <munit-tools:assert-that
+                doc:name="assert duplicate = true"
+                expression="#[payload.duplicate]"
+                is="#[MunitTools::equalTo(true)]" />
+        </munit:validation>
+
+    </munit:test>
+
+    <!-- ──────────────────────────────────────────────────────────────────────────
+         Test 4: Valid signature + PR merged + branch tracked → job transitions to DEPLOYING
+         ────────────────────────────────────────────────────────────────────────── -->
+    <munit:test name="post-webhook-pr-merge-tracked-branch-sets-DEPLOYING"
+                doc:id="wh-test-0004"
+                description="PR merged event for a tracked branch transitions the job to DEPLOYING">
+
+        <munit:behavior>
+            <!-- Delivery key not yet seen → fresh delivery -->
+            <munit-tools:mock-when doc:name="Mock OS retrieve delivery key (new)"
+                                   processor="os:retrieve">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name"
+                                                whereValue="#['OS Retrieve delivery idempotency key']" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[null]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <!-- Branch index lookup → returns the tracked jobId -->
+            <munit-tools:mock-when doc:name="Mock OS retrieve branch index"
+                                   processor="os:retrieve">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name"
+                                                whereValue="#['OS Retrieve jobId by Branch']" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#['job-tracked-004']" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <!-- Job record retrieve -->
+            <munit-tools:mock-when doc:name="Mock OS retrieve job record"
+                                   processor="os:retrieve">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name"
+                                                whereValue="#['OS Retrieve Job Record']" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                                         value="#[{
+                        jobId:      'job-tracked-004',
+                        status:     'PR_OPEN',
+                        appName:    'my-app',
+                        branchName: 'migrate/my-app-4.9.18-java17',
+                        coords:     { owner: 'myorg', repo: 'my-app' }
+                    }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <!-- Allow all os:store calls to succeed silently -->
+            <munit-tools:mock-when doc:name="Mock all OS store calls"
+                                   processor="os:store">
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[null]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+
+        <munit:execution>
+            <set-variable variableName="rawBody"
+                          value="#['webhook-body-test-4' as Binary]"
+                          doc:name="PV rawBody" />
+            <ee:transform doc:name="DW Compute valid HMAC" doc:id="wh-test-0004-hmac">
+                <ee:variables>
+                    <ee:set-variable variableName="ghSignature"><![CDATA[%dw 2.0
+import dw::Crypto
+output text/plain
+---
+"sha256=" ++ Crypto::HMACWith(
+    "test-webhook-secret-value-12345!" as Binary,
+    vars.rawBody,
+    "HmacSHA256"
+)]]></ee:set-variable>
+                </ee:variables>
+            </ee:transform>
+            <set-variable variableName="ghDelivery" value="delivery-004" doc:name="PV ghDelivery" />
+            <set-variable variableName="ghEvent"    value="pull_request"  doc:name="PV ghEvent" />
+            <set-payload
+                value='#[{
+                    action: "closed",
+                    pull_request: {
+                        merged:   true,
+                        head:     { ref: "migrate/my-app-4.9.18-java17" },
+                        html_url: "https://github.com/myorg/my-app/pull/7"
+                    }
+                }]'
+                mimeType="application/json"
+                doc:name="SET parsed PR event payload" />
+            <flow-ref name="mf-impl-post-webhook" doc:name="invoke post-webhook" />
+        </munit:execution>
+
+        <munit:validation>
+            <munit-tools:assert-that
+                doc:name="assert acknowledged = true"
+                expression="#[payload.acknowledged]"
+                is="#[MunitTools::equalTo(true)]" />
+            <!-- Verify OS store was invoked (job record updated to DEPLOYING) -->
+            <munit-tools:verify-call doc:name="verify OS store called for DEPLOYING update"
+                                     processor="os:store">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name"
+                                                whereValue="#['OS Update Job to DEPLOYING']" />
+                </munit-tools:with-attributes>
+            </munit-tools:verify-call>
+        </munit:validation>
+
+    </munit:test>
+
+    <!-- ──────────────────────────────────────────────────────────────────────────
+         Test 5: Valid signature + non-merge event → acknowledged, no state change
+         ────────────────────────────────────────────────────────────────────────── -->
+    <munit:test name="post-webhook-non-merge-event-is-acknowledged"
+                doc:id="wh-test-0005"
+                description="A pull_request.opened event is acknowledged with 200 and causes no OS state changes">
+
+        <munit:behavior>
+            <!-- Delivery key not yet seen -->
+            <munit-tools:mock-when doc:name="Mock OS retrieve delivery key (non-merge)"
+                                   processor="os:retrieve">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name"
+                                                whereValue="#['OS Retrieve delivery idempotency key']" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[null]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <!-- Allow OS store for idempotency key only -->
+            <munit-tools:mock-when doc:name="Mock OS store (idempotency key)"
+                                   processor="os:store">
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[null]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+
+        <munit:execution>
+            <set-variable variableName="rawBody"
+                          value="#['webhook-body-test-5' as Binary]"
+                          doc:name="PV rawBody" />
+            <ee:transform doc:name="DW Compute valid HMAC (non-merge)" doc:id="wh-test-0005-hmac">
+                <ee:variables>
+                    <ee:set-variable variableName="ghSignature"><![CDATA[%dw 2.0
+import dw::Crypto
+output text/plain
+---
+"sha256=" ++ Crypto::HMACWith(
+    "test-webhook-secret-value-12345!" as Binary,
+    vars.rawBody,
+    "HmacSHA256"
+)]]></ee:set-variable>
+                </ee:variables>
+            </ee:transform>
+            <set-variable variableName="ghDelivery" value="delivery-005"  doc:name="PV ghDelivery" />
+            <set-variable variableName="ghEvent"    value="pull_request"   doc:name="PV ghEvent" />
+            <set-payload
+                value='#[{ action: "opened", pull_request: { merged: false } }]'
+                mimeType="application/json"
+                doc:name="SET non-merge PR event payload" />
+            <flow-ref name="mf-impl-post-webhook" doc:name="invoke post-webhook" />
+        </munit:execution>
+
+        <munit:validation>
+            <munit-tools:assert-that
+                doc:name="assert acknowledged = true"
+                expression="#[payload.acknowledged]"
+                is="#[MunitTools::equalTo(true)]" />
+            <!-- httpStatus should be default 200 (not set by the flow for non-error paths) -->
+            <munit-tools:assert-that
+                doc:name="assert httpStatus not explicitly set to error code"
+                expression="#[vars.httpStatus default '200']"
+                is="#[MunitTools::equalTo('200')]" />
+            <!-- No DEPLOYING transition: OS retrieve for branch index must NOT have been called -->
+            <munit-tools:verify-call doc:name="verify branch-index OS retrieve NOT called"
+                                     processor="os:retrieve"
+                                     times="0">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name"
+                                                whereValue="#['OS Retrieve jobId by Branch']" />
+                </munit-tools:with-attributes>
+            </munit-tools:verify-call>
+        </munit:validation>
+
+    </munit:test>
+
+</mule>

@@ -1,0 +1,5 @@
+# Test-environment properties — loaded when env=test
+# Only overrides / additions beyond config.yaml defaults needed for MUnit execution
+
+api:
+  id: "00000001"   # dummy API Manager instance ID satisfies API Autodiscovery at test startup

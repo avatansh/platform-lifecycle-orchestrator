@@ -1,0 +1,296 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+      xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns:os="http://www.mulesoft.org/schema/mule/os"
+      xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core          http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/munit         http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+        http://www.mulesoft.org/schema/mule/munit-tools   http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd
+        http://www.mulesoft.org/schema/mule/ee/core       http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+        http://www.mulesoft.org/schema/mule/os            http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd">
+
+    <!--
+        pf-get-job-status-suite.xml
+        Tests for the pf-get-job-status shared sub-flow.
+
+        pf-get-job-status:
+          · Reads vars.jobId
+          · Calls os:retrieve (throws OS:KEY_NOT_FOUND when job absent → mapped to 404)
+          · Builds a JobStatus response using statusMeta lookup table
+          · Conditionally adds branchName, prUrl, prNumber, completedAt, error fields
+
+        Test matrix:
+          1. PROCESSING status  → message + nextPollSeconds=5, no optional fields
+          2. PR_OPEN status     → message + nextPollSeconds=0 + prUrl + prNumber
+          3. DEPLOYED status    → message + nextPollSeconds=0 + completedAt
+          4. FAILED_COMMIT      → message + nextPollSeconds=0 + error field
+          5. Unknown status     → fallback message + nextPollSeconds=10 (no error in record)
+
+        All tests mock os:retrieve so the Object Store is never actually accessed.
+    -->
+    <munit:config name="pf-get-job-status-suite" doc:id="jss-suite-0001" />
+
+    <!-- ──────────────────────────────────────────────────────────────────────────
+         Test 1: PROCESSING — minimal fields; polling interval = 5 s
+         ────────────────────────────────────────────────────────────────────────── -->
+    <munit:test name="pf-get-job-status-PROCESSING"
+                doc:id="jss-test-0001"
+                description="PROCESSING status returns correct message, nextPollSeconds=5, and no optional fields">
+
+        <munit:behavior>
+            <!-- Mock the single os:retrieve in pf-get-job-status to return a PROCESSING record -->
+            <munit-tools:mock-when doc:name="Mock OS retrieve — PROCESSING job"
+                                   processor="os:retrieve">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                                         value="#[{ jobId: 'job-proc-001', status: 'PROCESSING', appName: 'test-app' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+
+        <munit:execution>
+            <set-variable variableName="jobId"
+                          value="job-proc-001"
+                          doc:name="PV SET jobId" />
+            <flow-ref name="pf-get-job-status" doc:name="invoke pf-get-job-status" />
+        </munit:execution>
+
+        <munit:validation>
+            <munit-tools:assert-that
+                doc:name="assert jobId echoed"
+                expression="#[payload.jobId]"
+                is="#[MunitTools::equalTo('job-proc-001')]" />
+            <munit-tools:assert-that
+                doc:name="assert status = PROCESSING"
+                expression="#[payload.status]"
+                is="#[MunitTools::equalTo('PROCESSING')]" />
+            <munit-tools:assert-that
+                doc:name="assert nextPollSeconds = 5"
+                expression="#[payload.nextPollSeconds]"
+                is="#[MunitTools::equalTo(5)]" />
+            <munit-tools:assert-that
+                doc:name="assert message is non-empty"
+                expression="#[payload.message]"
+                is="#[MunitTools::notNullValue()]" />
+            <!-- Optional fields must NOT be present for a minimal record -->
+            <munit-tools:assert-that
+                doc:name="assert prUrl absent"
+                expression="#[payload.prUrl?]"
+                is="#[MunitTools::equalTo(false)]" />
+            <munit-tools:assert-that
+                doc:name="assert error absent"
+                expression="#[payload.error?]"
+                is="#[MunitTools::equalTo(false)]" />
+            <munit-tools:assert-that
+                doc:name="assert completedAt absent"
+                expression="#[payload.completedAt?]"
+                is="#[MunitTools::equalTo(false)]" />
+        </munit:validation>
+
+    </munit:test>
+
+    <!-- ──────────────────────────────────────────────────────────────────────────
+         Test 2: PR_OPEN — nextPollSeconds=0, prUrl and prNumber included
+         ────────────────────────────────────────────────────────────────────────── -->
+    <munit:test name="pf-get-job-status-PR_OPEN"
+                doc:id="jss-test-0002"
+                description="PR_OPEN status returns nextPollSeconds=0 and includes prUrl and prNumber">
+
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="Mock OS retrieve — PR_OPEN job"
+                                   processor="os:retrieve">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                                         value="#[{
+                        jobId:    'job-pr-002',
+                        status:   'PR_OPEN',
+                        appName:  'test-app',
+                        prNumber: 42,
+                        prUrl:    'https://github.com/owner/repo/pull/42',
+                        branchName: 'migrate/test-app-4.9.18-java17'
+                    }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+
+        <munit:execution>
+            <set-variable variableName="jobId" value="job-pr-002" doc:name="PV SET jobId" />
+            <flow-ref name="pf-get-job-status" doc:name="invoke pf-get-job-status" />
+        </munit:execution>
+
+        <munit:validation>
+            <munit-tools:assert-that
+                doc:name="assert status = PR_OPEN"
+                expression="#[payload.status]"
+                is="#[MunitTools::equalTo('PR_OPEN')]" />
+            <munit-tools:assert-that
+                doc:name="assert nextPollSeconds = 0 (terminal for polling)"
+                expression="#[payload.nextPollSeconds]"
+                is="#[MunitTools::equalTo(0)]" />
+            <munit-tools:assert-that
+                doc:name="assert prUrl included"
+                expression="#[payload.prUrl]"
+                is="#[MunitTools::equalTo('https://github.com/owner/repo/pull/42')]" />
+            <munit-tools:assert-that
+                doc:name="assert prNumber included"
+                expression="#[payload.prNumber]"
+                is="#[MunitTools::equalTo(42)]" />
+            <munit-tools:assert-that
+                doc:name="assert branchName included"
+                expression="#[payload.branchName]"
+                is="#[MunitTools::equalTo('migrate/test-app-4.9.18-java17')]" />
+            <!-- DEPLOYED-only fields must be absent -->
+            <munit-tools:assert-that
+                doc:name="assert completedAt absent"
+                expression="#[payload.completedAt?]"
+                is="#[MunitTools::equalTo(false)]" />
+        </munit:validation>
+
+    </munit:test>
+
+    <!-- ──────────────────────────────────────────────────────────────────────────
+         Test 3: DEPLOYED — nextPollSeconds=0, completedAt included
+         ────────────────────────────────────────────────────────────────────────── -->
+    <munit:test name="pf-get-job-status-DEPLOYED"
+                doc:id="jss-test-0003"
+                description="DEPLOYED status returns nextPollSeconds=0 and includes completedAt">
+
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="Mock OS retrieve — DEPLOYED job"
+                                   processor="os:retrieve">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                                         value="#[{
+                        jobId:       'job-dep-003',
+                        status:      'DEPLOYED',
+                        appName:     'test-app',
+                        completedAt: '2025-06-01T12:00:00Z',
+                        branchName:  'migrate/test-app-4.9.18-java17',
+                        prUrl:       'https://github.com/owner/repo/pull/10',
+                        prNumber:    10
+                    }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+
+        <munit:execution>
+            <set-variable variableName="jobId" value="job-dep-003" doc:name="PV SET jobId" />
+            <flow-ref name="pf-get-job-status" doc:name="invoke pf-get-job-status" />
+        </munit:execution>
+
+        <munit:validation>
+            <munit-tools:assert-that
+                doc:name="assert status = DEPLOYED"
+                expression="#[payload.status]"
+                is="#[MunitTools::equalTo('DEPLOYED')]" />
+            <munit-tools:assert-that
+                doc:name="assert nextPollSeconds = 0"
+                expression="#[payload.nextPollSeconds]"
+                is="#[MunitTools::equalTo(0)]" />
+            <munit-tools:assert-that
+                doc:name="assert completedAt included"
+                expression="#[payload.completedAt]"
+                is="#[MunitTools::equalTo('2025-06-01T12:00:00Z')]" />
+            <!-- DEPLOYED success → no error -->
+            <munit-tools:assert-that
+                doc:name="assert error absent"
+                expression="#[payload.error?]"
+                is="#[MunitTools::equalTo(false)]" />
+        </munit:validation>
+
+    </munit:test>
+
+    <!-- ──────────────────────────────────────────────────────────────────────────
+         Test 4: FAILED_COMMIT — nextPollSeconds=0, error field included
+         ────────────────────────────────────────────────────────────────────────── -->
+    <munit:test name="pf-get-job-status-FAILED_COMMIT"
+                doc:id="jss-test-0004"
+                description="FAILED_COMMIT status returns nextPollSeconds=0 and includes the error field">
+
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="Mock OS retrieve — FAILED_COMMIT job"
+                                   processor="os:retrieve">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                                         value="#[{
+                        jobId:    'job-fail-004',
+                        status:   'FAILED_COMMIT',
+                        appName:  'test-app',
+                        error:    'GitHub API returned 422: Reference already exists'
+                    }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+
+        <munit:execution>
+            <set-variable variableName="jobId" value="job-fail-004" doc:name="PV SET jobId" />
+            <flow-ref name="pf-get-job-status" doc:name="invoke pf-get-job-status" />
+        </munit:execution>
+
+        <munit:validation>
+            <munit-tools:assert-that
+                doc:name="assert status = FAILED_COMMIT"
+                expression="#[payload.status]"
+                is="#[MunitTools::equalTo('FAILED_COMMIT')]" />
+            <munit-tools:assert-that
+                doc:name="assert nextPollSeconds = 0"
+                expression="#[payload.nextPollSeconds]"
+                is="#[MunitTools::equalTo(0)]" />
+            <munit-tools:assert-that
+                doc:name="assert error field included"
+                expression="#[payload.error]"
+                is="#[MunitTools::containsString('422')]" />
+        </munit:validation>
+
+    </munit:test>
+
+    <!-- ──────────────────────────────────────────────────────────────────────────
+         Test 5: Unknown / unrecognised status — fallback message, nextPollSeconds=10
+         ────────────────────────────────────────────────────────────────────────── -->
+    <munit:test name="pf-get-job-status-unknown-status"
+                doc:id="jss-test-0005"
+                description="An unrecognised status value returns the fallback message and nextPollSeconds=10">
+
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="Mock OS retrieve — unknown status job"
+                                   processor="os:retrieve">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                                         value="#[{
+                        jobId:   'job-unk-005',
+                        status:  'CUSTOM_STATE',
+                        appName: 'test-app'
+                    }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+
+        <munit:execution>
+            <set-variable variableName="jobId" value="job-unk-005" doc:name="PV SET jobId" />
+            <flow-ref name="pf-get-job-status" doc:name="invoke pf-get-job-status" />
+        </munit:execution>
+
+        <munit:validation>
+            <munit-tools:assert-that
+                doc:name="assert status echoed verbatim"
+                expression="#[payload.status]"
+                is="#[MunitTools::equalTo('CUSTOM_STATE')]" />
+            <!-- Fallback: nextPollSeconds = 10 -->
+            <munit-tools:assert-that
+                doc:name="assert fallback nextPollSeconds = 10"
+                expression="#[payload.nextPollSeconds]"
+                is="#[MunitTools::equalTo(10)]" />
+            <!-- Fallback message must mention the status value -->
+            <munit-tools:assert-that
+                doc:name="assert fallback message non-empty"
+                expression="#[payload.message]"
+                is="#[MunitTools::notNullValue()]" />
+        </munit:validation>
+
+    </munit:test>
+
+</mule>

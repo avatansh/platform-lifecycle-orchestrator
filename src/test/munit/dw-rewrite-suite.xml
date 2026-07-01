@@ -1,0 +1,399 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+      xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core          http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/munit         http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+        http://www.mulesoft.org/schema/mule/munit-tools   http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd
+        http://www.mulesoft.org/schema/mule/ee/core       http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+    <!--
+        dw-rewrite-suite.xml
+        Unit tests for the four DataWeave rewrite library modules:
+          · dwl::rewritePomProperties  — surgical <tag>value</tag> replacement in pom.xml text
+          · dwl::rewriteMuleArtifact   — update mule-artifact.json preserving other keys
+          · dwl::rewriteCiWorkflow     — bump java-version in a GitHub Actions YAML workflow
+          · dwl::rewriteMunitRuntime   — replace <runtimeVersion>…</runtimeVersion> in pom text
+
+        All tests are pure DataWeave — no connectors, no Object Store, no HTTP mocks needed.
+        Each test uses an ee:transform to invoke the module function and stores the result in
+        vars.result, then asserts directly on that variable.
+    -->
+    <munit:config name="dw-rewrite-suite" doc:id="dw-suite-0001" />
+
+    <!-- ══════════════════════════════════════════════════════════════════════════
+         rewritePomProperties
+         ══════════════════════════════════════════════════════════════════════════ -->
+
+    <!--
+        Test 1: Single property rewrite — app.runtime updated, other tags untouched.
+    -->
+    <munit:test name="rewritePomProperties-single-property"
+                doc:id="dw-test-0001"
+                description="rewritePomProperties updates a single target property and leaves all other tags unchanged">
+
+        <munit:execution>
+            <ee:transform doc:name="DW invoke rewritePomProperties (single)"
+                          doc:id="dw-test-0001-exec">
+                <ee:variables>
+                    <ee:set-variable variableName="result"><![CDATA[%dw 2.0
+import rewritePomProperties from dwl::rewritePomProperties
+output application/java
+var samplePom = "<?xml version=\"1.0\"?>
+<project>
+  <properties>
+    <app.runtime>4.6.0</app.runtime>
+    <java.version>8</java.version>
+    <mule.maven.plugin.version>4.5.0</mule.maven.plugin.version>
+  </properties>
+</project>"
+---
+rewritePomProperties(samplePom, [
+    { property: "app.runtime", to: "4.9.18" }
+])]]></ee:set-variable>
+                </ee:variables>
+            </ee:transform>
+        </munit:execution>
+
+        <munit:validation>
+            <!-- Updated property must contain new value -->
+            <munit-tools:assert-that
+                doc:name="assert app.runtime updated"
+                expression="#[vars.result]"
+                is="#[MunitTools::containsString('&lt;app.runtime&gt;4.9.18&lt;/app.runtime&gt;')]" />
+            <!-- Untouched properties must retain original values -->
+            <munit-tools:assert-that
+                doc:name="assert java.version unchanged"
+                expression="#[vars.result]"
+                is="#[MunitTools::containsString('&lt;java.version&gt;8&lt;/java.version&gt;')]" />
+            <munit-tools:assert-that
+                doc:name="assert old app.runtime value absent"
+                expression="#[vars.result contains '4.6.0']"
+                is="#[MunitTools::equalTo(false)]" />
+        </munit:validation>
+
+    </munit:test>
+
+    <!--
+        Test 2: Multiple property rewrites in one call — both updated, unrelated tag preserved.
+    -->
+    <munit:test name="rewritePomProperties-multiple-properties"
+                doc:id="dw-test-0002"
+                description="rewritePomProperties updates multiple target properties in a single pass">
+
+        <munit:execution>
+            <ee:transform doc:name="DW invoke rewritePomProperties (multiple)"
+                          doc:id="dw-test-0002-exec">
+                <ee:variables>
+                    <ee:set-variable variableName="result"><![CDATA[%dw 2.0
+import rewritePomProperties from dwl::rewritePomProperties
+output application/java
+var samplePom = "<properties>
+  <app.runtime>4.6.0</app.runtime>
+  <java.version>8</java.version>
+  <muleHttpConnectorVersion>1.9.0</muleHttpConnectorVersion>
+  <unrelated.tag>keep-me</unrelated.tag>
+</properties>"
+---
+rewritePomProperties(samplePom, [
+    { property: "app.runtime",              to: "4.9.18" },
+    { property: "java.version",             to: "17"     },
+    { property: "muleHttpConnectorVersion", to: "1.11.3" }
+])]]></ee:set-variable>
+                </ee:variables>
+            </ee:transform>
+        </munit:execution>
+
+        <munit:validation>
+            <munit-tools:assert-that
+                doc:name="assert app.runtime → 4.9.18"
+                expression="#[vars.result]"
+                is="#[MunitTools::containsString('&lt;app.runtime&gt;4.9.18&lt;/app.runtime&gt;')]" />
+            <munit-tools:assert-that
+                doc:name="assert java.version → 17"
+                expression="#[vars.result]"
+                is="#[MunitTools::containsString('&lt;java.version&gt;17&lt;/java.version&gt;')]" />
+            <munit-tools:assert-that
+                doc:name="assert muleHttpConnectorVersion → 1.11.3"
+                expression="#[vars.result]"
+                is="#[MunitTools::containsString('&lt;muleHttpConnectorVersion&gt;1.11.3&lt;/muleHttpConnectorVersion&gt;')]" />
+            <munit-tools:assert-that
+                doc:name="assert unrelated tag preserved"
+                expression="#[vars.result]"
+                is="#[MunitTools::containsString('&lt;unrelated.tag&gt;keep-me&lt;/unrelated.tag&gt;')]" />
+        </munit:validation>
+
+    </munit:test>
+
+    <!--
+        Test 3: No matching property — original text returned verbatim (no changes).
+    -->
+    <munit:test name="rewritePomProperties-no-match-is-noop"
+                doc:id="dw-test-0003"
+                description="rewritePomProperties returns original text unchanged when no edit tag exists">
+
+        <munit:execution>
+            <ee:transform doc:name="DW invoke rewritePomProperties (no match)"
+                          doc:id="dw-test-0003-exec">
+                <ee:variables>
+                    <ee:set-variable variableName="result"><![CDATA[%dw 2.0
+import rewritePomProperties from dwl::rewritePomProperties
+output application/java
+var samplePom = "<properties><other.tag>some-value</other.tag></properties>"
+---
+rewritePomProperties(samplePom, [
+    { property: "app.runtime", to: "4.9.18" }
+])]]></ee:set-variable>
+                </ee:variables>
+            </ee:transform>
+        </munit:execution>
+
+        <munit:validation>
+            <munit-tools:assert-that
+                doc:name="assert text unchanged"
+                expression="#[vars.result]"
+                is="#[MunitTools::equalTo('&lt;properties&gt;&lt;other.tag&gt;some-value&lt;/other.tag&gt;&lt;/properties&gt;')]" />
+        </munit:validation>
+
+    </munit:test>
+
+    <!-- ══════════════════════════════════════════════════════════════════════════
+         rewriteMuleArtifact
+         ══════════════════════════════════════════════════════════════════════════ -->
+
+    <!--
+        Test 4: File with only minMuleVersion — javaSpecificationVersions must be ADDED.
+    -->
+    <munit:test name="rewriteMuleArtifact-adds-javaSpecVersions"
+                doc:id="dw-test-0004"
+                description="rewriteMuleArtifact adds javaSpecificationVersions when not present and updates minMuleVersion">
+
+        <munit:execution>
+            <ee:transform doc:name="DW invoke rewriteMuleArtifact (add java spec)"
+                          doc:id="dw-test-0004-exec">
+                <ee:variables>
+                    <ee:set-variable variableName="result"><![CDATA[%dw 2.0
+import rewriteMuleArtifact from dwl::rewriteMuleArtifact
+output application/java
+var originalText = "{\"minMuleVersion\": \"4.4.0\"}"
+---
+rewriteMuleArtifact(originalText, "4.9.0", ["17"])]]></ee:set-variable>
+                </ee:variables>
+            </ee:transform>
+        </munit:execution>
+
+        <munit:validation>
+            <munit-tools:assert-that
+                doc:name="assert minMuleVersion updated"
+                expression="#[(read(vars.result, 'application/json')).minMuleVersion]"
+                is="#[MunitTools::equalTo('4.9.0')]" />
+            <munit-tools:assert-that
+                doc:name="assert javaSpecificationVersions added"
+                expression="#[(read(vars.result, 'application/json')).javaSpecificationVersions[0]]"
+                is="#[MunitTools::equalTo('17')]" />
+        </munit:validation>
+
+    </munit:test>
+
+    <!--
+        Test 5: File with existing keys — all are preserved, owned keys updated.
+    -->
+    <munit:test name="rewriteMuleArtifact-preserves-other-keys"
+                doc:id="dw-test-0005"
+                description="rewriteMuleArtifact preserves all keys not owned by the rewrite function">
+
+        <munit:execution>
+            <ee:transform doc:name="DW invoke rewriteMuleArtifact (preserve keys)"
+                          doc:id="dw-test-0005-exec">
+                <ee:variables>
+                    <ee:set-variable variableName="result"><![CDATA[%dw 2.0
+import rewriteMuleArtifact from dwl::rewriteMuleArtifact
+output application/java
+var originalText = "{\"minMuleVersion\": \"4.4.0\", \"javaSpecificationVersions\": [\"8\"], \"name\": \"my-app\", \"secureProperties\": [\"encrypt.key\"]}"
+---
+rewriteMuleArtifact(originalText, "4.9.0", ["17"])]]></ee:set-variable>
+                </ee:variables>
+            </ee:transform>
+        </munit:execution>
+
+        <munit:validation>
+            <ee:transform doc:name="DW parse result JSON" doc:id="dw-test-0005-parse">
+                <ee:variables>
+                    <ee:set-variable variableName="parsed">#[read(vars.result, 'application/json')]</ee:set-variable>
+                </ee:variables>
+            </ee:transform>
+            <munit-tools:assert-that
+                doc:name="assert minMuleVersion = 4.9.0"
+                expression="#[vars.parsed.minMuleVersion]"
+                is="#[MunitTools::equalTo('4.9.0')]" />
+            <munit-tools:assert-that
+                doc:name="assert javaSpecificationVersions = [17]"
+                expression="#[vars.parsed.javaSpecificationVersions[0]]"
+                is="#[MunitTools::equalTo('17')]" />
+            <munit-tools:assert-that
+                doc:name="assert name preserved"
+                expression="#[vars.parsed.name]"
+                is="#[MunitTools::equalTo('my-app')]" />
+            <munit-tools:assert-that
+                doc:name="assert secureProperties preserved"
+                expression="#[vars.parsed.secureProperties[0]]"
+                is="#[MunitTools::equalTo('encrypt.key')]" />
+        </munit:validation>
+
+    </munit:test>
+
+    <!-- ══════════════════════════════════════════════════════════════════════════
+         rewriteCiWorkflow
+         ══════════════════════════════════════════════════════════════════════════ -->
+
+    <!--
+        Test 6: java-version with single-quotes — bumped, surrounding chars preserved.
+    -->
+    <munit:test name="rewriteCiWorkflow-quoted-java-version"
+                doc:id="dw-test-0006"
+                description="rewriteCiWorkflow bumps java-version when wrapped in single quotes">
+
+        <munit:execution>
+            <ee:transform doc:name="DW invoke rewriteCiWorkflow (quoted)"
+                          doc:id="dw-test-0006-exec">
+                <ee:variables>
+                    <ee:set-variable variableName="result"><![CDATA[%dw 2.0
+import rewriteCiWorkflow from dwl::rewriteCiWorkflow
+output application/java
+var sampleYaml = "      - name: Set up JDK\n        uses: actions/setup-java@v3\n        with:\n          java-version: '8'\n          distribution: 'temurin'"
+---
+rewriteCiWorkflow(sampleYaml, "17")]]></ee:set-variable>
+                </ee:variables>
+            </ee:transform>
+        </munit:execution>
+
+        <munit:validation>
+            <munit-tools:assert-that
+                doc:name="assert java-version bumped to 17"
+                expression="#[vars.result]"
+                is="#[MunitTools::containsString(&quot;java-version: '17'&quot;)]" />
+            <munit-tools:assert-that
+                doc:name="assert old value 8 absent"
+                expression="#[vars.result contains &quot;java-version: '8'&quot;]"
+                is="#[MunitTools::equalTo(false)]" />
+        </munit:validation>
+
+    </munit:test>
+
+    <!--
+        Test 7: java-version without quotes — bumped, no quotes added/removed.
+    -->
+    <munit:test name="rewriteCiWorkflow-unquoted-java-version"
+                doc:id="dw-test-0007"
+                description="rewriteCiWorkflow bumps java-version when unquoted">
+
+        <munit:execution>
+            <ee:transform doc:name="DW invoke rewriteCiWorkflow (unquoted)"
+                          doc:id="dw-test-0007-exec">
+                <ee:variables>
+                    <ee:set-variable variableName="result"><![CDATA[%dw 2.0
+import rewriteCiWorkflow from dwl::rewriteCiWorkflow
+output application/java
+var sampleYaml = "          java-version: 11\n          distribution: temurin"
+---
+rewriteCiWorkflow(sampleYaml, "17")]]></ee:set-variable>
+                </ee:variables>
+            </ee:transform>
+        </munit:execution>
+
+        <munit:validation>
+            <munit-tools:assert-that
+                doc:name="assert java-version: 17 present"
+                expression="#[vars.result]"
+                is="#[MunitTools::containsString('java-version: 17')]" />
+            <munit-tools:assert-that
+                doc:name="assert java-version: 11 absent"
+                expression="#[vars.result contains 'java-version: 11']"
+                is="#[MunitTools::equalTo(false)]" />
+        </munit:validation>
+
+    </munit:test>
+
+    <!-- ══════════════════════════════════════════════════════════════════════════
+         rewriteMunitRuntime
+         ══════════════════════════════════════════════════════════════════════════ -->
+
+    <!--
+        Test 8: runtimeVersion element present — value replaced.
+    -->
+    <munit:test name="rewriteMunitRuntime-replaces-version"
+                doc:id="dw-test-0008"
+                description="rewriteMunitRuntime replaces the runtimeVersion element value">
+
+        <munit:execution>
+            <ee:transform doc:name="DW invoke rewriteMunitRuntime"
+                          doc:id="dw-test-0008-exec">
+                <ee:variables>
+                    <ee:set-variable variableName="result"><![CDATA[%dw 2.0
+import rewriteMunitRuntime from dwl::rewriteMunitRuntime
+output application/java
+var samplePom = "<configuration>
+  <runtimeVersion>4.6.0</runtimeVersion>
+  <coverageReportFormats>
+    <coverageReportFormat>html</coverageReportFormat>
+  </coverageReportFormats>
+</configuration>"
+---
+rewriteMunitRuntime(samplePom, "4.9.18")]]></ee:set-variable>
+                </ee:variables>
+            </ee:transform>
+        </munit:execution>
+
+        <munit:validation>
+            <munit-tools:assert-that
+                doc:name="assert new runtimeVersion present"
+                expression="#[vars.result]"
+                is="#[MunitTools::containsString('&lt;runtimeVersion&gt;4.9.18&lt;/runtimeVersion&gt;')]" />
+            <munit-tools:assert-that
+                doc:name="assert old runtimeVersion absent"
+                expression="#[vars.result contains '4.6.0']"
+                is="#[MunitTools::equalTo(false)]" />
+            <!-- Surrounding configuration must be preserved -->
+            <munit-tools:assert-that
+                doc:name="assert coverageReportFormat preserved"
+                expression="#[vars.result]"
+                is="#[MunitTools::containsString('coverageReportFormat')]" />
+        </munit:validation>
+
+    </munit:test>
+
+    <!--
+        Test 9: runtimeVersion element absent — original text returned unchanged (no-op).
+    -->
+    <munit:test name="rewriteMunitRuntime-absent-is-noop"
+                doc:id="dw-test-0009"
+                description="rewriteMunitRuntime returns original text unchanged when runtimeVersion element is absent">
+
+        <munit:execution>
+            <ee:transform doc:name="DW invoke rewriteMunitRuntime (absent)"
+                          doc:id="dw-test-0009-exec">
+                <ee:variables>
+                    <ee:set-variable variableName="result"><![CDATA[%dw 2.0
+import rewriteMunitRuntime from dwl::rewriteMunitRuntime
+output application/java
+var samplePom = "<configuration><threads>4</threads></configuration>"
+---
+rewriteMunitRuntime(samplePom, "4.9.18")]]></ee:set-variable>
+                </ee:variables>
+            </ee:transform>
+        </munit:execution>
+
+        <munit:validation>
+            <munit-tools:assert-that
+                doc:name="assert text unchanged"
+                expression="#[vars.result]"
+                is="#[MunitTools::equalTo('&lt;configuration&gt;&lt;threads&gt;4&lt;/threads&gt;&lt;/configuration&gt;')]" />
+        </munit:validation>
+
+    </munit:test>
+
+</mule>

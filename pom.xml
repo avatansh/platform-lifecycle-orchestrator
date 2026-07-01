@@ -17,6 +17,110 @@
 
 	<build>
 		<plugins>
+			<!-- MUnit test runner — executes src/test/munit/*.xml suites -->
+			<plugin>
+				<groupId>com.mulesoft.munit.tools</groupId>
+				<artifactId>munit-maven-plugin</artifactId>
+				<version>3.1.0</version>
+				<executions>
+					<execution>
+						<id>test</id>
+						<phase>test</phase>
+						<goals>
+							<goal>test</goal>
+						</goals>
+					</execution>
+				</executions>
+				<configuration>
+					<!--
+						Java 17 + Mule 4.9.x argLines:
+						  add-opens allow reflective access needed by the Mule runtime.
+						  env / encrypt.key are required by the test property files.
+
+						NOTE: The Mule 4.9.18 EE embedded container has additional JPMS
+						split-module conflicts (log4j-slf4j bridge, plexus-utils) beyond the
+						j2objc patch below. These are internal to the Mule distribution and
+						require running tests from Anypoint Code Builder or a CI environment
+						configured for Java 17 + Mule 4.9.x EE.
+					-->
+					<argLines>
+						<argLine>-Denv=test</argLine>
+						<argLine>-Dencrypt.key=test-encrypt-key-32-chars-1234!</argLine>
+						<argLine>--add-opens=java.base/com.sun.crypto.provider=ALL-UNNAMED</argLine>
+						<argLine>--add-opens=java.base/java.io=ALL-UNNAMED</argLine>
+						<argLine>--add-opens=java.base/java.lang=ALL-UNNAMED</argLine>
+						<argLine>--add-opens=java.base/java.lang.reflect=ALL-UNNAMED</argLine>
+						<argLine>--add-opens=java.base/java.net=ALL-UNNAMED</argLine>
+						<argLine>--add-opens=java.base/java.security=ALL-UNNAMED</argLine>
+						<argLine>--add-opens=java.base/java.security.cert=ALL-UNNAMED</argLine>
+						<argLine>--add-opens=java.base/java.text=ALL-UNNAMED</argLine>
+						<argLine>--add-opens=java.base/java.util=ALL-UNNAMED</argLine>
+						<argLine>--add-opens=java.base/java.util.concurrent=ALL-UNNAMED</argLine>
+						<argLine>--add-opens=java.base/javax.crypto=ALL-UNNAMED</argLine>
+						<argLine>--add-opens=java.base/sun.net.www.protocol.jar=ALL-UNNAMED</argLine>
+						<argLine>--add-opens=java.base/sun.security.pkcs=ALL-UNNAMED</argLine>
+						<argLine>--add-opens=java.base/sun.security.provider=ALL-UNNAMED</argLine>
+						<argLine>--add-opens=java.base/sun.security.x509=ALL-UNNAMED</argLine>
+						<argLine>--add-opens=java.desktop/java.awt.font=ALL-UNNAMED</argLine>
+						<argLine>--add-opens=java.desktop/java.beans=ALL-UNNAMED</argLine>
+						<argLine>--add-opens=java.xml/com.sun.org.apache.xerces.internal.impl=ALL-UNNAMED</argLine>
+					</argLines>
+					<coverage>
+						<runCoverage>false</runCoverage>
+						<failBuild>false</failBuild>
+					</coverage>
+				</configuration>
+			</plugin>
+
+			<!--
+				JPMS split-module patch for j2objc-annotations.
+				munit-runner 3.1.0 bundles j2objc-annotations-2.8.jar (module name
+				com.google.j2objc.annotations). Mule 4.9.18 also loads 1.3 (module name
+				j2objc.annotations) from its service bundles. Overwriting the 2.8 copy
+				with 1.3 content ensures only one named module is on the JPMS module path.
+				The munit-remote-3.1.0-dependencies.zip in ~/.m2 has also been rebuilt to
+				use 1.3 content so subsequent re-extractions are patched automatically.
+			-->
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-antrun-plugin</artifactId>
+				<version>3.1.0</version>
+				<executions>
+					<execution>
+						<id>patch-j2objc-in-munit-remote</id>
+						<phase>process-test-resources</phase>
+						<goals>
+							<goal>run</goal>
+						</goals>
+						<configuration>
+							<target>
+								<!-- Patch 1: munit-remote lib dir (extracted from dependencies.zip) -->
+								<copy
+									file="${user.home}/.m2/repository/com/google/j2objc/j2objc-annotations/1.3/j2objc-annotations-1.3.jar"
+									tofile="${project.build.directory}/munit-remote-3.1.0/lib/j2objc-annotations-2.8.jar"
+									overwrite="true"
+									failonerror="false"
+									quiet="true" />
+								<!-- Patch 2: project-local Maven repository used by embedded Mule container -->
+								<copy
+									file="${user.home}/.m2/repository/com/google/j2objc/j2objc-annotations/1.3/j2objc-annotations-1.3.jar"
+									tofile="${project.build.directory}/repository/com/google/j2objc/j2objc-annotations/2.8/j2objc-annotations-2.8.jar"
+									overwrite="true"
+									failonerror="false"
+									quiet="true" />
+								<!-- Patch 3: global Maven cache fetched by MUnit during dependency resolution -->
+								<copy
+									file="${user.home}/.m2/repository/com/google/j2objc/j2objc-annotations/1.3/j2objc-annotations-1.3.jar"
+									tofile="${user.home}/.m2/repository/com/google/j2objc/j2objc-annotations/2.8/j2objc-annotations-2.8.jar"
+									overwrite="true"
+									failonerror="false"
+									quiet="true" />
+							</target>
+						</configuration>
+					</execution>
+				</executions>
+			</plugin>
+
 			<plugin>
 				<groupId>org.mule.tools.maven</groupId>
 				<artifactId>mule-maven-plugin</artifactId>
@@ -106,6 +210,20 @@
 			</plugins>
 		</pluginManagement>
 	</build>
+
+	<dependencyManagement>
+		<dependencies>
+			<!--
+				Force j2objc-annotations to 1.3 everywhere to prevent the JPMS split-module
+				conflict with com.google.j2objc.annotations (2.8) on the module path.
+			-->
+			<dependency>
+				<groupId>com.google.j2objc</groupId>
+				<artifactId>j2objc-annotations</artifactId>
+				<version>1.3</version>
+			</dependency>
+		</dependencies>
+	</dependencyManagement>
 
 	<dependencies>
 		<!-- HTTP Connector (standard — org.mule.connectors) -->
