@@ -1,0 +1,33 @@
+# Deploy the orchestrator to CloudHub 2.0. Delegates to the shared reusable
+# workflow. The orchestrator uses the secure-properties module, so it passes:
+#   • ENCRYPT_KEY secret  → -Dencrypt.key (AES master key for config-secure-*.yaml)
+#   • extra-maven-args    → -Dch2.runtimeEnv=<env> so it loads config-<env>.yaml
+#
+# NOTE: the orchestrator is not upgraded by itself, so no jobId is in its commits
+# and the cd-result callback is naturally skipped.
+#
+# For production, pin @main to a tag/SHA (e.g. @v1) once mule-ci-cd is released.
+name: Deploy to CH2.0
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Anypoint environment"
+        required: true
+        default: dev
+      runtimeEnv:
+        description: "Runtime env (selects config-<env>.yaml)"
+        required: true
+        default: dev
+
+jobs:
+  deploy:
+    uses: avatansh/mule-ci-cd/.github/workflows/deploy-ch2.yml@main
+    with:
+      environment: ${{ github.event.inputs.environment }}
+      target: ${{ vars.CH2_TARGET || 'Cloudhub-US-East-2' }}
+      replicas: ${{ vars.CH2_REPLICAS || '1' }}
+      vcores: ${{ vars.CH2_VCORES || '0.1' }}
+      extra-maven-args: "-Dch2.runtimeEnv=${{ github.event.inputs.runtimeEnv }}"
+    secrets: inherit

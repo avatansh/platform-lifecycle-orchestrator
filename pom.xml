@@ -16,6 +16,21 @@
 		<!-- MUnit 3.6.3+ is REQUIRED on Mule 4.9 / Java 17 (fixes W-20335051:
 		     "java.naming not open to MUnit starter"). Drives runner, tools, and plugin. -->
 		<munit.version>3.6.3</munit.version>
+
+		<!-- ══════════════════════════════════════════════════════════════════
+		     CloudHub 2.0 deploy knobs — property-driven so the shared CI deploy
+		     workflow (mule-ci-cd/deploy-ch2.yml) can override every value with -D.
+		     Defaults below keep a plain local `mvn clean deploy -DmuleDeploy` working.
+		     ══════════════════════════════════════════════════════════════════ -->
+		<ch2.appName>${project.artifactId}</ch2.appName>
+		<ch2.muleVersion>${app.runtime}</ch2.muleVersion>
+		<ch2.javaVersion>17</ch2.javaVersion>
+		<ch2.environment>dev</ch2.environment>
+		<ch2.target>Cloudhub-US-East-2</ch2.target>
+		<ch2.replicas>1</ch2.replicas>
+		<ch2.vCores>0.1</ch2.vCores>
+		<!-- Runtime env selects config-${env}.yaml + config-secure-${env}.yaml at boot -->
+		<ch2.runtimeEnv>dev</ch2.runtimeEnv>
 	</properties>
 
 	<build>
@@ -70,12 +85,14 @@
 					<cloudhub2Deployment>
 						<uri>https://anypoint.mulesoft.com</uri>
 						<provider>MC</provider>
-						<environment>dev</environment>
-						<target>Cloudhub-US-East-2</target>
-						<muleVersion>${app.runtime}</muleVersion>
-						<applicationName>${project.artifactId}</applicationName>
+						<environment>${ch2.environment}</environment>
+						<target>${ch2.target}</target>
+						<muleVersion>${ch2.muleVersion}</muleVersion>
+						<javaVersion>${ch2.javaVersion}</javaVersion>
+						<applicationName>${ch2.appName}</applicationName>
 						<businessGroupId>2e14f8c6-4d60-481b-bfb6-798695efc8f4</businessGroupId>
-						<replicas>1</replicas>
+						<replicas>${ch2.replicas}</replicas>
+						<vCores>${ch2.vCores}</vCores>
 						<!--
 							Connected App auth for programmatic deploy. NO secret literals here:
 							values resolve from .mvn/settings.xml (env-var backed) or -D overrides.
@@ -90,7 +107,7 @@
 						</deploymentSettings>
 						<!-- Non-secret runtime properties -->
 						<properties>
-							<env>dev</env>
+							<env>${ch2.runtimeEnv}</env>
 						</properties>
 						<!--
 							Secret runtime properties. CloudHub 2.0 encrypts these before storing,

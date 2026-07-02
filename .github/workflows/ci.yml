@@ -1,0 +1,16 @@
+# CI — build + MUnit for the orchestrator. Delegates to the shared reusable
+# workflow so it stays identical to every other Mule repo.
+#
+# For production, pin @main to a tag/SHA (e.g. @v1) once mule-ci-cd is released.
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  munit:
+    uses: avatansh/mule-ci-cd/.github/workflows/munit.yml@main
+    secrets: inherit
