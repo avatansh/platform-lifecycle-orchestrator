@@ -96,7 +96,7 @@
                                 </os:store>
                                 <try doc:name="TRY release lock (non-fatal)" doc:id="pfrc0001-0001-0001-0001-000000000026">
                                     <os:remove key="#['lock::' ++ (vars.rec.appName default '')]"
-                                               objectStore="jobStore"
+                                               objectStore="locksStore"
                                                doc:name="OS Remove lock" doc:id="pfrc0001-0001-0001-0001-000000000027" />
                                     <error-handler>
                                         <on-error-continue type="ANY" doc:id="pfrc0001-0001-0001-0001-000000000028">
@@ -122,8 +122,107 @@
 
                     <when expression="#[vars.isStale and vars.rec.status == 'DEPLOYING']"
                           doc:name="DEPLOYING stale" doc:id="pfrc0001-0001-0001-0001-000000000034">
-                        <logger level="DEBUG" doc:name="LOG DEBUG DEPLOYING awaiting cd-result" doc:id="pfrc0001-0001-0001-0001-000000000035"
-                                message="#['LOG DEBUG | flow=pf-reconcile | still DEPLOYING beyond threshold, awaiting cd-result | jobId=' ++ vars.k]" />
+
+                        <!-- Missed cd-result callback (timeout). Per ADR-015, make ONE Application
+                             Manager call to determine the real outcome instead of polling. -->
+                        <choice doc:name="CHOICE verify enabled?" doc:id="pfrc0001-0001-0001-0001-000000000041">
+                            <when expression="#[(p('anypoint.verify.enabled') default 'true') == 'true']"
+                                  doc:name="verify enabled" doc:id="pfrc0001-0001-0001-0001-000000000042">
+
+                                <set-variable variableName="vfyApp" value="#[vars.rec.appName]"
+                                              doc:name="PV SET vfyApp" doc:id="pfrc0001-0001-0001-0001-000000000043" />
+                                <set-variable variableName="vfyEnv" value="#[vars.rec.environment default '']"
+                                              doc:name="PV SET vfyEnv" doc:id="pfrc0001-0001-0001-0001-000000000044" />
+                                <set-variable variableName="vfyOrgId" value="#[vars.rec.coords.orgId default p('anypoint.defaultOrgId')]"
+                                              doc:name="PV SET vfyOrgId" doc:id="pfrc0001-0001-0001-0001-000000000045" />
+                                <flow-ref name="pf-verify-deployment" doc:name="pf-verify-deployment"
+                                          doc:id="pfrc0001-0001-0001-0001-000000000046" />
+
+                                <choice doc:name="CHOICE platform verdict?" doc:id="pfrc0001-0001-0001-0001-000000000047">
+
+                                    <when expression="#[(vars.verify.verified default false) and (vars.verify.healthy default false)]"
+                                          doc:name="platform healthy → DEPLOYED" doc:id="pfrc0001-0001-0001-0001-000000000048">
+                                        <os:retrieve key="#[vars.k]" objectStore="jobStore"
+                                                     doc:name="OS Re-retrieve before DEPLOYED" doc:id="pfrc0001-0001-0001-0001-000000000049">
+                                            <os:default-value>#[{}]</os:default-value>
+                                        </os:retrieve>
+                                        <ee:transform doc:name="DW DEPLOYED (reconciled)" doc:id="pfrc0001-0001-0001-0001-000000000050">
+                                            <ee:message><ee:set-payload><![CDATA[%dw 2.0 output application/json
+--- payload ++ { status: "DEPLOYED", platformVerified: true, platformStatus: (vars.verify.status default null),
+    platformRuntimeVersion: (vars.verify.runtimeVersion default null),
+    completedAt: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
+    updatedAt: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"} }]]></ee:set-payload></ee:message>
+                                        </ee:transform>
+                                        <os:store key="#[vars.k]" objectStore="jobStore"
+                                                  doc:name="OS Store DEPLOYED" doc:id="pfrc0001-0001-0001-0001-000000000051">
+                                            <os:value>#[payload]</os:value>
+                                        </os:store>
+                                        <try doc:name="TRY release lock (non-fatal)" doc:id="pfrc0001-0001-0001-0001-000000000052">
+                                            <os:remove key="#['lock::' ++ (vars.rec.appName default '')]"
+                                                       objectStore="locksStore"
+                                                       doc:name="OS Remove lock" doc:id="pfrc0001-0001-0001-0001-000000000053" />
+                                            <error-handler>
+                                                <on-error-continue type="ANY" doc:id="pfrc0001-0001-0001-0001-000000000054">
+                                                    <logger level="DEBUG" doc:name="LOG DEBUG lock skip" doc:id="pfrc0001-0001-0001-0001-000000000055"
+                                                            message="#['LOG DEBUG | flow=pf-reconcile | lock release skipped | app=' ++ (vars.rec.appName default '?')]" />
+                                                </on-error-continue>
+                                            </error-handler>
+                                        </try>
+                                        <set-variable variableName="fixed" value="#[vars.fixed + 1]"
+                                                      doc:name="PV fixed++" doc:id="pfrc0001-0001-0001-0001-000000000056" />
+                                        <logger level="INFO" doc:name="LOG INFO DEPLOYING→DEPLOYED" doc:id="pfrc0001-0001-0001-0001-000000000057"
+                                                message="#['LOG INFO | flow=pf-reconcile | reconciled DEPLOYING→DEPLOYED (missed cd-result, platform confirmed) | jobId=' ++ vars.k ++ ' | platformStatus=' ++ (vars.verify.status default '?')]" />
+                                    </when>
+
+                                    <when expression="#[(vars.verify.verified default false) and not (vars.verify.healthy default false)]"
+                                          doc:name="platform unhealthy → FAILED_DEPLOY" doc:id="pfrc0001-0001-0001-0001-000000000058">
+                                        <os:retrieve key="#[vars.k]" objectStore="jobStore"
+                                                     doc:name="OS Re-retrieve before FAILED_DEPLOY" doc:id="pfrc0001-0001-0001-0001-000000000059">
+                                            <os:default-value>#[{}]</os:default-value>
+                                        </os:retrieve>
+                                        <ee:transform doc:name="DW FAILED_DEPLOY (reconciled)" doc:id="pfrc0001-0001-0001-0001-000000000060">
+                                            <ee:message><ee:set-payload><![CDATA[%dw 2.0 output application/json
+--- payload ++ { status: "FAILED_DEPLOY",
+    error: "cd-result timed out; platform status=" ++ (vars.verify.status default "UNKNOWN"),
+    platformVerified: true, platformStatus: (vars.verify.status default null),
+    completedAt: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
+    updatedAt: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"} }]]></ee:set-payload></ee:message>
+                                        </ee:transform>
+                                        <os:store key="#[vars.k]" objectStore="jobStore"
+                                                  doc:name="OS Store FAILED_DEPLOY" doc:id="pfrc0001-0001-0001-0001-000000000061">
+                                            <os:value>#[payload]</os:value>
+                                        </os:store>
+                                        <try doc:name="TRY release lock (non-fatal)" doc:id="pfrc0001-0001-0001-0001-000000000062">
+                                            <os:remove key="#['lock::' ++ (vars.rec.appName default '')]"
+                                                       objectStore="locksStore"
+                                                       doc:name="OS Remove lock" doc:id="pfrc0001-0001-0001-0001-000000000063" />
+                                            <error-handler>
+                                                <on-error-continue type="ANY" doc:id="pfrc0001-0001-0001-0001-000000000064">
+                                                    <logger level="DEBUG" doc:name="LOG DEBUG lock skip" doc:id="pfrc0001-0001-0001-0001-000000000065"
+                                                            message="#['LOG DEBUG | flow=pf-reconcile | lock release skipped | app=' ++ (vars.rec.appName default '?')]" />
+                                                </on-error-continue>
+                                            </error-handler>
+                                        </try>
+                                        <set-variable variableName="fixed" value="#[vars.fixed + 1]"
+                                                      doc:name="PV fixed++" doc:id="pfrc0001-0001-0001-0001-000000000066" />
+                                        <logger level="WARN" doc:name="LOG WARN DEPLOYING→FAILED_DEPLOY" doc:id="pfrc0001-0001-0001-0001-000000000067"
+                                                message="#['LOG WARN | flow=pf-reconcile | reconciled DEPLOYING→FAILED_DEPLOY (missed cd-result, platform unhealthy) | jobId=' ++ vars.k ++ ' | platformStatus=' ++ (vars.verify.status default '?')]" />
+                                    </when>
+
+                                    <otherwise doc:name="platform unverified → leave" doc:id="pfrc0001-0001-0001-0001-000000000068">
+                                        <logger level="DEBUG" doc:name="LOG DEBUG platform unreachable" doc:id="pfrc0001-0001-0001-0001-000000000069"
+                                                message="#['LOG DEBUG | flow=pf-reconcile | DEPLOYING stale but platform unverified, retry next sweep | jobId=' ++ vars.k]" />
+                                    </otherwise>
+
+                                </choice>
+
+                            </when>
+                            <otherwise doc:name="verify disabled → leave" doc:id="pfrc0001-0001-0001-0001-000000000070">
+                                <logger level="DEBUG" doc:name="LOG DEBUG DEPLOYING awaiting cd-result" doc:id="pfrc0001-0001-0001-0001-000000000035"
+                                        message="#['LOG DEBUG | flow=pf-reconcile | still DEPLOYING beyond threshold, verify disabled, awaiting cd-result | jobId=' ++ vars.k]" />
+                            </otherwise>
+                        </choice>
+
                     </when>
 
                     <otherwise doc:name="not stale or non-reconcilable" doc:id="pfrc0001-0001-0001-0001-000000000036">

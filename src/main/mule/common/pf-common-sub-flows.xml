@@ -35,6 +35,17 @@
         doc:id="pfcs0002-0002-0002-0002-000000000001"
         keyGenerationExpression="#['app-registry-static']" />
 
+    <!--
+        repoBranchCachingStrategy: per-repo cache for the GitHub default-branch discovery
+        lookup. Keyed by owner/repo so each repo's default branch is fetched at most once
+        per refresh window. Uses the default in-memory managed store (no OSv2 TPS consumed).
+    -->
+    <ee:object-store-caching-strategy
+        name="repoBranchCachingStrategy"
+        doc:name="Repo Default-Branch Caching Strategy"
+        doc:id="pfcs0003-0003-0003-0003-000000000001"
+        keyGenerationExpression="#['repo-default-branch::' ++ (vars.coords.owner default '') ++ '/' ++ (vars.coords.repo default '')]" />
+
     <!-- ==========================================================================
          pf-load-matrix
          ──────────────────────────────────────────────────────────────────────────
@@ -214,7 +225,8 @@ readUrl("classpath://matrix/compatibility-matrix.yaml", "application/yaml")]]></
          Reads payload as the request body (transport-agnostic; may be null/empty):
            { owner?, repo?, appPath?, defaultBranch?, orgId? }
 
-         Precedence — first non-null value wins for each field:
+         Precedence for owner / repo / appPath / orgId — first non-null wins (registry is
+         authoritative for governance, so it beats a request override):
            1. Registry entry   — classpath://registry/app-registry.yaml → apps[vars.appName]
            2. Request override — same-named field on the request body (payload at call-time)
            3. Convention default (property placeholders):
@@ -222,9 +234,13 @@ readUrl("classpath://matrix/compatibility-matrix.yaml", "application/yaml")]]></
                 repo          → p('naming.repoEqualsAppName')=='true'  ? vars.appName : null
                 appPath       → p('naming.appPathAtRoot')=='true'      ? '.'           : null
                 orgId         → p('anypoint.defaultOrgId')
-                defaultBranch → p('github.defaultBranch')   [config fallback only; pf-assess-app
-                                                              may later discover the real default
-                                                              branch from the GitHub Repo API]
+
+         Precedence for defaultBranch — USER INPUT FIRST (a caller may target a specific
+         branch for this run), then registry, then LIVE discovery, then config:
+           1. Request field    — req.branch (preferred) or req.defaultBranch (legacy alias)
+           2. Registry entry   — apps[vars.appName].defaultBranch
+           3. GitHub discovery — GET /repos/{owner}/{repo} → default_branch (cached per repo)
+           4. Config fallback  — p('github.defaultBranch')  [only if discovery fails]
 
          Governance rules (evaluated in order):
            a) If p('registry.enforceAllowList')=='true' AND apps[vars.appName] is null
@@ -369,13 +385,18 @@ var resolvedOrgId =
     default p('anypoint.defaultOrgId')
 
 // ── defaultBranch ─────────────────────────────────────────────────────────
-//   Tier 3 convention: p('github.defaultBranch') — config fallback only.
-//   pf-assess-app may later discover the real default branch via the GitHub
-//   Repo API and update vars.coords.defaultBranch with the authoritative value.
+//   Precedence — USER INPUT FIRST (initiation semantics: the caller chooses the
+//   branch to change for THIS run; it is not a webhook-driven correlation):
+//     1. req.branch          — explicit user-supplied branch (REST/MCP request field)
+//     2. req.defaultBranch   — legacy alias for the same intent
+//     3. registry entry      — governed per-app default
+//   If none of the above resolves a value this stays null; the block AFTER this
+//   transform then discovers the repository's real default_branch from the GitHub
+//   Repo API (cached), and only falls back to p('github.defaultBranch') on failure.
 var resolvedBranch =
-    (regEntry.defaultBranch     default null)
-    default (req.defaultBranch  default null)
-    default p('github.defaultBranch')
+    (req.branch                default null)
+    default (req.defaultBranch default null)
+    default (regEntry.defaultBranch default null)
 ---
 {
     owner:         resolvedOwner,
@@ -415,6 +436,73 @@ var resolvedBranch =
                         doc:name="LOG DEBUG Coordinates Resolved"
                         doc:id="pfrc0001-0001-0001-0001-000000000019"
                         message="#['LOG DEBUG | flow=pf-resolve-coordinates | correlationId=' ++ correlationId ++ ' | app=' ++ vars.appName ++ ' | owner=' ++ (vars.coords.owner default '') ++ ' | repo=' ++ (vars.coords.repo default '') ++ ' | appPath=' ++ (vars.coords.appPath default '') ++ ' | orgId=' ++ (vars.coords.orgId default '') ++ ' | defaultBranch=' ++ (vars.coords.defaultBranch default '')]" />
+            </otherwise>
+        </choice>
+
+        <!--
+            DEFAULT-BRANCH DISCOVERY (fallback only).
+            Runs ONLY when neither the caller nor the registry supplied a branch. Instead of
+            blindly assuming a static config value, discover the repository's real default
+            branch from the GitHub Repo API. The result is cached per-repo
+            (repoBranchCachingStrategy, in-memory — no OSv2 cost). On ANY failure the config
+            default p('github.defaultBranch') is used, so resolution never breaks.
+        -->
+        <choice doc:name="CHOICE branch already known?"
+                doc:id="pfbr0001-0001-0001-0001-000000000001"
+                doc:description="Only call GitHub when no user/registry branch was resolved">
+            <when expression="#[vars.coords.defaultBranch == null or vars.coords.defaultBranch == '']"
+                  doc:name="branch unresolved — discover from GitHub"
+                  doc:id="pfbr0001-0001-0001-0001-000000000002">
+                <try doc:name="TRY discover default_branch (config fallback)"
+                     doc:id="pfbr0001-0001-0001-0001-000000000003">
+                    <ee:cache cachingStrategy-ref="repoBranchCachingStrategy"
+                              doc:name="CACHE GitHub default_branch"
+                              doc:id="pfbr0001-0001-0001-0001-000000000004">
+                        <http:request method="GET"
+                                      config-ref="GitHub_Request"
+                                      path="#['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo]"
+                                      doc:name="GET repo (default_branch)"
+                                      doc:id="pfbr0001-0001-0001-0001-000000000005" />
+                        <ee:transform doc:name="DW extract default_branch"
+                                      doc:id="pfbr0001-0001-0001-0001-000000000006">
+                            <ee:message>
+                                <ee:set-payload><![CDATA[%dw 2.0
+output text/plain
+---
+(payload.default_branch default "") as String]]></ee:set-payload>
+                            </ee:message>
+                        </ee:transform>
+                    </ee:cache>
+                    <set-variable variableName="coords"
+                                  value="#[vars.coords ++ { defaultBranch: (if (isEmpty(payload as String)) p('github.defaultBranch') else (payload as String)) }]"
+                                  doc:name="PV SET coords.defaultBranch (discovered)"
+                                  doc:id="pfbr0001-0001-0001-0001-000000000007" />
+                    <logger level="DEBUG"
+                            doc:name="LOG DEBUG default_branch discovered"
+                            doc:id="pfbr0001-0001-0001-0001-000000000008"
+                            message="#['LOG DEBUG | flow=pf-resolve-coordinates | correlationId=' ++ correlationId ++ ' | discovered default_branch=' ++ (vars.coords.defaultBranch default '?') ++ ' for ' ++ (vars.coords.owner default '') ++ '/' ++ (vars.coords.repo default '')]" />
+                    <error-handler>
+                        <on-error-continue type="ANY"
+                                           doc:name="On Error - config branch fallback"
+                                           doc:id="pfbr0001-0001-0001-0001-000000000009">
+                            <set-variable variableName="coords"
+                                          value="#[vars.coords ++ { defaultBranch: p('github.defaultBranch') }]"
+                                          doc:name="PV SET coords.defaultBranch (config fallback)"
+                                          doc:id="pfbr0001-0001-0001-0001-000000000010" />
+                            <logger level="WARN"
+                                    doc:name="LOG WARN default_branch discovery failed"
+                                    doc:id="pfbr0001-0001-0001-0001-000000000011"
+                                    message="#['LOG WARN | flow=pf-resolve-coordinates | correlationId=' ++ correlationId ++ ' | default_branch discovery failed (' ++ (error.description default 'unknown') ++ ') — using config default ' ++ (p('github.defaultBranch') default '')]" />
+                        </on-error-continue>
+                    </error-handler>
+                </try>
+            </when>
+            <otherwise doc:name="branch already resolved (caller/registry)"
+                       doc:id="pfbr0001-0001-0001-0001-000000000012">
+                <logger level="DEBUG"
+                        doc:name="LOG DEBUG branch preset"
+                        doc:id="pfbr0001-0001-0001-0001-000000000013"
+                        message="#['LOG DEBUG | flow=pf-resolve-coordinates | correlationId=' ++ correlationId ++ ' | branch from caller/registry=' ++ (vars.coords.defaultBranch default '?')]" />
             </otherwise>
         </choice>
 

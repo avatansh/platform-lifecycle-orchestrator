@@ -25,6 +25,7 @@ body.json
 target-test.log
 test-run.log
 .mvn/
+docs/
 
 
 # ─────────────────────────────────────────────────────────────

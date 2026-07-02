@@ -103,8 +103,40 @@ types:
         type: string
         required: false
 
-  AssessRequest:
+  CoordinateOverrides:
     type: object
+    description: |
+      Optional per-request overrides for repository/platform coordinates. When omitted, the
+      orchestrator resolves them from the app-registry, then convention defaults. For owner/repo/
+      appPath/orgId the registry is authoritative and wins over these overrides; they take effect
+      only for apps that are not in the registry.
+    properties:
+      branch:
+        type: string
+        required: false
+        description: |
+          Explicit branch to assess/upgrade for THIS request. Highest precedence — overrides the
+          registry default and the repository's discovered default branch. Use when targeting a
+          specific feature/release branch.
+      owner:
+        type: string
+        required: false
+        description: GitHub owner/org override (used only when the app is not in the registry).
+      repo:
+        type: string
+        required: false
+        description: GitHub repository name override (used only when the app is not in the registry).
+      appPath:
+        type: string
+        required: false
+        description: Path to the Mule module within the repo (e.g. "." for repo root).
+      orgId:
+        type: string
+        required: false
+        description: Anypoint organization ID override (used only when the app is not in the registry).
+
+  AssessRequest:
+    type: CoordinateOverrides
     properties:
       appName:
         type: string
@@ -115,7 +147,7 @@ types:
         required: false
 
   JobRequest:
-    type: object
+    type: CoordinateOverrides
     properties:
       appName:
         type: string

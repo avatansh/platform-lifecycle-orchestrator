@@ -15,18 +15,66 @@
         http://www.mulesoft.org/schema/mule/api-gateway http://www.mulesoft.org/schema/mule/api-gateway/current/mule-api-gateway.xsd
         http://www.mulesoft.org/schema/mule/mcp http://www.mulesoft.org/schema/mule/mcp/current/mule-mcp.xsd">
 
-    <!-- ===== Object Store v2 — explicit TTL-rolling job store ===== -->
+    <!-- ===== Object Store v2 — partitioned stores ===== -->
     <!--
-        Single named store for all pipeline state: job records, single-flight locks,
-        branch-to-jobId indices, and delivery de-duplication keys.
-        entryTtl = 30 days (osv2.jobTtlSeconds). Each os:store call on an existing key
-        resets the TTL, giving active jobs a rolling 30-day retention window.
+        All named stores below are PARTITIONS inside the single OSv2 allocation this app
+        receives from CloudHub. Splitting them (rather than sharing one store with key
+        prefixes) keeps each partition's key namespace clean — most importantly it lets
+        pf-reconcile's retrieve-all-keys scan ONLY job records instead of paging through
+        locks / de-dup / index keys (25 keys per GET). Note: the OSv2 TPS ceiling and
+        monthly quota are per-app and SHARED across all partitions — splitting improves
+        scan scope and TTL hygiene, it does not increase throughput budget.
+
+        jobStore — job records. 30d rolling TTL; each os:store resets the window.
     -->
     <os:object-store name="jobStore"
                      doc:name="Job Store"
                      doc:id="a1b2c3d4-0001-0001-0001-000000000012"
                      persistent="true"
                      entryTtl="${osv2.jobTtlSeconds}"
+                     entryTtlUnit="SECONDS"
+                     maxEntries="10000"
+                     expirationInterval="1"
+                     expirationIntervalUnit="HOURS" />
+
+    <!--
+        locksStore — single-flight upgrade locks (key = appName). Short TTL acts as a
+        safety net so a crashed worker cannot deadlock an app forever; locks are normally
+        released explicitly when a job reaches a terminal state.
+    -->
+    <os:object-store name="locksStore"
+                     doc:name="Locks Store"
+                     doc:id="a1b2c3d4-0001-0001-0001-000000000014"
+                     persistent="true"
+                     entryTtl="${osv2.lockTtlSeconds}"
+                     entryTtlUnit="SECONDS"
+                     maxEntries="10000"
+                     expirationInterval="10"
+                     expirationIntervalUnit="MINUTES" />
+
+    <!--
+        idempotencyStore — GitHub webhook delivery de-duplication (key = delivery UUID).
+        TTL only needs to outlive GitHub's redelivery window.
+    -->
+    <os:object-store name="idempotencyStore"
+                     doc:name="Idempotency Store"
+                     doc:id="a1b2c3d4-0001-0001-0001-000000000015"
+                     persistent="true"
+                     entryTtl="${osv2.idempotencyTtlSeconds}"
+                     entryTtlUnit="SECONDS"
+                     maxEntries="50000"
+                     expirationInterval="1"
+                     expirationIntervalUnit="HOURS" />
+
+    <!--
+        indexStore — branch→jobId correlation index (key = branchName). Must live as long
+        as a job may still receive a PR-merge / CD webhook, so it tracks the job lifetime.
+    -->
+    <os:object-store name="indexStore"
+                     doc:name="Index Store"
+                     doc:id="a1b2c3d4-0001-0001-0001-000000000016"
+                     persistent="true"
+                     entryTtl="${osv2.indexTtlSeconds}"
                      entryTtlUnit="SECONDS"
                      maxEntries="10000"
                      expirationInterval="1"

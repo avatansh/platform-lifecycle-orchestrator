@@ -135,10 +135,10 @@
 
         <munit:execution>
             <munit:set-event doc:name="SET event with valid X-CD-Token">
-                <munit:attributes
-                    value="#[{ headers: { 'x-cd-token': 'test-webhook-secret-value-12345!' } }]" />
                 <munit:payload
                     value='#[{ jobId: "job-dep-002", result: "success", deployUrl: "https://runtime.mulesoft.com/my-app" }]' />
+                <munit:attributes
+                    value="#[{ headers: { 'x-cd-token': 'test-webhook-secret-value-12345!' } }]" />
             </munit:set-event>
             <flow-ref name="mf-impl-post-cd-result" doc:name="invoke cd-result" />
         </munit:execution>
@@ -152,12 +152,12 @@
                 doc:name="assert status = DEPLOYED"
                 expression="#[payload.status]"
                 is="#[MunitTools::equalTo('DEPLOYED')]" />
-            <!-- DEPLOYED record must have been persisted to OS -->
-            <munit-tools:verify-call doc:name="verify OS store DEPLOYED record"
+            <!-- Finalized record must have been persisted to OS -->
+            <munit-tools:verify-call doc:name="verify OS store finalized record"
                                      processor="os:store">
                 <munit-tools:with-attributes>
                     <munit-tools:with-attribute attributeName="doc:name"
-                                                whereValue="#['OS Store DEPLOYED Job Record']" />
+                                                whereValue="#['OS Store finalized Job Record']" />
                 </munit-tools:with-attributes>
             </munit-tools:verify-call>
         </munit:validation>
@@ -227,10 +227,10 @@
 
         <munit:execution>
             <munit:set-event doc:name="SET event with valid X-CD-Token (failure)">
-                <munit:attributes
-                    value="#[{ headers: { 'x-cd-token': 'test-webhook-secret-value-12345!' } }]" />
                 <munit:payload
                     value='#[{ jobId: "job-fail-003", result: "failure", error: "Deployment timed out" }]' />
+                <munit:attributes
+                    value="#[{ headers: { 'x-cd-token': 'test-webhook-secret-value-12345!' } }]" />
             </munit:set-event>
             <flow-ref name="mf-impl-post-cd-result" doc:name="invoke cd-result" />
         </munit:execution>
@@ -285,10 +285,10 @@
 
         <munit:execution>
             <munit:set-event doc:name="SET event with valid X-CD-Token (idempotent)">
-                <munit:attributes
-                    value="#[{ headers: { 'x-cd-token': 'test-webhook-secret-value-12345!' } }]" />
                 <munit:payload
                     value='#[{ jobId: "job-idem-004", result: "success" }]' />
+                <munit:attributes
+                    value="#[{ headers: { 'x-cd-token': 'test-webhook-secret-value-12345!' } }]" />
             </munit:set-event>
             <flow-ref name="mf-impl-post-cd-result" doc:name="invoke cd-result" />
         </munit:execution>
@@ -342,10 +342,10 @@
 
         <munit:execution>
             <munit:set-event doc:name="SET event with valid X-CD-Token (unknown result)">
-                <munit:attributes
-                    value="#[{ headers: { 'x-cd-token': 'test-webhook-secret-value-12345!' } }]" />
                 <munit:payload
                     value='#[{ jobId: "job-unk-005", result: "partial" }]' />
+                <munit:attributes
+                    value="#[{ headers: { 'x-cd-token': 'test-webhook-secret-value-12345!' } }]" />
             </munit:set-event>
             <flow-ref name="mf-impl-post-cd-result" doc:name="invoke cd-result" />
         </munit:execution>

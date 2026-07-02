@@ -25,6 +25,12 @@ naming:                            # convention used when an app is NOT in the r
 anypoint:
   apiBase: "https://anypoint.mulesoft.com"
   defaultOrgId: "2e14f8c6-4d60-481b-bfb6-798695efc8f4"  # used if ARM lookup not run
+  tokenPath: "/accounts/api/v2/oauth2/token"            # Connected App client_credentials token endpoint
+  tokenRefreshSeconds: "3300"                            # cache bearer ~55 min (platform TTL is 60 min)
+  verify:
+    enabled: "true"                                      # post-deploy platform confirmation (event-driven, no polling)
+    # AMC/CH2.0 deployment statuses treated as a healthy/successful deploy (comma-separated, upper-case).
+    healthyStatuses: "RUNNING,APPLIED,STARTED,PARTIALLY_STARTED"
   
 slack:    { channel: "#java17-upgrades" }
 
@@ -36,7 +42,10 @@ matrix:
                                              #   exchange        = central governance at the pinned version below
                                              #   exchange-latest = auto-adopt newest published version (reads maven-metadata.xml)
                                              #   classpath       = bundled copy only (offline/tests)
-  refreshSeconds: "300"                       # re-fetch window when source=exchange* (matrix cache TTL)
+  refreshSeconds: "86400"                     # matrix cache TTL = 1 day. Override in Runtime Manager
+                                              #   (Settings → Properties) to change without a redeploy.
+                                              #   Key is bucketed (floor(epoch/refreshSeconds)) so the
+                                              #   matrix re-fetches ~once per UTC day.
   exchange:                                   # coordinates of the matrix asset published to Anypoint Exchange
     orgId: "2e14f8c6-4d60-481b-bfb6-798695efc8f4"
     assetId: "java17-compatibility-matrix"
@@ -48,7 +57,13 @@ registry:                          # OPTIONAL — see governance note
   path: "registry/app-registry.yaml"   # appName → repo coordinates
   enforceAllowList: "false"      # true = ONLY registered apps may be upgraded (governance)
   
-osv2:     { jobTtlSeconds: "2592000" }   # 30d rolling
+osv2:                                      # Object Store v2 — one allocation per app; these are
+                                           #   TTLs for the separate named partitions (stores).
+  jobTtlSeconds:         "2592000"        # jobStore        — job records, 30d rolling
+  lockTtlSeconds:        "86400"          # locksStore      — single-flight locks, 1d safety net
+                                          #   (normally released explicitly on terminal state)
+  idempotencyTtlSeconds: "172800"         # idempotencyStore— webhook delivery de-dup keys, 2d
+  indexTtlSeconds:       "2592000"        # indexStore      — branch→jobId correlation index, 30d
 
 job:      { maxConcurrentPerApp: "1" }     # single-flight
 

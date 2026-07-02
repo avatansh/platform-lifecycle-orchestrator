@@ -77,7 +77,7 @@ output application/json
                      no key, so we default to `false` (not seen) — this also preserves the payload,
                      which a null default + error handler would not. -->
                 <os:retrieve key="#['delivery::' ++ vars.ghDelivery]"
-                             objectStore="jobStore"
+                             objectStore="idempotencyStore"
                              target="seenDelivery"
                              doc:name="OS Retrieve delivery idempotency key"
                              doc:id="b8c9d0e1-0008-0008-0008-000000000028">
@@ -112,7 +112,7 @@ output application/json
 
                         <!-- Mark this delivery as processed before touching any job state -->
                         <os:store key="#['delivery::' ++ vars.ghDelivery]"
-                                  objectStore="jobStore"
+                                  objectStore="idempotencyStore"
                                   doc:name="OS Store delivery idempotency key"
                                   doc:id="b8c9d0e1-0008-0008-0008-000000000034">
                             <os:value>#[true]</os:value>
@@ -152,7 +152,7 @@ output application/json
                                      os:default-value would throw OS:KEY_NOT_FOUND, so default to ""
                                      (no mapping) — this also preserves the payload. -->
                                 <os:retrieve key="#['branch::' ++ vars.mergedBranch]"
-                                             objectStore="jobStore"
+                                             objectStore="indexStore"
                                              target="jobIdFromBranch"
                                              doc:name="OS Retrieve jobId by Branch"
                                              doc:id="b8c9d0e1-0008-0008-0008-000000000007">
@@ -311,7 +311,13 @@ output application/json
                              doc:name="OS Retrieve Job Record"
                              doc:id="b9c0d1e2-0009-0009-0009-000000000011" />
 
-                <!-- ── Step 4: Capture record fields before any transform overwrites payload ─ -->
+                <!-- ── Step 4: Capture record fields before any transform overwrites payload ─
+                     jobRec holds the full record; downstream sub-flows (verify/rollback) run
+                     HTTP calls that clobber `payload`, so finalize transforms build from jobRec. -->
+                <set-variable variableName="jobRec"
+                              value="#[payload]"
+                              doc:name="PV SET vars.jobRec (full record)"
+                              doc:id="b9c0d1e2-0009-0009-0009-000000000011a" />
                 <set-variable variableName="appName"
                               value="#[payload.appName]"
                               doc:name="PV SET vars.appName (from record)"
@@ -336,6 +342,10 @@ output application/json
                               value="#[payload.status default '']"
                               doc:name="PV SET vars.curStatus (from record)"
                               doc:id="b9c0d1e2-0009-0009-0009-000000000017" />
+                <set-variable variableName="environment"
+                              value="#[payload.environment default '']"
+                              doc:name="PV SET vars.environment (from record)"
+                              doc:id="b9c0d1e2-0009-0009-0009-000000000017a" />
 
                 <!-- ── Step 5: Idempotency / terminal guard ─────────────────────────────────
                      If the job is already in a terminal state, return 200 and skip re-processing.
@@ -371,29 +381,77 @@ output application/json
                                 doc:id="b9c0d1e2-0009-0009-0009-000000000023"
                                 doc:description="Finalize job as DEPLOYED (success) or FAILED_DEPLOY (failure)">
 
-                            <!-- ── 6a: SUCCESS ──────────────────────────────────────────────── -->
+                            <!-- ── 6a: SUCCESS (CI-reported) — confirm on platform before finalizing ─ -->
                             <when expression="#[vars.cdResult == 'success']"
                                   doc:name="success"
                                   doc:id="b9c0d1e2-0009-0009-0009-000000000024">
 
-                                <ee:transform doc:name="DW Update Job Status to DEPLOYED"
+                                <!-- ── 6a-i: Post-deploy platform confirmation (ADR-015) ──────────────
+                                     CI said success. Make ONE Application Manager call to confirm the
+                                     app is actually healthy on CH2.0:
+                                       - platform verified + healthy  → DEPLOYED
+                                       - platform verified + unhealthy → FAILED_DEPLOY (discrepancy)
+                                       - platform unreachable/disabled → trust CI signal → DEPLOYED
+                                     ──────────────────────────────────────────────────────────────── -->
+                                <choice doc:name="CHOICE verify enabled?"
+                                        doc:id="b9c0d1e2-0009-0009-0009-00000000006a">
+                                    <when expression="#[(p('anypoint.verify.enabled') default 'true') == 'true']"
+                                          doc:name="verify enabled"
+                                          doc:id="b9c0d1e2-0009-0009-0009-00000000006b">
+                                        <set-variable variableName="vfyApp"
+                                                      value="#[vars.appName]"
+                                                      doc:name="PV SET vfyApp"
+                                                      doc:id="b9c0d1e2-0009-0009-0009-00000000006c" />
+                                        <set-variable variableName="vfyEnv"
+                                                      value="#[vars.environment default '']"
+                                                      doc:name="PV SET vfyEnv"
+                                                      doc:id="b9c0d1e2-0009-0009-0009-00000000006d" />
+                                        <set-variable variableName="vfyOrgId"
+                                                      value="#[vars.coords.orgId default p('anypoint.defaultOrgId')]"
+                                                      doc:name="PV SET vfyOrgId"
+                                                      doc:id="b9c0d1e2-0009-0009-0009-00000000006e" />
+                                        <flow-ref name="pf-verify-deployment"
+                                                  doc:name="pf-verify-deployment"
+                                                  doc:id="b9c0d1e2-0009-0009-0009-00000000006f" />
+                                    </when>
+                                    <otherwise doc:name="verify disabled"
+                                               doc:id="b9c0d1e2-0009-0009-0009-000000000070">
+                                        <set-variable variableName="verify"
+                                                      value="#[{ verified: false, found: false, status: 'DISABLED', healthy: false, runtimeVersion: null }]"
+                                                      doc:name="PV SET vars.verify (disabled)"
+                                                      doc:id="b9c0d1e2-0009-0009-0009-000000000071" />
+                                    </otherwise>
+                                </choice>
+
+                                <set-variable variableName="deployVerdict"
+                                              value="#[if ((vars.verify.verified default false) and not (vars.verify.healthy default false)) 'FAILED_DEPLOY' else 'DEPLOYED']"
+                                              doc:name="PV SET vars.deployVerdict"
+                                              doc:id="b9c0d1e2-0009-0009-0009-000000000072" />
+
+                                <ee:transform doc:name="DW Update Job Status (verified)"
                                               doc:id="b9c0d1e2-0009-0009-0009-000000000025">
                                     <ee:message>
                                         <ee:set-payload><![CDATA[%dw 2.0
 output application/json
 ---
-payload ++ {
-    status:      "DEPLOYED",
-    deployUrl:   vars.deployUrl,
-    completedAt: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
-    updatedAt:   now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
-}]]></ee:set-payload>
+vars.jobRec ++ {
+    status:                 vars.deployVerdict,
+    deployUrl:              vars.deployUrl,
+    platformVerified:       (vars.verify.verified default false),
+    platformStatus:         (vars.verify.status default null),
+    platformRuntimeVersion: (vars.verify.runtimeVersion default null),
+    completedAt:            now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
+    updatedAt:              now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+}
+++ (if (vars.deployVerdict == "FAILED_DEPLOY")
+      { error: "CD reported success but platform status=" ++ (vars.verify.status default "UNKNOWN") }
+    else {})]]></ee:set-payload>
                                     </ee:message>
                                 </ee:transform>
 
                                 <os:store key="#[vars.jobId]"
                                           objectStore="jobStore"
-                                          doc:name="OS Store DEPLOYED Job Record"
+                                          doc:name="OS Store finalized Job Record"
                                           doc:id="b9c0d1e2-0009-0009-0009-000000000026">
                                     <os:value>#[payload]</os:value>
                                 </os:store>
@@ -402,8 +460,8 @@ payload ++ {
                                 <try doc:name="TRY release lock (non-fatal)"
                                      doc:id="b9c0d1e2-0009-0009-0009-000000000027">
                                     <os:remove key="#['lock::' ++ vars.appName]"
-                                               objectStore="jobStore"
-                                               doc:name="OS Remove upgrade lock (deployed)"
+                                               objectStore="locksStore"
+                                               doc:name="OS Remove upgrade lock (finalized)"
                                                doc:id="b9c0d1e2-0009-0009-0009-000000000028" />
                                     <error-handler>
                                         <on-error-continue type="ANY"
@@ -416,55 +474,70 @@ payload ++ {
                                     </error-handler>
                                 </try>
 
-                                <!-- Slack success notification — non-fatal -->
-                                <try doc:name="TRY Slack DEPLOYED notification (non-fatal)"
-                                     doc:id="b9c0d1e2-0009-0009-0009-000000000031">
-                                    <ee:transform doc:name="DW Build Slack DEPLOYED message"
-                                                  doc:id="b9c0d1e2-0009-0009-0009-000000000032">
-                                        <ee:message>
-                                            <ee:set-payload><![CDATA[%dw 2.0
+                                <!-- ── 6a-ii: Notify by verdict ───────────────────────────────────── -->
+                                <choice doc:name="CHOICE notify by verdict?"
+                                        doc:id="b9c0d1e2-0009-0009-0009-000000000073">
+                                    <when expression="#[vars.deployVerdict == 'DEPLOYED']"
+                                          doc:name="DEPLOYED — Slack success"
+                                          doc:id="b9c0d1e2-0009-0009-0009-000000000074">
+                                        <!-- Slack success notification — non-fatal -->
+                                        <try doc:name="TRY Slack DEPLOYED notification (non-fatal)"
+                                             doc:id="b9c0d1e2-0009-0009-0009-000000000031">
+                                            <ee:transform doc:name="DW Build Slack DEPLOYED message"
+                                                          doc:id="b9c0d1e2-0009-0009-0009-000000000032">
+                                                <ee:message>
+                                                    <ee:set-payload><![CDATA[%dw 2.0
 output application/json
 ---
 {
     channel: p('slack.channel'),
     text: (":white_check_mark: *Java 17 upgrade DEPLOYED* — " ++ vars.appName
            ++ "\nJob " ++ vars.jobId
+           ++ (if ((vars.verify.verified default false)) ("\nPlatform status: " ++ (vars.verify.status default "UNKNOWN")) else "\nPlatform: unverified (trusting CI)")
            ++ (if (vars.deployUrl != null) ("\n" ++ vars.deployUrl) else ""))
 }]]></ee:set-payload>
-                                        </ee:message>
-                                    </ee:transform>
-                                    <set-variable variableName="slackPath"
-                                                  value="#[p('secure::slack.webhookUrl') replace 'https://hooks.slack.com' with '']"
-                                                  doc:name="PV SET slackPath"
-                                                  doc:id="b9c0d1e2-0009-0009-0009-000000000033" />
-                                    <http:request method="POST"
-                                                  config-ref="Slack_Request"
-                                                  path="#[vars.slackPath]"
-                                                  doc:name="POST Slack DEPLOYED notification"
-                                                  doc:id="b9c0d1e2-0009-0009-0009-000000000034" />
-                                    <error-handler>
-                                        <on-error-continue type="ANY"
-                                                           doc:id="b9c0d1e2-0009-0009-0009-000000000035">
-                                            <logger level="WARN"
-                                                    doc:name="LOG WARN Slack DEPLOYED notification failed"
-                                                    doc:id="b9c0d1e2-0009-0009-0009-000000000036"
-                                                    message="#['LOG WARN | flow=' ++ flow.name ++ ' | Slack DEPLOYED notification error swallowed: ' ++ (error.description default 'unknown')]" />
-                                        </on-error-continue>
-                                    </error-handler>
-                                </try>
+                                                </ee:message>
+                                            </ee:transform>
+                                            <set-variable variableName="slackPath"
+                                                          value="#[p('secure::slack.webhookUrl') replace 'https://hooks.slack.com' with '']"
+                                                          doc:name="PV SET slackPath"
+                                                          doc:id="b9c0d1e2-0009-0009-0009-000000000033" />
+                                            <http:request method="POST"
+                                                          config-ref="Slack_Request"
+                                                          path="#[vars.slackPath]"
+                                                          doc:name="POST Slack DEPLOYED notification"
+                                                          doc:id="b9c0d1e2-0009-0009-0009-000000000034" />
+                                            <error-handler>
+                                                <on-error-continue type="ANY"
+                                                                   doc:id="b9c0d1e2-0009-0009-0009-000000000035">
+                                                    <logger level="WARN"
+                                                            doc:name="LOG WARN Slack DEPLOYED notification failed"
+                                                            doc:id="b9c0d1e2-0009-0009-0009-000000000036"
+                                                            message="#['LOG WARN | flow=' ++ flow.name ++ ' | Slack DEPLOYED notification error swallowed: ' ++ (error.description default 'unknown')]" />
+                                                </on-error-continue>
+                                            </error-handler>
+                                        </try>
+                                    </when>
+                                    <otherwise doc:name="FAILED_DEPLOY — discrepancy notify"
+                                               doc:id="b9c0d1e2-0009-0009-0009-000000000075">
+                                        <flow-ref name="pf-notify-failure"
+                                                  doc:name="pf-notify-failure (platform discrepancy)"
+                                                  doc:id="b9c0d1e2-0009-0009-0009-000000000076" />
+                                    </otherwise>
+                                </choice>
 
                                 <logger level="INFO"
-                                        doc:name="LOG INFO Job DEPLOYED"
+                                        doc:name="LOG INFO Job finalized"
                                         doc:id="b9c0d1e2-0009-0009-0009-000000000037"
-                                        message="#['LOG INFO | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | status=DEPLOYED' ++ (if (vars.deployUrl != null) (' | deployUrl=' ++ vars.deployUrl) else '')]" />
+                                        message="#['LOG INFO | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | status=' ++ vars.deployVerdict ++ ' | platformVerified=' ++ ((vars.verify.verified default false) as String) ++ ' | platformStatus=' ++ (vars.verify.status default 'n/a') ++ (if (vars.deployUrl != null) (' | deployUrl=' ++ vars.deployUrl) else '')]" />
 
-                                <ee:transform doc:name="DW Set 200 DEPLOYED Acknowledgement"
+                                <ee:transform doc:name="DW Set 200 finalized Acknowledgement"
                                               doc:id="b9c0d1e2-0009-0009-0009-000000000038">
                                     <ee:message>
                                         <ee:set-payload><![CDATA[%dw 2.0
 output application/json
 ---
-{ acknowledged: true, jobId: vars.jobId, status: "DEPLOYED" }]]></ee:set-payload>
+{ acknowledged: true, jobId: vars.jobId, status: vars.deployVerdict, platformVerified: (vars.verify.verified default false) }]]></ee:set-payload>
                                     </ee:message>
                                 </ee:transform>
 
@@ -485,7 +558,7 @@ output application/json
                                         <ee:set-payload><![CDATA[%dw 2.0
 output application/json
 ---
-payload ++ {
+vars.jobRec ++ {
     status:      "FAILED_DEPLOY",
     error:       (vars.cdError default "CD pipeline reported failure"),
     rolledBack:  true,
@@ -506,7 +579,7 @@ payload ++ {
                                 <try doc:name="TRY release lock on failure (non-fatal)"
                                      doc:id="b9c0d1e2-0009-0009-0009-000000000043">
                                     <os:remove key="#['lock::' ++ vars.appName]"
-                                               objectStore="jobStore"
+                                               objectStore="locksStore"
                                                doc:name="OS Remove upgrade lock (failed deploy)"
                                                doc:id="b9c0d1e2-0009-0009-0009-000000000044" />
                                     <error-handler>

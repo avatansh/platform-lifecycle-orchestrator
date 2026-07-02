@@ -1,0 +1,209 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+    <!-- ==========================================================================
+         Anypoint Platform integration (post-deploy verification) — ADR-015
+
+         Event-driven, single-confirmation model (NO polling):
+           - The primary deploy signal comes from the CI/CD webhook (cd-result).
+           - We make ONE Application Manager call to confirm the app is healthy.
+           - The reconcile sweep makes ONE call as a safety net for missed callbacks.
+
+         Sub-flows:
+           - pf-get-anypoint-token : client_credentials bearer, cached in-memory (~55 min).
+           - pf-verify-deployment  : resolves envId + reads the app's AMC deployment status.
+
+         Both caching strategies use the default in-memory managed store, so they
+         consume NO Object Store v2 TPS/entries.
+         ========================================================================== -->
+
+    <!--
+        anypointTokenCachingStrategy: time-bucketed key so the bearer token is fetched
+        at most once per anypoint.tokenRefreshSeconds window (default 3300s / 55 min,
+        below the platform's 60-min token TTL). In-memory only.
+    -->
+    <ee:object-store-caching-strategy
+        name="anypointTokenCachingStrategy"
+        doc:name="Anypoint Token Caching Strategy"
+        doc:id="pfpt0001-0001-0001-0001-000000000001"
+        keyGenerationExpression="#['anypoint-token-' ++ (floor((now() as Number {unit: 'seconds'}) / (p('anypoint.tokenRefreshSeconds') as Number)) as String)]" />
+
+    <!--
+        anypointEnvCachingStrategy: per-org cache for the org→environments lookup.
+        Environments rarely change, so cache once per org for the JVM lifetime. In-memory.
+    -->
+    <ee:object-store-caching-strategy
+        name="anypointEnvCachingStrategy"
+        doc:name="Anypoint Environments Caching Strategy"
+        doc:id="pfpt0002-0002-0002-0002-000000000001"
+        keyGenerationExpression="#['anypoint-envs::' ++ (vars.vfyOrgId default '')]" />
+
+    <!-- ==========================================================================
+         pf-get-anypoint-token
+           Requires: nothing (reads secure::anypoint.clientId / clientSecret)
+           Returns:  vars.anypointToken = bearer access token (String)
+         The token POST only fires on a cache miss (~ once per 55 min per worker).
+         ========================================================================== -->
+    <sub-flow name="pf-get-anypoint-token"
+              doc:id="pfpt0003-0003-0003-0003-000000000001">
+
+        <ee:cache cachingStrategy-ref="anypointTokenCachingStrategy"
+                  doc:name="CACHE Anypoint bearer token"
+                  doc:id="pfpt0003-0003-0003-0003-000000000002"
+                  doc:description="Fetch + cache the Connected App client_credentials token; time-bucketed key">
+
+            <ee:transform doc:name="DW Build token request body"
+                          doc:id="pfpt0003-0003-0003-0003-000000000003">
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    grant_type:    "client_credentials",
+    client_id:     p('secure::anypoint.clientId'),
+    client_secret: p('secure::anypoint.clientSecret')
+}]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
+
+            <http:request method="POST"
+                          config-ref="Anypoint_Request"
+                          path="#[p('anypoint.tokenPath')]"
+                          doc:name="POST Anypoint token"
+                          doc:id="pfpt0003-0003-0003-0003-000000000004">
+                <http:headers><![CDATA[#[{ "Content-Type": "application/json" }]]]></http:headers>
+            </http:request>
+
+            <ee:transform doc:name="DW Extract access_token"
+                          doc:id="pfpt0003-0003-0003-0003-000000000005">
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+output text/plain
+---
+(payload.access_token default "") as String]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
+
+        </ee:cache>
+
+        <set-variable variableName="anypointToken"
+                      value="#[payload as String]"
+                      doc:name="PV SET vars.anypointToken"
+                      doc:id="pfpt0003-0003-0003-0003-000000000006" />
+
+    </sub-flow>
+
+    <!-- ==========================================================================
+         pf-verify-deployment
+           Requires: vars.vfyApp   (application name as it appears in AMC)
+                     vars.vfyEnv   (environment name, e.g. "Production")
+                     vars.vfyOrgId (business group / org id)
+           Returns:  vars.verify = {
+                        verified: Boolean,   // true if the platform answered
+                        found:    Boolean,   // true if a deployment matched vfyApp
+                        status:   String,    // upper-case AMC status ("RUNNING", ...)
+                        healthy:  Boolean,   // status ∈ anypoint.verify.healthyStatuses
+                        runtimeVersion: String|null
+                     }
+
+         Non-fatal: any platform/network error yields verified=false so the caller
+         can fall back to the CI signal rather than block the job.
+
+         NOTE: AMC/CH2.0 deployment field paths vary slightly by API version. Status is
+         read defensively (application.status → status). Adjust the field paths below
+         if the live response schema differs.
+         ========================================================================== -->
+    <sub-flow name="pf-verify-deployment"
+              doc:id="pfpt0004-0004-0004-0004-000000000001">
+
+        <try doc:name="TRY platform verify (non-fatal)"
+             doc:id="pfpt0004-0004-0004-0004-000000000002">
+
+            <flow-ref name="pf-get-anypoint-token"
+                      doc:name="pf-get-anypoint-token"
+                      doc:id="pfpt0004-0004-0004-0004-000000000003" />
+
+            <!-- Resolve environment name → envId (cached per org) -->
+            <ee:cache cachingStrategy-ref="anypointEnvCachingStrategy"
+                      doc:name="CACHE org environments"
+                      doc:id="pfpt0004-0004-0004-0004-000000000004">
+                <http:request method="GET"
+                              config-ref="Anypoint_Request"
+                              path="#['/accounts/api/organizations/' ++ (vars.vfyOrgId default '') ++ '/environments']"
+                              doc:name="GET org environments"
+                              doc:id="pfpt0004-0004-0004-0004-000000000005">
+                    <http:headers><![CDATA[#[{ "Authorization": "Bearer " ++ (vars.anypointToken default "") }]]]></http:headers>
+                </http:request>
+            </ee:cache>
+
+            <set-variable variableName="envId"
+                          value="#[((payload.data default []) filter ((e) -> upper(e.name default '') == upper(vars.vfyEnv default '')))[0].id default '']"
+                          doc:name="PV SET vars.envId"
+                          doc:id="pfpt0004-0004-0004-0004-000000000006" />
+
+            <!-- Read the app's deployment(s) for this environment -->
+            <http:request method="GET"
+                          config-ref="Anypoint_Request"
+                          path="#['/amc/application-manager/api/v2/organizations/' ++ (vars.vfyOrgId default '') ++ '/environments/' ++ (vars.envId default '') ++ '/deployments']"
+                          target="deployments"
+                          doc:name="GET AMC deployments"
+                          doc:id="pfpt0004-0004-0004-0004-000000000007">
+                <http:headers><![CDATA[#[{ "Authorization": "Bearer " ++ (vars.anypointToken default "") }]]]></http:headers>
+            </http:request>
+
+            <ee:transform doc:name="DW Build verify result"
+                          doc:id="pfpt0004-0004-0004-0004-000000000008">
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+var items  = (vars.deployments.items default vars.deployments.data default [])
+var dep    = (items filter ((d) -> (d.name default "") == (vars.vfyApp default "")))[0]
+var st     = upper(((dep.application.status default dep.status default "") as String))
+var okList = ((p('anypoint.verify.healthyStatuses') default "") splitBy ",") map upper(trim($))
+---
+{
+    verified:       (dep != null),
+    found:          (dep != null),
+    status:         st,
+    healthy:        (dep != null) and (okList contains st),
+    runtimeVersion: (dep.target.deploymentSettings.runtimeVersion
+                     default dep.currentRuntimeVersion
+                     default dep.runtimeVersion
+                     default null)
+}]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
+
+            <set-variable variableName="verify"
+                          value="#[payload]"
+                          doc:name="PV SET vars.verify"
+                          doc:id="pfpt0004-0004-0004-0004-000000000009" />
+
+            <error-handler>
+                <on-error-continue type="ANY"
+                                   doc:name="platform unreachable → unverified"
+                                   doc:id="pfpt0004-0004-0004-0004-000000000010">
+                    <logger level="WARN"
+                            doc:name="LOG WARN verify failed (non-fatal)"
+                            doc:id="pfpt0004-0004-0004-0004-000000000011"
+                            message="#['LOG WARN | flow=pf-verify-deployment | platform verify failed (non-fatal), falling back to CI signal | app=' ++ (vars.vfyApp default '?') ++ ' | error=' ++ (error.description default 'unknown')]" />
+                    <set-variable variableName="verify"
+                                  value="#[{ verified: false, found: false, status: 'UNKNOWN', healthy: false, runtimeVersion: null }]"
+                                  doc:name="PV SET vars.verify (unverified)"
+                                  doc:id="pfpt0004-0004-0004-0004-000000000012" />
+                </on-error-continue>
+            </error-handler>
+
+        </try>
+
+    </sub-flow>
+
+</mule>
