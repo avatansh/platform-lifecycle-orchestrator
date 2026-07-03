@@ -1,0 +1,294 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:os="http://www.mulesoft.org/schema/mule/os" xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd">
+	
+	    <!-- ==========================================================================
+         pf-rollback
+         Opens a revert PR that restores the repo to its pre-upgrade state.
+         Called best-effort from mf-impl-post-cd-result on CD failure.
+         NON-FATAL: the entire revert sequence is wrapped in <try>/<on-error-continue>.
+         ALWAYS restores the job record to payload on return (required by the caller).
+         Inputs: vars.coords {owner,repo,defaultBranch}, vars.branchName, vars.commitSha,
+                 vars.jobId, vars.appName, vars.prNumber
+         ========================================================================== -->
+	
+	<sub-flow name="pf-rollback" doc:id="a710ee59-cf77-4810-b05f-57140bceeafe" doc:description="Open a revert PR restoring the repo to pre-upgrade state. Non-fatal." >
+		<try doc:name="TRY revert PR (non-fatal)" doc:id="ea67b917-417c-452d-b8ba-2cadb9e49835" >
+			<logger level="INFO" doc:name="LOG INFO pf-rollback enter" doc:id="5cd38732-1d10-45d2-81f4-18267943fc1f" message="#[output application/java --- 'LOG INFO | flow=pf-rollback | correlationId=' ++ correlationId ++ ' | jobId=' ++ (vars.jobId default '?') ++ ' | branchName=' ++ (vars.branchName default '?')]" />
+			<http:request doc:name="GET upgrade commit (find pre-upgrade base)" doc:id="9a03ff1f-97d7-49dc-80f2-01209fe4a3af" doc:description="Fetch the upgrade commit to extract its first parent SHA (=changePlan.headSha)" config-ref="GitHub_Request" path="#['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/commits/' ++ vars.commitSha]" target="upgradeCommit" />
+			<set-variable value="#[vars.upgradeCommit.parents[0].sha]" doc:name="PV SET baseSha (pre-upgrade HEAD)" doc:id="820d004b-5d13-43dd-88cb-145b7a03bb30" variableName="baseSha" />
+			<http:request doc:name="GET base commit (extract pre-upgrade tree SHA)" doc:id="e0f4d0f8-1ff0-4721-8a5e-12748230fa70" doc:description="Fetch the pre-upgrade commit object to get its tree SHA" config-ref="GitHub_Request" path="#['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/git/commits/' ++ vars.baseSha]" target="baseCommit" />
+			<set-variable value="#[vars.baseCommit.tree.sha]" doc:name="PV SET baseTreeSha" doc:id="8622f65c-fd5c-43f2-9bc5-3e25f0770e1b" variableName="baseTreeSha" />
+			<http:request doc:name="GET current default-branch HEAD" doc:id="01c62f62-2460-4b19-8a2b-cdbb74c318d1" doc:description="Fetch the current HEAD of the default branch to anchor the revert branch" config-ref="GitHub_Request" path="#['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/commits/' ++ vars.coords.defaultBranch]" target="defHead" />
+			<set-variable value="#[vars.defHead.sha]" doc:name="PV SET defHeadSha" doc:id="c90a8706-2aee-4a05-bc69-ae349054b387" variableName="defHeadSha" />
+			<set-variable value="#['revert/' ++ vars.branchName]" doc:name="PV SET revertBranch" doc:id="e1984e5a-95cb-48bb-b8e8-d7cfa22f9a0c" variableName="revertBranch" />
+			<ee:transform doc:name="DW Build create revert-branch ref body" doc:id="933f208d-4e04-43ff-ae9b-e5618af2a5ed" >
+				<ee:message >
+					<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+{ ref: ("refs/heads/" ++ vars.revertBranch), sha: vars.defHeadSha }]]></ee:set-payload>
+				</ee:message>
+			</ee:transform>
+			<http:request doc:name="POST create revert branch ref" doc:id="3ca0df25-002f-455a-ad0d-2052cc1909e6" doc:description="Create the revert branch anchored at the current default-branch HEAD" config-ref="GitHub_Request" method="POST" path="#['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/git/refs']" />
+			<ee:transform doc:name="DW Build revert commit body" doc:id="1bbabc49-0cfd-4bd7-a268-0ececc0e084a" >
+				<ee:message >
+					<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+{
+    message: ("Revert Java 17 upgrade (" ++ vars.jobId ++ ") — deploy failed"),
+    tree:    vars.baseTreeSha,
+    parents: [vars.defHeadSha]
+}]]></ee:set-payload>
+				</ee:message>
+			</ee:transform>
+			<http:request doc:name="POST create revert commit" doc:id="26730d01-246e-4eb1-98f0-71a1a5ec02f9" doc:description="Commit that restores the repo to the pre-upgrade tree" config-ref="GitHub_Request" method="POST" path="#['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/git/commits']" target="revertCommit" />
+			<ee:transform doc:name="DW Build update revert-branch ref body" doc:id="e1c0739e-7ea0-4800-acd1-06de82b9f1b0" >
+				<ee:message >
+					<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+{ sha: vars.revertCommit.sha, force: false }]]></ee:set-payload>
+				</ee:message>
+			</ee:transform>
+			<http:request doc:name="PATCH move revert branch to revert commit" doc:id="2f99807b-cf4a-42f6-b81f-55147c09a268" doc:description="Point the revert branch at the new revert commit SHA" config-ref="GitHub_Request" method="PATCH" path="#['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/git/refs/heads/' ++ vars.revertBranch]" />
+			<ee:transform doc:name="DW Build revert PR body" doc:id="d81dfc5a-b88f-4b95-b7bb-5c2884ca7cc7" >
+				<ee:message >
+					<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+{
+    title:                ("Revert: Java 17 upgrade " ++ vars.appName),
+    head:                 vars.revertBranch,
+    base:                 vars.coords.defaultBranch,
+    body:                 ("Automated rollback for job " ++ vars.jobId ++ " — the CD deploy failed."),
+    maintainer_can_modify: true
+}]]></ee:set-payload>
+				</ee:message>
+			</ee:transform>
+			<http:request doc:name="POST open revert PR" doc:id="f51de438-722f-4acd-9125-989683df4892" doc:description="Open the revert PR; response contains html_url" config-ref="GitHub_Request" method="POST" path="#['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/pulls']" target="revertPr" />
+			<set-variable value="#[vars.revertPr.html_url]" doc:name="PV SET revertPrUrl" doc:id="ca35354d-9881-41ff-8ac5-27725e900b55" variableName="revertPrUrl" />
+			<os:retrieve doc:name="OS Retrieve job record for revertPrUrl update" doc:id="1faa5aeb-530e-4feb-a67e-37968bdcfaee" key="#[vars.jobId]" objectStore="jobStore" >
+				<os:default-value ><![CDATA[#[{}]]]></os:default-value>
+			</os:retrieve>
+			<ee:transform doc:name="DW Merge revertPrUrl into job record" doc:id="546a2807-ee82-4322-a979-c4040af1196a" >
+				<ee:message >
+					<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+payload ++ {
+    revertPrUrl: vars.revertPrUrl,
+    updatedAt:   now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+}]]></ee:set-payload>
+				</ee:message>
+			</ee:transform>
+			<os:store doc:name="OS Store job record with revertPrUrl" doc:id="e4e69524-d901-4d66-8b03-dbd8a8d96e5f" key="#[vars.jobId]" objectStore="jobStore" />
+			<logger level="INFO" doc:name="LOG INFO rollback PR opened" doc:id="4a33f368-3474-494a-b98e-0b88664d5bb4" message="#[output application/java --- 'LOG INFO | flow=pf-rollback | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | revertPrUrl=' ++ (vars.revertPrUrl default '?')]" />
+			<error-handler >
+				<on-error-continue enableNotifications="true" logException="true" doc:name="On Error Continue" doc:id="9a01c72a-4423-4d64-a2ac-8f4207aca0ed" type="ANY" >
+					<logger level="WARN" doc:name="LOG WARN pf-rollback failed" doc:id="9c757f4b-fdd7-445f-addf-29d72a67757b" message="#[output application/java --- 'LOG WARN | flow=pf-rollback | correlationId=' ++ correlationId ++ ' | jobId=' ++ (vars.jobId default '?') ++ ' | rollback error swallowed: ' ++ (error.description default 'unknown')]" />
+				</on-error-continue>
+			</error-handler>
+		</try>
+		<os:retrieve doc:name="OS Retrieve job record (restore to payload for caller)" doc:id="7149eaa8-239a-4d2b-9024-1b7a15965a16" key="#[vars.jobId]" objectStore="jobStore" >
+			<os:default-value ><![CDATA[#[{}]]]></os:default-value>
+		</os:retrieve>
+	</sub-flow>
+	
+    <!-- ==========================================================================
+         pf-open-pr
+         Opens a GitHub Pull Request for the already-committed upgrade branch.
+         Inputs:  vars.coords {owner,repo,defaultBranch}
+                  vars.changePlan {targetRuntime,targetJavaVersion}
+                  vars.branchName, vars.commitSha, vars.appName, vars.jobId
+                  vars.jiraTicketId (optional)
+         Outputs: vars.prNumber, vars.prUrl persisted to job record in OS.
+                  Status is NOT changed here — pf-start-upgrade sets PR_OPEN.
+         ========================================================================== -->
+	
+	<sub-flow name="pf-open-pr" doc:id="56e634c3-1676-4a91-885b-eed8156ac3d1" doc:description="Open a GitHub Pull Request for the upgrade branch and persist prUrl to the job record." >
+		<logger level="INFO" doc:name="LOG INFO pf-open-pr enter" doc:id="beac8c5b-aab7-48a8-bee9-66a3422c733b" message="#[output application/java --- 'LOG INFO | flow=pf-open-pr | correlationId=' ++ correlationId ++ ' | jobId=' ++ (vars.jobId default '?') ++ ' | branchName=' ++ (vars.branchName default '?')]" />
+		<ee:transform doc:name="DW Build create-PR body" doc:id="125fcc00-7b58-4ac5-bee7-04cba4fa3873" doc:description="Compose the GitHub PR payload: title, head branch, base branch, body, flags" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+{
+    title: ("Java 17 upgrade: " ++ vars.appName ++ " → " ++ vars.changePlan.targetRuntime ++ " / Java " ++ vars.changePlan.targetJavaVersion),
+    head:  vars.branchName,
+    base:  vars.coords.defaultBranch,
+    body:  ("Automated Java 17 upgrade for **" ++ vars.appName ++ "**.\n\n"
+           ++ "- Target runtime: " ++ vars.changePlan.targetRuntime ++ "\n"
+           ++ "- Target Java: " ++ vars.changePlan.targetJavaVersion ++ "\n"
+           ++ "- Commit: " ++ vars.commitSha ++ "\n"
+           ++ "- Job: " ++ vars.jobId
+           ++ (if (vars.jiraTicketId != null) ("\n- Jira: " ++ vars.jiraTicketId) else "")),
+    maintainer_can_modify: true,
+    draft: false
+}]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<http:request doc:name="POST create Pull Request" doc:id="241d055a-7a50-4562-a4ad-05b285d1b7a9" doc:description="Create the GitHub PR; response contains number and html_url" config-ref="GitHub_Request" method="POST" path="#['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/pulls']" target="prResp" />
+		<set-variable value="#[vars.prResp.number]" doc:name="PV SET prNumber" doc:id="0b863185-c0a2-4d61-b5c9-5a87d2509ae4" variableName="prNumber" />
+		<set-variable value="#[vars.prResp.html_url]" doc:name="PV SET prUrl" doc:id="ba86cd6b-cf1b-4ff1-a77b-60fdbab8289d" variableName="prUrl" />
+		<os:retrieve doc:name="OS Retrieve job record for PR update" doc:id="02061d28-a470-4cbd-a708-1271d6013198" key="#[vars.jobId]" objectStore="jobStore" >
+			<os:default-value ><![CDATA[#[{}]]]></os:default-value>
+		</os:retrieve>
+		<ee:transform doc:name="DW Merge prNumber + prUrl into job record" doc:id="04e7ba46-d910-474d-a1cb-bff4fc64e0ac" doc:description="Persist prNumber and prUrl; status unchanged — caller sets PR_OPEN via pf-set-status" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+payload ++ {
+    prNumber:  vars.prNumber,
+    prUrl:     vars.prUrl,
+    updatedAt: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+}]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<os:store doc:name="OS Store job record with PR details" doc:id="4532df19-b953-4ac4-b167-ac0f1d17a3f4" key="#[vars.jobId]" objectStore="jobStore" />
+		<logger level="INFO" doc:name="LOG INFO PR created" doc:id="b973fd63-7158-4cc3-8906-a1057d36b177" message="#[output application/java --- 'LOG INFO | flow=pf-open-pr | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | prNumber=' ++ vars.prNumber ++ ' | prUrl=' ++ (vars.prUrl default '?')]" />
+	</sub-flow>
+	
+    <!-- ==========================================================================
+         pf-atomic-commit
+         Commits all vars.stagedFiles as ONE commit on a new branch via the GitHub
+         Git Data API (low-level: blob → tree → commit → update ref).
+         Inputs:  vars.coords {owner,repo,defaultBranch}
+                  vars.changePlan {headSha,targetRuntime,targetJavaVersion}
+                  vars.stagedFiles [{path,content}]
+                  vars.appName, vars.jobId, vars.jiraTicketId (optional)
+         Outputs: vars.branchName, vars.commitSha written to job record in OS.
+                  Status is NOT changed here — pf-start-upgrade sets COMMITTED.
+         ========================================================================== -->
+	
+	<sub-flow name="pf-atomic-commit" doc:id="d38f3f65-a652-403f-aaa8-32aa8bafb57d" doc:description="Commit all staged files as one Git commit on a new branch via GitHub Git Data API." >
+		<logger level="INFO" doc:name="LOG INFO pf-atomic-commit enter" doc:id="21192d62-38f0-4dd1-81a5-d7c75385de93" message="#[output application/java --- 'LOG INFO | flow=pf-atomic-commit | correlationId=' ++ correlationId ++ ' | jobId=' ++ (vars.jobId default '?') ++ ' | stagedFiles=' ++ sizeOf(vars.stagedFiles default []) ++ ' | headSha=' ++ (vars.changePlan.headSha default '?')]" />
+		<http:request doc:name="GET HEAD commit (stale-plan check)" doc:id="8bbfd1ff-8998-4b02-92d7-97b094ef93f3" doc:description="Fetch current HEAD SHA to verify the repo has not moved since the change plan was computed" config-ref="GitHub_Request" path="#['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/commits/' ++ vars.coords.defaultBranch]" target="headCheck" />
+		<choice doc:name="CHOICE stale plan?" doc:id="7a8dfc7f-baea-4949-8890-40f0c5a73888" doc:description="Reject if the branch HEAD has moved since pf-assess-app captured it" >
+			<when expression="#[vars.headCheck.sha != vars.changePlan.headSha]" doc:id="pfac0001-0001-0001-0001-000000000005" >
+				<logger level="WARN" doc:name="LOG WARN stale plan" doc:id="6a48f6d0-7d7e-4143-9200-2a7eba967720" message="#[output application/java --- 'LOG WARN | flow=pf-atomic-commit | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | stale plan: repo HEAD=' ++ (vars.headCheck.sha default '?') ++ ' != plan headSha=' ++ (vars.changePlan.headSha default '?')]" />
+				<raise-error doc:name="RAISE CONFLICT:STALE_PLAN" doc:id="8c875ffe-6bef-455b-95a4-39ab0a49bbea" type="CONFLICT:STALE_PLAN" description="#[output application/java --- 'The repo HEAD moved since assessment (current=' ++ (vars.headCheck.sha default '?') ++ ', plan=' ++ (vars.changePlan.headSha default '?') ++ '). Re-run assess_app to get a fresh changePlan.']" />
+			</when>
+			<otherwise doc:id="pfac0001-0001-0001-0001-000000000008" >
+				<logger level="DEBUG" doc:name="LOG DEBUG stale-plan check passed" doc:id="6fd587a7-9eff-4d5c-beee-ab70e8dd6bd8" message="#[output application/java --- 'LOG DEBUG | flow=pf-atomic-commit | stale-plan check passed | headSha matches plan']" />
+			</otherwise>
+		</choice>
+		<set-variable value="#['migrate/' ++ vars.appName ++ '-' ++ vars.changePlan.targetRuntime ++ '-java' ++ vars.changePlan.targetJavaVersion]" doc:name="PV SET branchBase" doc:id="f9eb31a3-2f9b-47a5-a03e-81c29eebff6e" doc:description="Deterministic base branch name before collision handling" variableName="branchBase" />
+		<http:request doc:name="GET matching branch refs" doc:id="faf4e4d1-0350-4831-a9d2-41d5377c82ad" doc:description="List existing branches sharing the base name so a free suffix can be chosen" config-ref="GitHub_Request" path="#['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/git/matching-refs/heads/' ++ vars.branchBase]" target="existingRefs" />
+		<ee:transform doc:name="DW Pick free branch name" doc:id="f6117859-274f-40cd-897c-3320c8fe573f" >
+			<ee:variables >
+				<ee:set-variable variableName="branchName" ><![CDATA[%dw 2.0
+output application/java
+var base       = vars.branchBase
+// names already taken on the remote (strip the refs/heads/ prefix)
+var taken      = (vars.existingRefs default []) map ((r) -> ((r.ref as String) replace /^refs\/heads\// with ""))
+// try the base first, then base-1 .. base-50
+var candidates = [base] ++ ((1 to 50) map ((n) -> base ++ "-" ++ (n as String)))
+---
+(candidates filter ((c) -> !(taken contains c)))[0] default (base ++ "-" ++ vars.jobId)]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+		<logger level="INFO" doc:name="LOG INFO branch name computed" doc:id="7ce47f45-8d39-40a3-be30-9d32c406f954" message="#[output application/java --- 'LOG INFO | flow=pf-atomic-commit | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | branchBase=' ++ vars.branchBase ++ ' | branchName=' ++ vars.branchName ++ ' | existing=' ++ sizeOf(vars.existingRefs default [])]" />
+		<ee:transform doc:name="DW Build create-ref body" doc:id="d9834f2a-2d76-485b-85c8-2e2c17988651" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+{
+    ref: ("refs/heads/" ++ vars.branchName),
+    sha: vars.changePlan.headSha
+}]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<http:request doc:name="POST create branch ref" doc:id="7d482156-0891-4412-9cd0-1a0e2a6af275" doc:description="Create the upgrade branch at the current HEAD SHA" config-ref="GitHub_Request" method="POST" path="#['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/git/refs']" />
+		<set-variable value="#[[]]" doc:name="PV INIT blobs accumulator" doc:id="9de61471-b6da-4790-8019-3ad42ad004bd" variableName="blobs" />
+		<foreach doc:name="FOR EACH staged file — create blob" doc:id="5c8e6fea-ae7c-4c92-9921-e1fcca65e85d" collection="#[vars.stagedFiles]" >
+			<set-variable value="#[payload]" doc:name="PV SET currentFile" doc:id="32345aeb-ffad-49a8-b265-ecdd50ed8e65" variableName="currentFile" />
+			<ee:transform doc:name="DW Build create-blob body" doc:id="cbdfb2b3-4bfa-4997-a117-85db8391c5f1" >
+				<ee:message >
+					<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+{
+    content:  vars.currentFile.content,
+    encoding: "utf-8"
+}]]></ee:set-payload>
+				</ee:message>
+			</ee:transform>
+			<http:request doc:name="POST create blob" doc:id="d0ff3732-40ca-4ee5-a7d2-136749caa4c9" doc:description="Upload file content as a Git blob; response contains the blob SHA" config-ref="GitHub_Request" method="POST" path="#['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/git/blobs']" target="blobResp" />
+			<set-variable value="#[(vars.blobs default []) ++ [{ path: vars.currentFile.path, blobSha: vars.blobResp.sha }]]" doc:name="PV APPEND blob to accumulator" doc:id="a61caf57-07ca-40a1-b850-d8413a522813" variableName="blobs" />
+		</foreach>
+		<ee:transform doc:name="DW Build create-tree body" doc:id="d16a6bdb-1a84-4277-9052-04836ae323ae" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+{
+    base_tree: vars.changePlan.headSha,
+    tree: vars.blobs map ((b) -> {
+        path: b.path,
+        mode: "100644",
+        "type": "blob",
+        sha:  b.blobSha
+    })
+}]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<http:request doc:name="POST create tree" doc:id="7c6e5004-3f9d-422d-908a-d02dbe2da8d7" doc:description="Create a new Git tree from blobs; response contains the tree SHA" config-ref="GitHub_Request" method="POST" path="#['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/git/trees']" target="treeResp" />
+		<ee:transform doc:name="DW Build create-commit body" doc:id="a052b1e0-e797-4b68-bc2e-a454f89588fe" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+{
+    message: ("Java 17 upgrade (" ++ vars.jobId ++ ")"
+              ++ (if (vars.jiraTicketId != null) (" " ++ vars.jiraTicketId) else "")),
+    tree:    vars.treeResp.sha,
+    parents: [vars.changePlan.headSha]
+}]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<http:request doc:name="POST create commit" doc:id="5da044e1-f7cc-4952-be7e-6ce8ecec6be3" doc:description="Create the upgrade commit object; response contains the commit SHA" config-ref="GitHub_Request" method="POST" path="#['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/git/commits']" target="commitResp" />
+		<set-variable value="#[vars.commitResp.sha]" doc:name="PV SET commitSha" doc:id="b818d045-e600-490b-b8fb-96ddcc4211a4" variableName="commitSha" />
+		<logger level="INFO" doc:name="LOG INFO commit created" doc:id="7a187e5e-52ad-4b76-bb50-1cf70f03434b" message="#[output application/java --- 'LOG INFO | flow=pf-atomic-commit | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | branchName=' ++ vars.branchName ++ ' | commitSha=' ++ (vars.commitSha default '?')]" />
+		<ee:transform doc:name="DW Build update-ref body" doc:id="9d94659f-0bf9-4d06-baac-7a8e7168cd3f" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+{
+    sha:   vars.commitSha,
+    force: false
+}]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<http:request doc:name="PATCH move branch ref to commit" doc:id="7daea571-dd8b-4553-8937-dbb547c0e2fe" doc:description="Point the upgrade branch at the new commit SHA" config-ref="GitHub_Request" method="PATCH" path="#['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/git/refs/heads/' ++ vars.branchName]" />
+		<os:store doc:name="OS Store branch index (branch→jobId)" doc:id="2edd8e57-d424-4761-b504-06dd67a7fb2f" doc:description="Index entry read by the webhook handler to map an incoming branch event back to a jobId" key="#['branch::' ++ vars.branchName]" objectStore="indexStore" >
+			<os:value ><![CDATA[#[vars.jobId]]]></os:value>
+		</os:store>
+		<os:retrieve doc:name="OS Retrieve job record for branch/commit update" doc:id="7fd04aa6-8cab-4cc2-9736-b276e117cdbc" key="#[vars.jobId]" objectStore="jobStore" >
+			<os:default-value ><![CDATA[#[{}]]]></os:default-value>
+		</os:retrieve>
+		<ee:transform doc:name="DW Merge branchName + commitSha into job record" doc:id="c2c5ede2-9315-407b-b2e0-a218240a4694" doc:description="Persist branchName and commitSha; status is set by pf-start-upgrade via pf-set-status after this flow returns" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+payload ++ {
+    branchName: vars.branchName,
+    commitSha:  vars.commitSha,
+    updatedAt:  now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+}]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<os:store doc:name="OS Store job record with branch + commit" doc:id="f0209c9f-3c52-42ce-ad06-076ca6b1e79b" key="#[vars.jobId]" objectStore="jobStore" />
+		<logger level="INFO" doc:name="LOG INFO pf-atomic-commit done" doc:id="6bbdbfc9-f208-4f5c-b8d2-1502ab35d633" message="#[output application/java --- 'LOG INFO | flow=pf-atomic-commit | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | branchName=' ++ vars.branchName ++ ' | commitSha=' ++ (vars.commitSha default '?') ++ ' | stagedFiles=' ++ sizeOf(vars.stagedFiles default [])]" />
+	</sub-flow>
+</mule>

@@ -1,0 +1,549 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd">
+
+    <!--
+        REST entry point for POST /jobs/assess.
+        Maps the HTTP request body to variables, then delegates to the shared
+        private sub-flow pf-assess-app (defined in platform-lifecycle-orchestrator-mcp.xml).
+        The same pf-assess-app sub-flow is also called by the MCP assess_app tool-listener.
+    -->
+    <flow name="mf-impl-post-jobs-assess"
+          doc:id="e5f6a7b8-0005-0005-0005-000000000001"
+          doc:name="mf-impl-post-jobs-assess"
+          doc:description="REST entry: maps HTTP body to vars, then calls shared pf-assess-app sub-flow">
+
+        <!-- Snapshot inbound HTTP body FIRST — before any sub-flow call overwrites payload.
+             vars.requestBody is read by pf-resolve-coordinates for Tier-2 coordinate overrides. -->
+        <ee:transform doc:name="PV SET vars" doc:id="c8192ad3-9cb6-4f85-b43c-7a061713781e">
+			<ee:message />
+			<ee:variables>
+				<ee:set-variable variableName="requestBody"><![CDATA[payload]]></ee:set-variable>
+				<ee:set-variable variableName="appName"><![CDATA[payload.appName]]></ee:set-variable>
+				<ee:set-variable variableName="environment"><![CDATA[payload.environment]]></ee:set-variable>
+				<ee:set-variable variableName="jiraTicketId"><![CDATA[payload.jiraTicketId]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+		<logger level="DEBUG"
+                doc:name="LOG DEBUG Request"
+                doc:id="e5f6a7b8-0005-0005-0005-000000000002"
+                message="#[output application/java --- 'LOG DEBUG | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | app=' ++ (payload.appName default 'unknown') ++ ' | env=' ++ (payload.environment default 'unknown')]" />
+
+        <!-- Map HTTP request body fields to variables expected by pf-assess-app -->
+
+        <!-- Delegate to the shared sub-flow (also used by MCP assess_app tool) -->
+        <flow-ref name="pf-assess-app"
+                  doc:name="pf-assess-app"
+                  doc:id="e5f6a7b8-0005-0005-0005-000000000006" />
+
+    </flow>
+	
+    <!-- pf-assess-app: assesses application migration readiness             -->
+    <!-- Requires: vars.appName, vars.environment, vars.jiraTicketId(opt)    -->
+    <!-- Returns:  payload = AssessmentResult JSON                           -->
+	<sub-flow name="pf-assess-app" doc:id="a8f8c1c7-66e2-441e-af4d-59e690ae977a" doc:description="Shared: assess MuleSoft app for Java 17 upgrade. Called by REST and MCP." >
+		<logger level="DEBUG" doc:name="LOG DEBUG pf-assess-app enter" doc:id="cc5b86ce-1e14-4d48-8d60-abe102b14173" message="#[output application/java --- 'LOG DEBUG | flow=pf-assess-app | correlationId=' ++ correlationId ++ ' | app=' ++ (vars.appName default 'unknown') ++ ' | env=' ++ (vars.environment default 'unknown')]" />
+		<flow-ref doc:name="pf-load-matrix" doc:id="4e3a8d7e-fd87-40bb-a548-1183f96d6f2e" name="pf-load-matrix" />
+		<flow-ref doc:name="pf-resolve-coordinates" doc:id="5a9c2057-abee-44a5-a529-f8cd72f5eb0d" name="pf-resolve-coordinates" />
+		<choice doc:name="CHOICE env empty?" doc:id="7a33cf1b-b2c0-482c-a9fd-0a07a1a2ef36" doc:description="Reject immediately if no environment was supplied" >
+			<when expression="#[vars.environment == null or vars.environment == '']" doc:id="pf000001-0001-0001-0001-000000000013" >
+				<raise-error doc:name="RAISE VALIDATION:ENV_REQUIRED" doc:id="5d5dfe84-4c5f-4543-b489-cc807579910a" type="VALIDATION:ENV_REQUIRED" description="vars.environment must be set before calling pf-assess-app" />
+			</when>
+			<otherwise doc:id="pf000001-0001-0001-0001-000000000015" >
+				<logger level="DEBUG" doc:name="LOG DEBUG env present" doc:id="cd890a30-c071-4abb-85d9-927a6f5f17a2" message="#[output application/java --- 'LOG DEBUG | flow=pf-assess-app | env=' ++ vars.environment ++ ' | owner=' ++ (vars.coords.owner default '') ++ ' | repo=' ++ (vars.coords.repo default '')]" />
+			</otherwise>
+		</choice>
+		<choice doc:name="CHOICE coords complete?" doc:id="907d9888-e616-4602-998b-40255fdb000c" doc:description="Reject if owner or repo could not be resolved" >
+			<when expression="#[vars.coords.owner == null or vars.coords.repo == null]" doc:id="pf000001-0001-0001-0001-000000000018" >
+				<raise-error doc:name="RAISE VALIDATION:APP_NOT_REGISTERED" doc:id="93802119-8312-4e8b-8b76-f9a3750daff6" type="VALIDATION:APP_NOT_REGISTERED" description="#[output application/java --- 'Cannot resolve repo coordinates for app &quot;' ++ vars.appName ++ '&quot;. Provide owner/repo in the registry or request body.']" />
+			</when>
+			<otherwise doc:id="pf000001-0001-0001-0001-000000000020" >
+				<logger level="DEBUG" doc:name="LOG DEBUG coords present" doc:id="956734f1-db62-4b62-8b80-387cbb8ef031" message="#[output application/java --- 'LOG DEBUG | flow=pf-assess-app | coords ok | owner=' ++ (vars.coords.owner default '') ++ ' | repo=' ++ (vars.coords.repo default '')]" />
+			</otherwise>
+		</choice>
+		<http:request doc:name="GET GitHub commit SHA" doc:id="d7832dbe-fc24-4d9b-bd69-92b6f6c09fce" doc:description="Fetch HEAD commit on defaultBranch to pin all Contents API calls to a consistent tree SHA" config-ref="GitHub_Request" path="#['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/commits/' ++ vars.coords.defaultBranch]" />
+		<set-variable value="#[payload.sha]" doc:name="PV SET vars.headSha" doc:id="26612ae6-1bf9-4c14-9169-bd5e87aa0b89" doc:description="Store commit SHA; used as ref= parameter in all subsequent Contents API calls" variableName="headSha" />
+		<http:request doc:name="GET GitHub tree (recursive)" doc:id="96326571-db42-4713-a4f5-b9db6c5136d8" doc:description="Fetch the full recursive file tree to locate pom.xml, mule-artifact.json, and CI workflow files" config-ref="GitHub_Request" path="#['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/git/trees/' ++ vars.headSha]" >
+			<http:query-params ><![CDATA[#[{ recursive: "1" }]]]></http:query-params>
+		</http:request>
+		<set-variable value="#[payload]" doc:name="PV SET vars.tree" doc:id="ddfc2261-94c1-42bd-be75-53af16c1c520" doc:description="Store full tree object for path lookups in subsequent steps" variableName="tree" />
+		<ee:transform doc:name="DW Analyse Tree" doc:id="360b57eb-3ebb-4774-aaaa-01882881ef42" doc:description="Locate appPomPath, mule-artifact.json, CI workflow, and build allProps list from the recursive tree" >
+			<ee:variables >
+				<ee:set-variable variableName="treeAnalysis" ><![CDATA[%dw 2.0
+output application/java
+var appPath      = vars.coords.appPath default "."
+var nominalPom   = if (appPath == ".") "pom.xml" else (appPath ++ "/pom.xml")
+var treePaths    = vars.tree.tree map $.path
+// Use nominal path when present; otherwise fall back to first blob pom.xml at any depth
+var appPomPath   =
+    if (treePaths contains nominalPom) nominalPom
+    else ((vars.tree.tree filter ((item) ->
+            item."type" == "blob" and item.path matches /(?:^|\/)pom\.xml$/
+         ))[0].path) default nominalPom
+var maPath       = if (appPath == ".") "mule-artifact.json" else (appPath ++ "/mule-artifact.json")
+var maExists     = treePaths contains maPath
+// CI workflow: first .github/workflows/*.yml or *.yaml found in tree
+var ciPath       = ((vars.tree.tree filter ((item) ->
+                       item.path matches /\.github\/workflows\/[^\/]+\.ya?ml$/
+                   ))[0].path) default null
+// All property names from matrix gating + connectors — needed by step-6 ownerOf()
+var allProps     = ((valuesOf(vars.matrix.gating) map $.property)
+                    ++ (vars.matrix.connectors map $.property))
+---
+{
+    appPomPath:          appPomPath,
+    muleArtifactExists:  maExists,
+    muleArtifactPath:    if (maExists) maPath else null,
+    ciWorkflowPath:      ciPath,
+    allProps:            allProps
+}]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+		<ee:transform doc:name="DW Spread Tree Analysis to flat vars" doc:id="78cd393b-63be-4872-a299-fdbd7cb5e9c6" >
+			<ee:variables >
+				<ee:set-variable variableName="appPomPath" ><![CDATA[#[vars.treeAnalysis.appPomPath]]]></ee:set-variable>
+				<ee:set-variable variableName="muleArtifactExists" ><![CDATA[#[vars.treeAnalysis.muleArtifactExists]]]></ee:set-variable>
+				<ee:set-variable variableName="muleArtifactPath" ><![CDATA[#[vars.treeAnalysis.muleArtifactPath]]]></ee:set-variable>
+				<ee:set-variable variableName="ciWorkflowPath" ><![CDATA[#[vars.treeAnalysis.ciWorkflowPath]]]></ee:set-variable>
+				<ee:set-variable variableName="allProps" ><![CDATA[#[vars.treeAnalysis.allProps]]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+		<http:request doc:name="GET app pom.xml (Contents API)" doc:id="85fcb00d-0c66-444a-8357-b469abc05587" doc:description="Fetch app pom.xml via Contents API; response contains base64-encoded file content" config-ref="GitHub_Request" path="#['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/contents/' ++ vars.appPomPath]" >
+			<http:query-params ><![CDATA[#[{ ref: vars.headSha }]]]></http:query-params>
+		</http:request>
+		<ee:transform doc:name="DW Parse App Pom — init chain" doc:id="ff4046fa-820f-487b-901b-7f422f2a73eb" doc:description="Base64-decode app pom content, parse XML, initialise vars.chain, compute next parent path" >
+			<ee:variables >
+				<ee:set-variable variableName="appPomParsed" ><![CDATA[%dw 2.0
+output application/java
+import fromBase64 from dw::core::Binaries
+// Path normalisation: resolve relative parent paths against the directory of the current pom
+fun removeLastSeg(arr: Array): Array =
+    if (sizeOf(arr) <= 1) [] else arr[0 to (sizeOf(arr) - 2)]
+fun normalizePath(currentPomPath: String, relPath: String): String = do {
+    var dir      = if (currentPomPath contains "/")
+                       currentPomPath[0 to ((currentPomPath lastIndexOf "/") - 1)]
+                   else ""
+    var combined = if (dir == "") relPath else (dir ++ "/" ++ relPath)
+    var parts    = (combined splitBy "/") filter ($ != "" and $ != ".")
+    --- (parts reduce ((seg, acc = []) ->
+            if (seg == ".." and !isEmpty(acc)) removeLastSeg(acc)
+            else acc ++ [seg]
+        )) joinBy "/"
+}
+var rawBytes   = fromBase64(payload.content replace /[\r\n\t ]/ with "")
+var rawContent = rawBytes as String {encoding: "UTF-8"}
+var parsedPom  = read(rawContent, "application/xml")
+var parentEl      = parsedPom.project.parent
+var rawRel        = parentEl.relativePath default null
+// Maven default: <parent> present but no <relativePath> ⇒ ../pom.xml
+var relForResolve =
+    if (parentEl == null) null
+    else if (rawRel == null or (rawRel as String) == "") "../pom.xml"
+    else (rawRel as String)
+var resolved      = if (relForResolve == null) null
+                    else normalizePath(vars.appPomPath, relForResolve)
+// Directory-form relativePath (no .xml suffix) ⇒ append /pom.xml
+var resolvedFile  = if (resolved == null) null
+                    else if (resolved matches /.*pom\.xml$/) resolved
+                    else (resolved ++ "/pom.xml")
+// Only walk parents that live in THIS repo's tree; external/Exchange parents stop the chain
+var treePaths     = vars.tree.tree map $.path
+var nextPath      = if (resolvedFile != null and (treePaths contains resolvedFile)) resolvedFile
+                    else null
+---
+{
+    appPomText:      rawContent,
+    chain:           [{ path: vars.appPomPath, pom: parsedPom }],
+    nextParentPath:  nextPath
+}]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+		<ee:transform doc:name="DW Spread App Pom to flat vars" doc:id="870bbd06-9277-4e20-914f-680a36a7b804" >
+			<ee:variables >
+				<ee:set-variable variableName="appPomText" ><![CDATA[#[vars.appPomParsed.appPomText]]]></ee:set-variable>
+				<ee:set-variable variableName="chain" ><![CDATA[#[vars.appPomParsed.chain]]]></ee:set-variable>
+				<ee:set-variable variableName="nextParentPath" ><![CDATA[#[vars.appPomParsed.nextParentPath]]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+		<choice doc:name="CHOICE fetch parent pom (level 1)?" doc:id="b59c8d0d-4978-47b2-ade7-e74be0b68c22" doc:description="Fetch direct parent pom when app pom declares a resolvable relativePath" >
+			<when expression="#[vars.nextParentPath != null]" doc:id="pf000001-0001-0001-0001-000000000041" >
+				<http:request doc:name="GET parent pom.xml level-1 (Contents API)" doc:id="903a1705-cde8-485a-a45a-6bb36361d345" doc:description="Fetch the direct parent pom.xml via Contents API" config-ref="GitHub_Request" path="#['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/contents/' ++ vars.nextParentPath]" >
+					<http:query-params ><![CDATA[#[{ ref: vars.headSha }]]]></http:query-params>
+				</http:request>
+				<ee:transform doc:name="DW Parse Parent Pom level-1 — update chain" doc:id="4e9c8b5c-8da5-4617-95d4-2455d4aaa582" doc:description="Base64-decode parent-1 pom, parse XML, append to vars.chain, compute grandparent path" >
+					<ee:variables >
+						<ee:set-variable variableName="parent1Data" ><![CDATA[%dw 2.0
+output application/java
+import fromBase64 from dw::core::Binaries
+fun removeLastSeg(arr: Array): Array =
+    if (sizeOf(arr) <= 1) [] else arr[0 to (sizeOf(arr) - 2)]
+fun normalizePath(currentPomPath: String, relPath: String): String = do {
+    var dir      = if (currentPomPath contains "/")
+                       currentPomPath[0 to ((currentPomPath lastIndexOf "/") - 1)]
+                   else ""
+    var combined = if (dir == "") relPath else (dir ++ "/" ++ relPath)
+    var parts    = (combined splitBy "/") filter ($ != "" and $ != ".")
+    --- (parts reduce ((seg, acc = []) ->
+            if (seg == ".." and !isEmpty(acc)) removeLastSeg(acc)
+            else acc ++ [seg]
+        )) joinBy "/"
+}
+var rawBytes   = fromBase64(payload.content replace /[\r\n\t ]/ with "")
+var rawContent = rawBytes as String {encoding: "UTF-8"}
+var parsedPom  = read(rawContent, "application/xml")
+var parentEl      = parsedPom.project.parent
+var rawRel        = parentEl.relativePath default null
+// Maven default: <parent> present but no <relativePath> ⇒ ../pom.xml
+var relForResolve =
+    if (parentEl == null) null
+    else if (rawRel == null or (rawRel as String) == "") "../pom.xml"
+    else (rawRel as String)
+var resolved      = if (relForResolve == null) null
+                    else normalizePath(vars.nextParentPath, relForResolve)
+// Directory-form relativePath (no .xml suffix) ⇒ append /pom.xml
+var resolvedFile  = if (resolved == null) null
+                    else if (resolved matches /.*pom\.xml$/) resolved
+                    else (resolved ++ "/pom.xml")
+// Only walk parents that live in THIS repo's tree; external/Exchange parents stop the chain
+var treePaths     = vars.tree.tree map $.path
+var nextPath      = if (resolvedFile != null and (treePaths contains resolvedFile)) resolvedFile
+                    else null
+---
+{
+    chain:          vars.chain ++ [{ path: vars.nextParentPath, pom: parsedPom }],
+    nextParentPath: nextPath
+}]]></ee:set-variable>
+					</ee:variables>
+				</ee:transform>
+				<ee:transform doc:name="DW Spread Parent-1 to flat vars" doc:id="7cf2f4dc-94fc-4ae8-8db8-da4cc3f547b5" >
+					<ee:variables >
+						<ee:set-variable variableName="chain" ><![CDATA[#[vars.parent1Data.chain]]]></ee:set-variable>
+						<ee:set-variable variableName="nextParentPath" ><![CDATA[#[vars.parent1Data.nextParentPath]]]></ee:set-variable>
+					</ee:variables>
+				</ee:transform>
+			</when>
+			<otherwise doc:id="pf000001-0001-0001-0001-000000000045" >
+				<logger level="DEBUG" doc:name="LOG DEBUG no level-1 parent" doc:id="93a8d396-2473-40cf-acaf-f1ffc050db74" message="#[output application/java --- 'LOG DEBUG | flow=pf-assess-app | app=' ++ vars.appName ++ ' | chain depth=1 (APP_STANDALONE)']" />
+			</otherwise>
+		</choice>
+		<choice doc:name="CHOICE fetch grandparent pom (level 2)?" doc:id="53a4b1f0-08e2-4673-ac32-91d404f3e561" doc:description="Fetch grandparent (BOM) pom when the level-1 parent also declared a relativePath" >
+			<when expression="#[vars.nextParentPath != null]" doc:id="pf000001-0001-0001-0001-000000000051" >
+				<http:request doc:name="GET grandparent pom.xml level-2 (Contents API)" doc:id="81edf673-957c-490a-9c97-eea9873aaab4" doc:description="Fetch the grandparent (typically BOM) pom.xml via Contents API" config-ref="GitHub_Request" path="#['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/contents/' ++ vars.nextParentPath]" >
+					<http:query-params ><![CDATA[#[{ ref: vars.headSha }]]]></http:query-params>
+				</http:request>
+				<ee:transform doc:name="DW Parse Grandparent Pom level-2 — update chain" doc:id="2eb61656-1e6b-4e8e-b89c-5ad680cc1e2a" doc:description="Base64-decode grandparent pom, parse XML, append to vars.chain (chain is now complete)" >
+					<ee:variables >
+						<ee:set-variable variableName="parent2Data" ><![CDATA[%dw 2.0
+output application/java
+import fromBase64 from dw::core::Binaries
+var rawBytes   = fromBase64(payload.content replace /[\r\n\t ]/ with "")
+var rawContent = rawBytes as String {encoding: "UTF-8"}
+var parsedPom  = read(rawContent, "application/xml")
+---
+{
+    chain: vars.chain ++ [{ path: vars.nextParentPath, pom: parsedPom }]
+}]]></ee:set-variable>
+					</ee:variables>
+				</ee:transform>
+				<ee:transform doc:name="DW Spread Grandparent to flat vars" doc:id="9728df41-7ce5-40de-bd9e-a2dc9a79748e" >
+					<ee:variables >
+						<ee:set-variable variableName="chain" ><![CDATA[#[vars.parent2Data.chain]]]></ee:set-variable>
+						<ee:set-variable variableName="nextParentPath" ><![CDATA[#[null]]]></ee:set-variable>
+					</ee:variables>
+				</ee:transform>
+			</when>
+			<otherwise doc:id="pf000001-0001-0001-0001-000000000055" >
+				<logger level="DEBUG" doc:name="LOG DEBUG grandparent not present" doc:id="044a7498-9fe8-4a43-9014-1b7c51d11dbc" message="#[output application/java --- 'LOG DEBUG | flow=pf-assess-app | app=' ++ vars.appName ++ ' | chain depth=' ++ sizeOf(vars.chain) ++ ' — no grandparent pom']" />
+			</otherwise>
+		</choice>
+		<ee:transform doc:name="DW Scan Flags" doc:id="027eeac1-acf4-422d-a0c8-26f416410bb9" doc:description="Detect custom Java files, lookup() usage, and build warnings list from tree and pom text" >
+			<ee:variables >
+				<ee:set-variable variableName="flags" ><![CDATA[%dw 2.0
+output application/java
+// Custom Java: any .java file anywhere in the repository tree
+var javaFiles      = vars.tree.tree filter ($.path matches /.*\.java$/)
+var customJava     = !isEmpty(javaFiles)
+// lookup(): scan raw app pom text as a fast heuristic; Mule XML scan would be more accurate
+// but requires fetching every flow file — deferred to a future step
+var lookupInPom    = vars.appPomText contains "lookup("
+// Warnings
+var truncWarning   = if (vars.tree.truncated default false)
+                         ["Repository tree was truncated by GitHub (>100k objects); some file paths may have been missed."]
+                     else []
+var javaWarning    = if (customJava)
+                         ["Custom Java classes detected (" ++ sizeOf(javaFiles) ++ " file(s)). Verify reflection and SecurityManager usage on JDK 17."]
+                     else []
+var lookupWarning  = if (lookupInPom)
+                         ["lookup() reference found in pom text; scan Mule XMLs to confirm DataWeave POJO lookup usage requiring getter/setter validation."]
+                     else []
+---
+{
+    customJavaFound: customJava,
+    lookupFound:     lookupInPom,
+    hasApiPolicies:  false,    // TODO: query Anypoint API Manager for applied policies
+    warnings:        truncWarning ++ javaWarning ++ lookupWarning
+}]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+		<ee:transform doc:name="DW Spread Flags to flat vars" doc:id="f0a06c26-0670-4f3a-a0b3-286da1d3f9fd" >
+			<ee:variables >
+				<ee:set-variable variableName="customJavaFound" ><![CDATA[#[vars.flags.customJavaFound]]]></ee:set-variable>
+				<ee:set-variable variableName="lookupFound" ><![CDATA[#[vars.flags.lookupFound]]]></ee:set-variable>
+				<ee:set-variable variableName="hasApiPolicies" ><![CDATA[#[vars.flags.hasApiPolicies]]]></ee:set-variable>
+				<ee:set-variable variableName="warnings" ><![CDATA[#[vars.flags.warnings]]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+		<choice doc:name="CHOICE fetch mule-artifact.json?" doc:id="38855c51-99bc-4313-89d0-8e98a883ebef" doc:description="Fetch and parse mule-artifact.json only when present in the tree" >
+			<when expression="#[vars.muleArtifactExists default false]" doc:id="pf000001-0001-0001-0001-0000000000a1" >
+				<http:request doc:name="GET mule-artifact.json (Contents API)" doc:id="b14b7be0-3afe-435e-8ddd-6a9655cfde82" doc:description="Fetch mule-artifact.json content via Contents API" config-ref="GitHub_Request" path="#['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/contents/' ++ vars.muleArtifactPath]" >
+					<http:query-params ><![CDATA[#[{ ref: vars.headSha }]]]></http:query-params>
+				</http:request>
+				<ee:transform doc:name="DW Decode mule-artifact.json" doc:id="e6ad1f90-5bd4-4f1a-a6d8-24a18c930fb8" >
+					<ee:variables >
+						<ee:set-variable variableName="muleArtifactCurrent" ><![CDATA[%dw 2.0
+output application/java
+import fromBase64 from dw::core::Binaries
+---
+read((fromBase64((payload.content default "") replace /[\r\n\t ]/ with "")) as String {encoding: "UTF-8"}, "application/json")]]></ee:set-variable>
+					</ee:variables>
+				</ee:transform>
+			</when>
+			<otherwise doc:id="pf000001-0001-0001-0001-0000000000a4" >
+				<ee:transform doc:name="DW mule-artifact null" doc:id="46327ce7-b704-4ae8-aa53-0b8dc861965a" >
+					<ee:variables >
+						<ee:set-variable variableName="muleArtifactCurrent" ><![CDATA[#[null]]]></ee:set-variable>
+					</ee:variables>
+				</ee:transform>
+			</otherwise>
+		</choice>
+		<choice doc:name="CHOICE fetch CI workflow?" doc:id="2f1491ad-1d11-426b-9616-90f423e26e43" doc:description="Fetch CI workflow text only when a workflow path was found" >
+			<when expression="#[vars.ciWorkflowPath != null]" doc:id="pf000001-0001-0001-0001-0000000000b1" >
+				<http:request doc:name="GET CI workflow (Contents API)" doc:id="c8720155-2e66-4d4e-9273-d3987d4a77c2" doc:description="Fetch CI workflow YAML content via Contents API" config-ref="GitHub_Request" path="#['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/contents/' ++ vars.ciWorkflowPath]" >
+					<http:query-params ><![CDATA[#[{ ref: vars.headSha }]]]></http:query-params>
+				</http:request>
+				<ee:transform doc:name="DW Decode CI workflow" doc:id="b87ccfb3-e24b-4fb5-90ea-a4de134908dd" >
+					<ee:variables >
+						<ee:set-variable variableName="ciWorkflowText" ><![CDATA[%dw 2.0
+output application/java
+import fromBase64 from dw::core::Binaries
+---
+(fromBase64((payload.content default "") replace /[\r\n\t ]/ with "")) as String {encoding: "UTF-8"}]]></ee:set-variable>
+					</ee:variables>
+				</ee:transform>
+			</when>
+			<otherwise doc:id="pf000001-0001-0001-0001-0000000000b4" >
+				<ee:transform doc:name="DW CI workflow null" doc:id="78b76fd5-a2dd-49e3-bf09-34a1635ec224" >
+					<ee:variables >
+						<ee:set-variable variableName="ciWorkflowText" ><![CDATA[#[null]]]></ee:set-variable>
+					</ee:variables>
+				</ee:transform>
+			</otherwise>
+		</choice>
+		<ee:transform doc:name="DW Classify Topology and build ownerByProperty" doc:id="9506e71d-537f-4a6e-b124-7e4a5a0afa95" doc:description="Derive BOM/PARENT/STANDALONE topology from chain depth and build property→ownerPomPath map" >
+			<ee:variables >
+				<ee:set-variable variableName="topoData" ><![CDATA[%dw 2.0
+output application/java
+// vars.chain = ordered list of fetched POMs, nearest-first:
+//   [{ path: "<app>/pom.xml", pom: <parsed> }, { path: "<parent>/pom.xml", pom },
+//    { path: "<bom>/pom.xml", pom }]   // 1..N entries, ANY folder names
+// classify by chain shape + whether the topmost is packaging=pom acting as a BOM
+var n         = sizeOf(vars.chain)
+var topIsBom  = (vars.chain[-1].pom.project.dependencyManagement?) != null
+var topology  = if (n >= 3 and topIsBom) "BOM_PARENT_APP"
+                else if (n == 2)          "PARENT_APP"
+                else if (n == 1)          "APP_STANDALONE"
+                else                      "MULTI_LEVEL"
+// propOf(pom, prop): read a Maven <properties> value by NAME. Matches on the key
+// as a plain String so dotted names (e.g. app.runtime.semver) and XML namespace
+// Key types resolve reliably — a plain properties[prop] dynamic selector does not.
+fun propOf(pom, prop) = do {
+    var pairs = (pom.project.properties default {}) pluck ((pv, pk) -> { name: (pk as String), value: pv })
+    --- (pairs filter ($.name == prop))[0].value default null
+}
+// ownerOf(prop): first POM in the chain (nearest-first) that declares the property.
+// Falls back to the app POM so an edit always has a home (it can be ADDED there).
+fun ownerOf(prop) =
+    ((vars.chain filter ((c) -> propOf(c.pom, prop) != null))[0])
+        .path default vars.chain[0].path
+---
+{
+  topology: topology,
+  appPomPath: vars.chain[0].path,
+  ownerByProperty: {
+    (vars.allProps map ((p) -> { (p): ownerOf(p) }))
+  }
+}]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+		<ee:transform doc:name="DW Spread Topology to flat vars" doc:id="ee1316fd-efbf-4cba-804a-10218c3a49e5" >
+			<ee:variables >
+				<ee:set-variable variableName="topology" ><![CDATA[#[vars.topoData.topology]]]></ee:set-variable>
+				<ee:set-variable variableName="ownerByProperty" ><![CDATA[#[vars.topoData.ownerByProperty]]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+		<ee:transform doc:name="DW Build AssessmentResult" doc:id="31b45c99-0c4f-43a7-9759-411292dd9008" doc:description="Apply all matrix upgrade rules to installed property values and produce the full AssessmentResult JSON payload" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+import * from dw::core::Strings
+// helpers: simple semver compare a < b
+fun toNums(v) = (v splitBy ".") map (trim($) replace /[^0-9].*/ with "") map (($ default "0") as Number)
+fun lt(a,b) = do { var x=toNums(a)
+    var y=toNums(b)
+    --- (x[0] default 0) < (y[0] default 0) or
+        ((x[0] default 0)==(y[0] default 0) and (x[1] default 0) < (y[1] default 0)) or
+        ((x[0] default 0)==(y[0] default 0) and (x[1] default 0)==(y[1] default 0) and (x[2] default 0)<(y[2] default 0)) }
+var m = vars.matrix
+// propOf(pom, prop): read a Maven <properties> value by NAME (String-key match) so
+// dotted names and XML namespace Key types resolve reliably.
+fun propOf(pom, prop) = do {
+    var pairs = (pom.project.properties default {}) pluck ((pv, pk) -> { name: (pk as String), value: pv })
+    --- (pairs filter ($.name == prop))[0].value default null
+}
+// rawProp(name): first non-null property value across the chain (nearest-first), no indirection.
+fun rawProp(name) = ((vars.chain map ((c) -> propOf(c.pom, name))) filter ($ != null))[0] default null
+// resolveProp(name): rawProp, following ONE level of Maven property-placeholder indirection when present.
+fun resolveProp(name) = do {
+    var v = rawProp(name)
+    --- if (v != null and ((v as String) matches /^\s*\$\{.+\}\s*$/))
+            rawProp((trim(v as String) replace /^\$\{/ with "" replace /\}$/ with ""))
+        else v
+}
+// ownerOfProp(name): path of the nearest chain pom that declares the property, else null.
+fun ownerOfProp(name) =
+    ((vars.chain filter ((c) -> propOf(c.pom, name) != null))[0]).path default null
+// findDep(g,a): nearest chain entry declaring dependency g:a in <dependencies> or
+// <dependencyManagement>, returned as { path, dep }, else null.
+fun findDep(g, a) =
+    (flatten(vars.chain map ((c) -> do {
+        var deps = ((c.pom.project.dependencies default {}).*dependency) default []
+        var mgmt = ((c.pom.project.dependencyManagement.dependencies default {}).*dependency) default []
+        --- (deps ++ mgmt) map ((d) -> { path: c.path, dep: d })
+    })) filter ((x) ->
+        (((x.dep.groupId default "") as String) == g) and
+        (((x.dep.artifactId default "") as String) == a)))[0] default null
+// findPlugin(g,a): nearest chain entry declaring plugin a in <build><plugins> or
+// <build><pluginManagement><plugins>, returned as { path, plugin }, else null.
+// groupId is optional (plugins are commonly identified by artifactId alone).
+fun findPlugin(g, a) =
+    (flatten(vars.chain map ((c) -> do {
+        var ps  = ((c.pom.project.build.plugins default {}).*plugin) default []
+        var pms = ((c.pom.project.build.pluginManagement.plugins default {}).*plugin) default []
+        --- (ps ++ pms) map ((p) -> { path: c.path, plugin: p })
+    })) filter ((x) ->
+        (((x.plugin.artifactId default "") as String) == a) and
+        (g == null or (((x.plugin.groupId default "") as String) == g))))[0] default null
+// resolveInline(r, ver, path, kind, coords): shared handling for an inline <version> found
+// on a dependency or plugin — null → skip; property-placeholder → resolve as pomProperty on
+// the referenced property; literal → emit `kind` carrying the given coordinate fields.
+fun resolveInline(r, ver, path, kind, coords) =
+    if (ver == null) { property: r.property, kind: null, file: null, installed: null }
+    else if ((ver as String) matches /^\s*\$\{.+\}\s*$/) do {
+        var pn = (trim(ver as String) replace /^\$\{/ with "" replace /\}$/ with "")
+        --- { property: pn, kind: "pomProperty", file: (ownerOfProp(pn) default path), installed: rawProp(pn) }
+    }
+    else
+        ({ property: r.property, kind: kind, file: path, installed: (ver as String) } ++ coords)
+// resolveRule(r): find installed value + owner file + edit kind. Resolution order:
+//   1) <properties> value (kind=pomProperty)
+//   2) inline <dependency>/<dependencyManagement> <version> (kind=depVersion)
+//   3) inline <plugin> <version> (kind=pluginVersion)
+// An inline value that is itself a property placeholder collapses back to a pomProperty edit.
+fun resolveRule(r) = do {
+    var pOwner = ownerOfProp(r.property)
+    var depHit = if ((r.groupId?) and (r.artifactId?)) findDep(r.groupId, r.artifactId) else null
+    var plgHit = if (r.pluginArtifactId?) findPlugin((r.pluginGroupId default null), r.pluginArtifactId) else null
+    ---
+    if (pOwner != null)
+        { property: r.property, kind: "pomProperty", file: pOwner, installed: rawProp(r.property) }
+    else if (depHit != null)
+        resolveInline(r, (depHit.dep.version default null), depHit.path, "depVersion",
+                      { groupId: r.groupId, artifactId: r.artifactId })
+    else if (plgHit != null)
+        resolveInline(r, (plgHit.plugin.version default null), plgHit.path, "pluginVersion",
+                      { pluginGroupId: (r.pluginGroupId default null), pluginArtifactId: r.pluginArtifactId })
+    else { property: r.property, kind: null, file: null, installed: null }
+}
+// all gating + connector rules → one list; each edit carries its OWN owner file + kind
+var allRules = (valuesOf(m.gating) ++ m.connectors)
+var propEdits = allRules
+    map ((r) -> do {
+        var res       = resolveRule(r)
+        var installed = res.installed
+        var needs     = if (installed == null or res.kind == null) false   // not present → skip
+                        else if (r.in?)  (r.in contains installed)
+                        else lt(installed, r.set)
+        ---
+        {
+            property:         res.property,
+            kind:             res.kind,
+            file:             res.file,
+            (groupId:          res.groupId)          if (res.groupId?),
+            (artifactId:       res.artifactId)       if (res.artifactId?),
+            (pluginGroupId:    res.pluginGroupId)    if (res.pluginGroupId?),
+            (pluginArtifactId: res.pluginArtifactId) if (res.pluginArtifactId?),
+            from:             installed,
+            to:               r.set,
+            change:           needs
+        } })
+    filter ($.change)
+// app-level edits — DIFF-AWARE: emit ONLY when the current value actually differs from target.
+var appPomText = vars.appPomText default ""
+// (1) MUnit <runtimeVersion> — literal only. A property-placeholder value is driven by a
+//     property, so it is handled by the property path above and must NOT be rewritten here.
+var munitCur         = (appPomText scan /<runtimeVersion>\s*([^<]+?)\s*<\/runtimeVersion>/)[0][1] default null
+var munitPlaceholder = (munitCur != null) and ((munitCur default "") matches /^\s*\$\{.+\}\s*$/)
+var munitNeeds       = (munitCur != null) and (!munitPlaceholder) and lt((munitCur as String), m.target.runtime)
+// (2) mule-artifact.json — bump minMuleVersion only if BELOW target (never downgrade); ensure
+//     java target support only if no current spec is already >= target (handles "1.8"/"8"/"11").
+var maCur      = vars.muleArtifactCurrent
+var maSpecs    = (maCur.javaSpecificationVersions default [])
+var maMinNeeds = (maCur != null) and lt((maCur.minMuleVersion default "0"), m.muleArtifact.minMuleVersion)
+var maJavaOk   = !isEmpty(maSpecs filter ((s) -> !lt((s as String), m.target.javaVersion)))
+var maJavaNeeds= (maCur != null) and (!maJavaOk)
+var maNeeds    = maMinNeeds or maJavaNeeds
+// Never downgrade minMuleVersion: keep current when it is already at/above target.
+var maToMin    = if (maMinNeeds) m.muleArtifact.minMuleVersion else (maCur.minMuleVersion default m.muleArtifact.minMuleVersion)
+// (3) CI workflow — bump only if the current java-version is below target (never downgrade).
+var ciCur      = ((vars.ciWorkflowText default "") scan /java-version:\s*['"]?([^'"\s]+)['"]?/)[0][1] default null
+var ciNeeds    = (ciCur != null) and lt((ciCur as String), m.target.javaVersion)
+var appEdits = []
+  ++ (if (munitNeeds)
+        [{ file: vars.chain[0].path, kind: "munitRuntimeVersion", from: munitCur, to: m.target.runtime }] else [])
+  ++ (if (maNeeds)
+        [{ file: vars.muleArtifactPath, kind: "muleArtifactJson",
+           from: { minMuleVersion: (maCur.minMuleVersion default null), javaSpecificationVersions: maSpecs },
+           to: { minMuleVersion: maToMin,
+                 javaSpecificationVersions: m.muleArtifact.javaSpecificationVersions } }] else [])
+  ++ (if (ciNeeds)
+        [{ file: vars.ciWorkflowPath, kind: "ciWorkflow", from: ciCur, to: m.target.javaVersion }] else [])
+var all = propEdits ++ appEdits
+---
+{
+  appName: vars.appName,
+  currentRuntime: resolveProp("app.runtime") default resolveProp("app.runtime.semver") default "unknown",
+  currentJavaVersion: resolveProp("java.version") default resolveProp("maven.compiler.source") default resolveProp("maven.compiler.target") default "unknown",
+  changePlan: {
+    targetRuntime:     m.target.runtime,
+    targetJavaVersion: m.target.javaVersion,
+    topology:          vars.topology,
+    headSha:           vars.headSha,
+    fileEdits:         all,
+    filesToChange:     (all map $.file) distinctBy $,
+    hasApiPolicies:    vars.hasApiPolicies default false,
+    hasCustomJavaCode: vars.customJavaFound default false,
+    hasLookupFunction: vars.lookupFound default false
+  },
+  warnings: vars.warnings default []
+}]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<logger level="DEBUG" doc:name="LOG DEBUG pf-assess-app done" doc:id="4e74d6e1-36c1-4409-a36d-2a6db4b1a704" message="#[output application/java --- 'LOG DEBUG | flow=pf-assess-app | correlationId=' ++ correlationId ++ ' | app=' ++ vars.appName ++ ' | topology=' ++ (vars.topology default 'unknown') ++ ' | fileEdits=' ++ sizeOf(payload.changePlan.fileEdits default []) ++ ' | warnings=' ++ sizeOf(payload.warnings default [])]" />
+	</sub-flow>
+
+</mule>

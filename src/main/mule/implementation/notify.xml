@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:os="http://www.mulesoft.org/schema/mule/os" xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd">
+	
+    <!-- ==========================================================================
+         pf-notify  (success — PR opened)
+         Sends Slack message + optional Jira comment after the PR is opened.
+         NON-FATAL: the whole body is wrapped in <try> so a notification outage
+         never fails the upgrade pipeline. Errors are logged at WARN and swallowed.
+         Inputs: vars.appName, vars.jobId, vars.prUrl, vars.prNumber,
+                 vars.branchName, vars.jiraTicketId (optional)
+         ========================================================================== -->
+	<sub-flow name="pf-notify" doc:id="08b7f046-8af1-4d74-9dbf-e947b2e0071d" doc:description="Send Slack + optional Jira PR-opened notification. Non-fatal." >
+		<try doc:name="TRY notification (non-fatal)" doc:id="a65ccca1-956a-4c3b-9a34-908f21cd258d" >
+			<logger level="INFO" doc:name="LOG INFO pf-notify enter" doc:id="d803b314-c91f-4550-9941-5696370ae2f4" message="#[output application/java --- 'LOG INFO | flow=pf-notify | correlationId=' ++ correlationId ++ ' | jobId=' ++ (vars.jobId default '?') ++ ' | prUrl=' ++ (vars.prUrl default '(none)')]" />
+			<ee:transform doc:name="DW Build Slack success message" doc:id="739fed17-d1a9-4309-98b0-616633f051a7" >
+				<ee:message >
+					<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+{
+    channel: p('slack.channel'),
+    text: (":rocket: *Java 17 upgrade PR ready* — " ++ vars.appName
+           ++ "\n" ++ (vars.prUrl default "(no url)")
+           ++ "\nJob " ++ vars.jobId ++ " • status PR_OPEN")
+}]]></ee:set-payload>
+				</ee:message>
+			</ee:transform>
+			<set-variable value="#[p('secure::slack.webhookUrl') replace 'https://hooks.slack.com' with '']" doc:name="PV SET slackPath" doc:id="9e69ffdd-a8dc-46cb-8a97-79bffcfd009d" variableName="slackPath" />
+			<http:request doc:name="POST Slack success notification" doc:id="c99f84cb-8984-4f59-9e05-5bdd3e089687" doc:description="Send PR-opened message to the configured Slack channel" config-ref="Slack_Request" method="POST" path="#[vars.slackPath]" />
+			<set-variable value="#[('Java 17 upgrade PR opened for ' ++ (vars.appName as String) ++ ' — status PR_OPEN.')]" doc:name="PV SET vars.jiraCommentText (PR opened)" doc:id="5f397dce-2e11-42ed-8e13-f3271ff1084a" variableName="jiraCommentText" />
+			<set-variable value="#[vars.prUrl default null]" doc:name="PV SET vars.jiraCommentUrl (PR opened)" doc:id="72c8d87b-4882-4ab9-bdf0-8d51201c48d1" variableName="jiraCommentUrl" />
+			<flow-ref doc:name="pf-jira-comment (PR opened)" doc:id="fc12f80d-2d77-4d0e-b45e-1e4668bef3a3" name="pf-jira-comment" />
+			<error-handler >
+				<on-error-continue enableNotifications="true" logException="true" doc:name="swallow notification error" doc:id="ae57166e-8341-47db-ae80-20df793cfb31" type="ANY" >
+					<logger level="WARN" doc:name="LOG WARN notification failed" doc:id="243ee6db-8df4-48bf-b050-ac60d712f6fb" message="#[output application/java --- 'LOG WARN | flow=pf-notify | correlationId=' ++ correlationId ++ ' | jobId=' ++ (vars.jobId default '?') ++ ' | notification error swallowed: ' ++ (error.description default 'unknown')]" />
+				</on-error-continue>
+			</error-handler>
+		</try>
+	</sub-flow>
+	
+      <!-- ==========================================================================
+         pf-notify  (success — PR opened)
+         Sends Slack message + optional Jira comment after the PR is opened.
+         NON-FATAL: the whole body is wrapped in <try> so a notification outage
+         never fails the upgrade pipeline. Errors are logged at WARN and swallowed.
+         Inputs: vars.appName, vars.jobId, vars.prUrl, vars.prNumber,
+                 vars.branchName, vars.jiraTicketId (optional)
+         ========================================================================== -->
+	<sub-flow name="pf-jira-comment" doc:id="8c77c2f9-e425-40db-ba26-1d4915c5ec35" doc:description="Post an ADF comment (with optional link) to a Jira issue. Self-guarding + non-fatal." >
+		<choice doc:name="CHOICE jiraTicketId present?" doc:id="02a267ea-5383-4932-a98c-91ee4b799225" >
+			<when expression="#[vars.jiraTicketId != null]" doc:id="pfjc0001-0001-0001-0001-000000000003" >
+				<try doc:name="TRY jira comment (non-fatal)" doc:id="d4460b56-4a5d-44a3-8a90-475941ad9fee" >
+					<ee:transform doc:name="DW Build Jira ADF comment" doc:id="6fefaa21-2df3-4988-8bb7-dc506f5c5cbc" doc:description="ADF comment body: summary paragraph + optional link node" >
+						<ee:message >
+							<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+var summary = (vars.jiraCommentText default "") as String
+var url     = (vars.jiraCommentUrl default "") as String
+var hasUrl  = url != ""
+---
+{
+    body: {
+        "type": "doc",
+        version: 1,
+        content: [
+            {
+                "type": "paragraph",
+                content: [ { "type": "text", text: summary } ]
+                    ++ (if (hasUrl)
+                          [ { "type": "text", text: "  " },
+                            { "type": "text", text: url, marks: [ { "type": "link", attrs: { href: url } } ] } ]
+                        else [])
+            }
+        ]
+    }
+}]]></ee:set-payload>
+						</ee:message>
+					</ee:transform>
+					<http:request doc:name="POST Jira comment (final decision)" doc:id="c45630b4-25c3-42ad-bad0-5dd0486470b5" doc:description="Post the ADF comment to the Jira ticket" config-ref="Jira_Request" method="POST" path="#['/rest/api/3/issue/' ++ (vars.jiraTicketId as String) ++ '/comment']" />
+					<error-handler >
+						<on-error-continue enableNotifications="true" logException="true" doc:name="swallow jira comment error" doc:id="1ebed8fc-12ed-4ea2-9c54-796ad8e6d3c3" type="ANY" >
+							<logger level="WARN" doc:name="LOG WARN jira comment failed" doc:id="c4d8cc67-6ea7-4c7c-ada3-fbecbef2bbf6" message="#[output application/java --- 'LOG WARN | flow=pf-jira-comment | jira comment error swallowed: ' ++ (error.description default 'unknown')]" />
+						</on-error-continue>
+					</error-handler>
+				</try>
+			</when>
+			<otherwise doc:id="pfjc0001-0001-0001-0001-000000000009" >
+				<logger level="DEBUG" doc:name="LOG DEBUG no jira ticket (final)" doc:id="99a95439-a8f4-42ec-831a-18b49d92e385" message="#[output application/java --- 'LOG DEBUG | flow=pf-jira-comment | no jira ticket — skipping comment']" />
+			</otherwise>
+		</choice>
+	</sub-flow>
+	
+    <!-- ==========================================================================
+         pf-notify-failure  (failure — upgrade pipeline errored)
+         Reads the authoritative status + error from the job record in Object Store
+         (the error-handler in pf-start-upgrade has already written them there).
+         Sends a Slack failure message. NON-FATAL: errors are logged at WARN and swallowed.
+         Inputs: vars.appName, vars.jobId
+         ========================================================================== -->
+	<sub-flow name="pf-notify-failure" doc:id="406fc29d-c01e-4cb2-b608-cd6c271927da" doc:description="Send Slack failure notification. Reads status/error from job record. Non-fatal." >
+		<try doc:name="TRY failure notification (non-fatal)" doc:id="604d6787-68fa-40ce-b740-e2af3a606795" >
+			<logger level="WARN" doc:name="LOG WARN pf-notify-failure enter" doc:id="46771572-cb37-47e4-bfe4-a736270839e2" message="#[output application/java --- 'LOG WARN | flow=pf-notify-failure | correlationId=' ++ correlationId ++ ' | jobId=' ++ (vars.jobId default '?') ++ ' | sending failure notification']" />
+			<os:retrieve doc:name="OS Retrieve job record (for failure notification)" doc:id="3098c8ba-aad5-4a1f-9198-4085dcc16e3e" key="#[vars.jobId]" objectStore="jobStore" >
+				<os:default-value ><![CDATA[#[{}]]]></os:default-value>
+			</os:retrieve>
+			<set-variable value="#[payload.status default 'FAILED']" doc:name="PV SET failStatus" doc:id="3d026e6b-2fdf-48ba-a7f1-9d11e0b56131" variableName="failStatus" />
+			<set-variable value="#[payload.error default 'unknown']" doc:name="PV SET failError" doc:id="d9d8605d-3eb2-47da-b0c2-23ac99b83f34" variableName="failError" />
+			<ee:transform doc:name="DW Build Slack failure message" doc:id="cc635476-49ef-4078-a7fb-4286ab6eb510" >
+				<ee:message >
+					<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+{
+    channel: p('slack.channel'),
+    text: (":x: *Java 17 upgrade FAILED* — " ++ vars.appName
+           ++ "\nJob " ++ vars.jobId
+           ++ " • status " ++ vars.failStatus
+           ++ "\nError: " ++ vars.failError)
+}]]></ee:set-payload>
+				</ee:message>
+			</ee:transform>
+			<set-variable value="#[p('secure::slack.webhookUrl') replace 'https://hooks.slack.com' with '']" doc:name="PV SET slackPath" doc:id="f89fd279-bdde-4bd0-8e74-7f36f525be47" variableName="slackPath" />
+			<http:request doc:name="POST Slack failure notification" doc:id="970759ae-0b6d-4239-a230-0d46a585dedd" doc:description="Send upgrade-failed message to the configured Slack channel" config-ref="Slack_Request" method="POST" path="#[vars.slackPath]" />
+			<error-handler >
+				<on-error-continue enableNotifications="true" logException="true" doc:name="swallow failure notification error" doc:id="ffd04e24-06b3-42a5-9fb1-5fe7f55adb00" type="ANY" >
+					<logger level="WARN" doc:name="LOG WARN failure notification itself failed" doc:id="75effa4c-9368-4882-8bd8-247c62f248d6" message="#[output application/java --- 'LOG WARN | flow=pf-notify-failure | correlationId=' ++ correlationId ++ ' | jobId=' ++ (vars.jobId default '?') ++ ' | failure notification error swallowed: ' ++ (error.description default 'unknown')]" />
+				</on-error-continue>
+			</error-handler>
+		</try>
+	</sub-flow>
+</mule>

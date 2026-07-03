@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns:os="http://www.mulesoft.org/schema/mule/os"
+      xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+    <!--
+        REST entry point for GET /jobs/{jobId}.
+        Extracts the jobId URI path parameter, sets it as a variable, then delegates
+        to the shared private sub-flow pf-get-job-status (defined in
+        platform-lifecycle-orchestrator-mcp.xml).
+        The same pf-get-job-status sub-flow is also called by the MCP get_job_status tool-listener.
+        OBJECTSTORE:KEY_NOT_FOUND thrown by the sub-flow is caught by the global error handler → 404.
+    -->
+    <flow name="mf-impl-get-job-status"
+          doc:id="a7b8c9d0-0007-0007-0007-000000000001"
+          doc:name="mf-impl-get-job-status"
+          doc:description="REST entry: extracts jobId from URI params, calls shared pf-get-job-status sub-flow">
+
+        <!-- Extract jobId from the URI path parameter -->
+        <set-variable variableName="jobId"
+                      value="#[attributes.uriParams.jobId]"
+                      doc:name="PV SET jobId"
+                      doc:id="a7b8c9d0-0007-0007-0007-000000000002" />
+
+        <logger level="DEBUG"
+                doc:name="LOG DEBUG Request"
+                doc:id="a7b8c9d0-0007-0007-0007-000000000003"
+                message="#[output application/java --- 'LOG DEBUG | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId]" />
+
+        <!-- Delegate to the shared sub-flow (also used by MCP get_job_status tool) -->
+        <flow-ref name="pf-get-job-status"
+                  doc:name="pf-get-job-status"
+                  doc:id="a7b8c9d0-0007-0007-0007-000000000004" />
+
+    </flow>
+	
+	<!-- pf-get-job-status: retrieves a job record from Object Store         -->
+    <!-- Requires: vars.jobId                                                -->
+    <!-- Returns:  payload = JobStatus JSON (public fields only)             -->
+    <!-- Throws:   OS:KEY_NOT_FOUND → mapped to 404 by error handler         -->
+	<sub-flow name="pf-get-job-status" doc:id="b7ab308e-6ec3-4a73-930e-2e92806f6081" doc:description="Shared: retrieve job from Object Store by jobId. Called by REST and MCP." >
+		<logger level="DEBUG" doc:name="LOG DEBUG Status Lookup" doc:id="62f9de93-8c7f-476b-af3c-e77d5175f3bf" message="#[output application/java --- 'LOG DEBUG | flow=pf-get-job-status | correlationId=' ++ correlationId ++ ' | jobId=' ++ (vars.jobId default 'unknown')]" />
+		<os:retrieve doc:name="OS Retrieve Job Record" doc:id="63895e47-2b8f-4546-9d1c-f3a8aa1e0456" key="#[vars.jobId]" objectStore="jobStore" />
+		<ee:transform doc:name="DW Build JobStatus Response" doc:id="52a75152-0301-4176-98bb-9cef66599adc" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+// Human-readable message + recommended poll interval keyed by status.
+// nextPollSeconds = 0 means terminal — the caller should stop polling.
+var statusMeta = {
+    PROCESSING:    { message: "Upgrade accepted and queued.",                               nextPollSeconds: 5  },
+    ASSESSING:     { message: "Analyzing the repository and computing the change plan.",    nextPollSeconds: 5  },
+    COMMITTING:    { message: "Applying transforms and committing changes to a branch.",    nextPollSeconds: 5  },
+    COMMITTED:     { message: "Changes committed; opening a pull request.",                 nextPollSeconds: 5  },
+    PR_OPEN:       { message: "Pull request is open and ready for review/merge.",           nextPollSeconds: 0  },
+    DEPLOYING:     { message: "PR merged; CI/CD is building and deploying.",                nextPollSeconds: 10 },
+    DEPLOYED:      { message: "Upgrade deployed successfully.",                             nextPollSeconds: 0  },
+    FAILED_ASSESS: { message: "Assessment failed. See error for details.",                  nextPollSeconds: 0  },
+    FAILED_COMMIT: { message: "Commit/transform stage failed. See error for details.",      nextPollSeconds: 0  },
+    FAILED_CI:     { message: "CI build/tests failed after merge. See error for details.",  nextPollSeconds: 0  },
+    FAILED_DEPLOY: { message: "Deployment failed. See error for details.",                  nextPollSeconds: 0  }
+}
+var meta = statusMeta[payload.status]
+           default { message: ("Status: " ++ (payload.status default "UNKNOWN")), nextPollSeconds: 10 }
+---
+{
+    jobId:           payload.jobId,
+    status:          payload.status,
+    message:         meta.message,
+    nextPollSeconds: meta.nextPollSeconds
+}
+++ (if (payload.branchName  != null) { branchName:  payload.branchName  } else {})
+++ (if (payload.prUrl       != null) { prUrl:        payload.prUrl       } else {})
+++ (if (payload.prNumber    != null) { prNumber:     payload.prNumber    } else {})
+++ (if (payload.completedAt != null) { completedAt:  payload.completedAt } else {})
+++ (if (payload.error       != null) { error:        payload.error       } else {})]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<logger level="DEBUG" doc:name="LOG DEBUG Status Found" doc:id="c052784d-bb53-40f6-a228-a7663b245d6a" message="#[output application/java --- 'LOG DEBUG | flow=pf-get-job-status | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | status=' ++ payload.status]" />
+	</sub-flow>
+
+</mule>
