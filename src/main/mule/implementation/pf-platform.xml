@@ -194,7 +194,7 @@ var okList = ((p('anypoint.verify.healthyStatuses') default "") splitBy ",") map
                     <logger level="WARN"
                             doc:name="LOG WARN verify failed (non-fatal)"
                             doc:id="pfpt0004-0004-0004-0004-000000000011"
-                            message="#['LOG WARN | flow=pf-verify-deployment | platform verify failed (non-fatal), falling back to CI signal | app=$(vars.vfyApp default &quot;?&quot;) | error=$(error.description default &quot;unknown&quot;)']" />
+                            message="#['LOG WARN | flow=pf-verify-deployment | platform verify failed (non-fatal), falling back to CI signal | app=' ++ ((vars.vfyApp default '?') as String) ++ ' | error=' ++ ((error.description default 'unknown') as String)]" />
                     <set-variable variableName="verify"
                                   value="#[{ verified: false, found: false, status: 'UNKNOWN', healthy: false, runtimeVersion: null }]"
                                   doc:name="PV SET vars.verify (unverified)"

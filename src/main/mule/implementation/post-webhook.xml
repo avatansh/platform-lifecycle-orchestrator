@@ -346,6 +346,14 @@ output application/json
                               value="#[payload.environment default '']"
                               doc:name="PV SET vars.environment (from record)"
                               doc:id="b9c0d1e2-0009-0009-0009-000000000017a" />
+                <set-variable variableName="jiraTicketId"
+                              value="#[payload.jiraTicketId default null]"
+                              doc:name="PV SET vars.jiraTicketId (from record)"
+                              doc:id="b9c0d1e2-0009-0009-0009-000000000017b" />
+                <set-variable variableName="prUrl"
+                              value="#[payload.prUrl default null]"
+                              doc:name="PV SET vars.prUrl (from record)"
+                              doc:id="b9c0d1e2-0009-0009-0009-000000000017c" />
 
                 <!-- ── Step 5: Idempotency / terminal guard ─────────────────────────────────
                      If the job is already in a terminal state, return 200 and skip re-processing.
@@ -360,7 +368,7 @@ output application/json
                         <logger level="INFO"
                                 doc:name="LOG INFO CD Result Already Final"
                                 doc:id="b9c0d1e2-0009-0009-0009-000000000020"
-                                message="#['LOG INFO | flow=$(flow.name) | correlationId=$(correlationId) | cd-result already final, skipping | jobId=$(vars.jobId) | status=$(vars.curStatus)']" />
+                                message="#['LOG INFO | flow=' ++ (flow.name as String) ++ ' | correlationId=' ++ (correlationId as String) ++ ' | cd-result already final, skipping | jobId=' ++ (vars.jobId as String) ++ ' | status=' ++ (vars.curStatus as String)]" />
 
                         <ee:transform doc:name="DW Set 200 Idempotent Acknowledgement"
                                       doc:id="b9c0d1e2-0009-0009-0009-000000000021">
@@ -513,7 +521,7 @@ output application/json
                                                     <logger level="WARN"
                                                             doc:name="LOG WARN Slack DEPLOYED notification failed"
                                                             doc:id="b9c0d1e2-0009-0009-0009-000000000036"
-                                                            message="#['LOG WARN | flow=$(flow.name) | Slack DEPLOYED notification error swallowed: $(error.description default &quot;unknown&quot;)']" />
+                                                            message="#['LOG WARN | flow=' ++ (flow.name as String) ++ ' | Slack DEPLOYED notification error swallowed: ' ++ ((error.description default 'unknown') as String)]" />
                                                 </on-error-continue>
                                             </error-handler>
                                         </try>
@@ -526,10 +534,26 @@ output application/json
                                     </otherwise>
                                 </choice>
 
+                                <!-- ── 6a-iii: Jira comment on the final decision (with PR link) ──── -->
+                                <set-variable variableName="jiraCommentText"
+                                              value="#[if (vars.deployVerdict == 'DEPLOYED')
+                                                         ('Java 17 upgrade DEPLOYED for ' ++ (vars.appName as String) ++ ' (job ' ++ (vars.jobId as String) ++ '). Platform status: ' ++ ((vars.verify.status default 'n/a') as String) ++ '.')
+                                                       else
+                                                         ('Java 17 upgrade marked FAILED_DEPLOY for ' ++ (vars.appName as String) ++ ' (job ' ++ (vars.jobId as String) ++ '). CI reported success but platform status=' ++ ((vars.verify.status default 'UNKNOWN') as String) ++ '.')]"
+                                              doc:name="PV SET vars.jiraCommentText (finalize)"
+                                              doc:id="b9c0d1e2-0009-0009-0009-000000000037a" />
+                                <set-variable variableName="jiraCommentUrl"
+                                              value="#[vars.prUrl default vars.deployUrl default null]"
+                                              doc:name="PV SET vars.jiraCommentUrl (finalize)"
+                                              doc:id="b9c0d1e2-0009-0009-0009-000000000037b" />
+                                <flow-ref name="pf-jira-comment"
+                                          doc:name="pf-jira-comment (final decision)"
+                                          doc:id="b9c0d1e2-0009-0009-0009-000000000037c" />
+
                                 <logger level="INFO"
                                         doc:name="LOG INFO Job finalized"
                                         doc:id="b9c0d1e2-0009-0009-0009-000000000037"
-                                        message="#['LOG INFO | flow=$(flow.name) | correlationId=$(correlationId) | jobId=$(vars.jobId) | status=$(vars.deployVerdict) | platformVerified=$(vars.verify.verified default false) | platformStatus=$(vars.verify.status default &quot;n/a&quot;) | deployUrl=$(vars.deployUrl default &quot;n/a&quot;)']" />
+                                        message="#['LOG INFO | flow=' ++ (flow.name as String) ++ ' | correlationId=' ++ (correlationId as String) ++ ' | jobId=' ++ (vars.jobId as String) ++ ' | status=' ++ (vars.deployVerdict as String) ++ ' | platformVerified=' ++ ((vars.verify.verified default false) as String) ++ ' | platformStatus=' ++ ((vars.verify.status default 'n/a') as String) ++ ' | deployUrl=' ++ ((vars.deployUrl default 'n/a') as String)]" />
 
                                 <ee:transform doc:name="DW Set 200 finalized Acknowledgement"
                                               doc:id="b9c0d1e2-0009-0009-0009-000000000038">
@@ -596,6 +620,19 @@ vars.jobRec ++ {
                                 <flow-ref name="pf-notify-failure"
                                           doc:name="pf-notify-failure (FAILED_DEPLOY)"
                                           doc:id="b9c0d1e2-0009-0009-0009-000000000047" />
+
+                                <!-- Jira comment on the final decision (with PR link) -->
+                                <set-variable variableName="jiraCommentText"
+                                              value="#[('Java 17 upgrade FAILED_DEPLOY for ' ++ (vars.appName as String) ++ ' (job ' ++ (vars.jobId as String) ++ '). ' ++ ((vars.cdError default 'CD pipeline reported failure') as String) ++ ' Rollback attempted.')]"
+                                              doc:name="PV SET vars.jiraCommentText (failure)"
+                                              doc:id="b9c0d1e2-0009-0009-0009-000000000047a" />
+                                <set-variable variableName="jiraCommentUrl"
+                                              value="#[vars.prUrl default null]"
+                                              doc:name="PV SET vars.jiraCommentUrl (failure)"
+                                              doc:id="b9c0d1e2-0009-0009-0009-000000000047b" />
+                                <flow-ref name="pf-jira-comment"
+                                          doc:name="pf-jira-comment (failure)"
+                                          doc:id="b9c0d1e2-0009-0009-0009-000000000047c" />
 
                                 <logger level="WARN"
                                         doc:name="LOG WARN Job FAILED_DEPLOY"

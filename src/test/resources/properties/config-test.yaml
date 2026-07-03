@@ -8,3 +8,10 @@ api:
 # (env-specific config is loaded before config.yaml, so this overrides matrix.source=exchange.)
 matrix:
   source: "classpath"
+
+# Platform post-deploy verification hits Anypoint (token + AMC deployments). Disabled in
+# tests so the cd-result finalize path is deterministic (verify=DISABLED → trust CI signal)
+# and we don't have to mock three separate Anypoint HTTP calls just to reach DEPLOYED.
+anypoint:
+  verify:
+    enabled: "false"
