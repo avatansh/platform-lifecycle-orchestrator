@@ -424,10 +424,15 @@ output application/json
                                     </when>
                                     <otherwise doc:name="verify disabled"
                                                doc:id="b9c0d1e2-0009-0009-0009-000000000070">
-                                        <set-variable variableName="verify"
-                                                      value="#[{ verified: false, found: false, status: 'DISABLED', healthy: false, runtimeVersion: null }]"
-                                                      doc:name="PV SET vars.verify (disabled)"
-                                                      doc:id="b9c0d1e2-0009-0009-0009-000000000071" />
+                                        <ee:transform doc:name="DW SET vars.verify (disabled)"
+                                                      doc:id="b9c0d1e2-0009-0009-0009-000000000071">
+                                            <ee:variables>
+                                                <ee:set-variable variableName="verify"><![CDATA[%dw 2.0
+output application/java
+---
+{ verified: false, found: false, status: 'DISABLED', healthy: false, runtimeVersion: null }]]></ee:set-variable>
+                                            </ee:variables>
+                                        </ee:transform>
                                     </otherwise>
                                 </choice>
 
@@ -535,11 +540,13 @@ output application/json
                                 </choice>
 
                                 <!-- ── 6a-iii: Jira comment on the final decision (with PR link) ──── -->
-                                <set-variable variableName="jiraCommentText"
-                                              value="#[if (vars.deployVerdict == 'DEPLOYED')
-                                                         ('Java 17 upgrade DEPLOYED for ' ++ (vars.appName as String) ++ ' (job ' ++ (vars.jobId as String) ++ '). Platform status: ' ++ ((vars.verify.status default 'n/a') as String) ++ '.')
-                                                       else
-                                                         ('Java 17 upgrade marked FAILED_DEPLOY for ' ++ (vars.appName as String) ++ ' (job ' ++ (vars.jobId as String) ++ '). CI reported success but platform status=' ++ ((vars.verify.status default 'UNKNOWN') as String) ++ '.')]"
+<set-variable variableName="jiraCommentText"
+              value="#[output text/plain
+---
+if (vars.deployVerdict == 'DEPLOYED')
+    ('Java 17 upgrade DEPLOYED for ' ++ (vars.appName as String) ++ ' (job ' ++ (vars.jobId as String) ++ '). Platform status: ' ++ ((vars.verify.status default 'n/a') as String) ++ '.')
+else
+    ('Java 17 upgrade marked FAILED_DEPLOY for ' ++ (vars.appName as String) ++ ' (job ' ++ (vars.jobId as String) ++ '). CI reported success but platform status=' ++ ((vars.verify.status default 'UNKNOWN') as String) ++ '.')]"
                                               doc:name="PV SET vars.jiraCommentText (finalize)"
                                               doc:id="b9c0d1e2-0009-0009-0009-000000000037a" />
                                 <set-variable variableName="jiraCommentUrl"
@@ -623,7 +630,7 @@ vars.jobRec ++ {
 
                                 <!-- Jira comment on the final decision (with PR link) -->
                                 <set-variable variableName="jiraCommentText"
-                                              value="#[('Java 17 upgrade FAILED_DEPLOY for ' ++ (vars.appName as String) ++ ' (job ' ++ (vars.jobId as String) ++ '). ' ++ ((vars.cdError default 'CD pipeline reported failure') as String) ++ ' Rollback attempted.')]"
+                                              value="#[output text/plain --- ('Java 17 upgrade FAILED_DEPLOY for ' ++ (vars.appName as String) ++ ' (job ' ++ (vars.jobId as String) ++ '). ' ++ ((vars.cdError default 'CD pipeline reported failure') as String) ++ ' Rollback attempted.')]"
                                               doc:name="PV SET vars.jiraCommentText (failure)"
                                               doc:id="b9c0d1e2-0009-0009-0009-000000000047a" />
                                 <set-variable variableName="jiraCommentUrl"
