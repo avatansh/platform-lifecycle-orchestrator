@@ -166,8 +166,8 @@ read(payload, "application/yaml")]]></ee:set-payload>
                             <on-error-continue type="ANY"
                                                doc:name="On Error - classpath fallback"
                                                doc:id="pflm0001-0001-0001-0001-000000000012">
-                                <logger level="WARN"
-                                        doc:name="LOG WARN Exchange fetch failed"
+                                <logger level="ERROR"
+                                        doc:name="LOG ERROR Exchange fetch failed"
                                         doc:id="pflm0001-0001-0001-0001-000000000013"
                                         message="#[output application/java --- 'LOG WARN | flow=pf-load-matrix | correlationId=' ++ correlationId ++ ' | Exchange matrix fetch failed (' ++ (error.description default 'unknown error') ++ ') - falling back to bundled classpath matrix']" />
                                 <ee:transform doc:name="DW readUrl classpath fallback"
@@ -307,8 +307,8 @@ readUrl("classpath://registry/app-registry.yaml", "application/yaml")]]></ee:set
             <when expression="#[p('registry.enforceAllowList') == 'true' and vars.registry.apps[vars.appName] == null]"
                   doc:name="enforceAllowList=true AND app not in registry"
                   doc:id="pfrc0001-0001-0001-0001-000000000008">
-                <logger level="WARN"
-                        doc:name="LOG WARN App Not Allow-Listed"
+                <logger level="ERROR"
+                        doc:name="LOG ERROR App Not Allow-Listed"
                         doc:id="pfrc0001-0001-0001-0001-000000000009"
                         message="#[output application/java --- 'LOG WARN | flow=pf-resolve-coordinates | correlationId=' ++ correlationId ++ ' | app=' ++ vars.appName ++ ' not in registry and enforceAllowList=true — rejecting']" />
                 <raise-error type="VALIDATION:APP_NOT_REGISTERED"

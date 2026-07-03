@@ -288,25 +288,19 @@ output application/json
                        doc:id="b9c0d1e2-0009-0009-0009-000000000006">
 
                 <!-- ── Step 2: Parse CD callback body ─────────────────────────────────────── -->
-                <set-variable variableName="jobId"
-                              value="#[payload.jobId]"
-                              doc:name="PV SET vars.jobId"
-                              doc:id="b9c0d1e2-0009-0009-0009-000000000007" />
-                <set-variable variableName="cdResult"
-                              value="#[payload.result default '']"
-                              doc:name="PV SET vars.cdResult"
-                              doc:id="b9c0d1e2-0009-0009-0009-000000000008" />
-                <set-variable variableName="deployUrl"
-                              value="#[payload.deployUrl default null]"
-                              doc:name="PV SET vars.deployUrl"
-                              doc:id="b9c0d1e2-0009-0009-0009-000000000009" />
-                <set-variable variableName="cdError"
-                              value="#[payload.error default null]"
-                              doc:name="PV SET vars.cdError"
-                              doc:id="b9c0d1e2-0009-0009-0009-000000000010" />
 
                 <!-- ── Step 3: Load job record (throws OS:KEY_NOT_FOUND → 404 if missing) ── -->
-                <os:retrieve key="#[vars.jobId]"
+                <ee:transform doc:name="PV SET payload vars" doc:id="63c02425-9a3f-4309-ad9b-850f577a592d">
+					<ee:message>
+					</ee:message>
+					<ee:variables >
+						<ee:set-variable variableName="jobId" ><![CDATA[payload.jobId]]></ee:set-variable>
+						<ee:set-variable variableName="cdResult" ><![CDATA[payload.result default '']]></ee:set-variable>
+						<ee:set-variable variableName="deployUrl" ><![CDATA[payload.deployUrl default null]]></ee:set-variable>
+						<ee:set-variable variableName="cdError" ><![CDATA[payload.error default null]]></ee:set-variable>
+					</ee:variables>
+				</ee:transform>
+				<os:retrieve key="#[vars.jobId]"
                              objectStore="jobStore"
                              doc:name="OS Retrieve Job Record"
                              doc:id="b9c0d1e2-0009-0009-0009-000000000011" />
@@ -314,51 +308,27 @@ output application/json
                 <!-- ── Step 4: Capture record fields before any transform overwrites payload ─
                      jobRec holds the full record; downstream sub-flows (verify/rollback) run
                      HTTP calls that clobber `payload`, so finalize transforms build from jobRec. -->
-                <set-variable variableName="jobRec"
-                              value="#[payload]"
-                              doc:name="PV SET vars.jobRec (full record)"
-                              doc:id="b9c0d1e2-0009-0009-0009-000000000011a" />
-                <set-variable variableName="appName"
-                              value="#[payload.appName]"
-                              doc:name="PV SET vars.appName (from record)"
-                              doc:id="b9c0d1e2-0009-0009-0009-000000000012" />
-                <set-variable variableName="coords"
-                              value="#[payload.coords]"
-                              doc:name="PV SET vars.coords (from record)"
-                              doc:id="b9c0d1e2-0009-0009-0009-000000000013" />
-                <set-variable variableName="branchName"
-                              value="#[payload.branchName]"
-                              doc:name="PV SET vars.branchName (from record)"
-                              doc:id="b9c0d1e2-0009-0009-0009-000000000014" />
-                <set-variable variableName="commitSha"
-                              value="#[payload.commitSha]"
-                              doc:name="PV SET vars.commitSha (from record)"
-                              doc:id="b9c0d1e2-0009-0009-0009-000000000015" />
-                <set-variable variableName="prNumber"
-                              value="#[payload.prNumber]"
-                              doc:name="PV SET vars.prNumber (from record)"
-                              doc:id="b9c0d1e2-0009-0009-0009-000000000016" />
-                <set-variable variableName="curStatus"
-                              value="#[payload.status default '']"
-                              doc:name="PV SET vars.curStatus (from record)"
-                              doc:id="b9c0d1e2-0009-0009-0009-000000000017" />
-                <set-variable variableName="environment"
-                              value="#[payload.environment default '']"
-                              doc:name="PV SET vars.environment (from record)"
-                              doc:id="b9c0d1e2-0009-0009-0009-000000000017a" />
-                <set-variable variableName="jiraTicketId"
-                              value="#[payload.jiraTicketId default null]"
-                              doc:name="PV SET vars.jiraTicketId (from record)"
-                              doc:id="b9c0d1e2-0009-0009-0009-000000000017b" />
-                <set-variable variableName="prUrl"
-                              value="#[payload.prUrl default null]"
-                              doc:name="PV SET vars.prUrl (from record)"
-                              doc:id="b9c0d1e2-0009-0009-0009-000000000017c" />
+				<ee:transform doc:name="PVT SET record vars" doc:id="665264f0-76f0-4ddb-8e2d-4b2478119611">
+											<ee:message>
+											</ee:message>
+					<ee:variables>
+						<ee:set-variable variableName="jobRec"><![CDATA[payload]]></ee:set-variable>
+						<ee:set-variable variableName="appName"><![CDATA[payload.appName]]></ee:set-variable>
+						<ee:set-variable variableName="coords"><![CDATA[payload.coords]]></ee:set-variable>
+						<ee:set-variable variableName="branchName"><![CDATA[payload.branchName]]></ee:set-variable>
+						<ee:set-variable variableName="commitSha"><![CDATA[payload.commitSha]]></ee:set-variable>
+						<ee:set-variable variableName="prNumber"><![CDATA[payload.prNumber]]></ee:set-variable>
+						<ee:set-variable variableName="curStatus"><![CDATA[payload.status default '']]></ee:set-variable>
+						<ee:set-variable variableName="environment" ><![CDATA[payload.environment default '']]></ee:set-variable>
+						<ee:set-variable variableName="jiraTicketId" ><![CDATA[payload.jiraTicketId default null]]></ee:set-variable>
+						<ee:set-variable variableName="prUrl" ><![CDATA[payload.prUrl default null]]></ee:set-variable>
+					</ee:variables>
+										</ee:transform>
 
                 <!-- ── Step 5: Idempotency / terminal guard ─────────────────────────────────
                      If the job is already in a terminal state, return 200 and skip re-processing.
                      ──────────────────────────────────────────────────────────────────────────── -->
-                <choice doc:name="CHOICE already terminal?"
+				<choice doc:name="CHOICE already terminal?"
                         doc:id="b9c0d1e2-0009-0009-0009-000000000018"
                         doc:description="Skip if the job was already finalized by a previous cd-result callback">
                     <when expression="#[vars.curStatus == 'DEPLOYED' or vars.curStatus == 'FAILED_DEPLOY']"
@@ -406,18 +376,15 @@ output application/json
                                     <when expression="#[(p('anypoint.verify.enabled') default 'true') == 'true']"
                                           doc:name="verify enabled"
                                           doc:id="b9c0d1e2-0009-0009-0009-00000000006b">
-                                        <set-variable variableName="vfyApp"
-                                                      value="#[vars.appName]"
-                                                      doc:name="PV SET vfyApp"
-                                                      doc:id="b9c0d1e2-0009-0009-0009-00000000006c" />
-                                        <set-variable variableName="vfyEnv"
-                                                      value="#[vars.environment default '']"
-                                                      doc:name="PV SET vfyEnv"
-                                                      doc:id="b9c0d1e2-0009-0009-0009-00000000006d" />
-                                        <set-variable variableName="vfyOrgId"
-                                                      value="#[vars.coords.orgId default p('anypoint.defaultOrgId')]"
-                                                      doc:name="PV SET vfyOrgId"
-                                                      doc:id="b9c0d1e2-0009-0009-0009-00000000006e" />
+                                        <ee:transform doc:name="PV SET vars" doc:id="74c02f41-5bd4-4f0e-9d40-5657c83652d0">
+											<ee:message>
+											</ee:message>
+											<ee:variables>
+												<ee:set-variable variableName="vfyEnv"><![CDATA[vars.environment default '']]></ee:set-variable>
+												<ee:set-variable variableName="vfyOrgId"><![CDATA[vars.coords.orgId default p('anypoint.defaultOrgId')]]></ee:set-variable>
+												<ee:set-variable variableName="vfyApp"><![CDATA[vars.appName]]></ee:set-variable>
+											</ee:variables>
+										</ee:transform>
                                         <flow-ref name="pf-verify-deployment"
                                                   doc:name="pf-verify-deployment"
                                                   doc:id="b9c0d1e2-0009-0009-0009-00000000006f" />
@@ -461,8 +428,7 @@ vars.jobRec ++ {
     else {})]]></ee:set-payload>
                                     </ee:message>
                                 </ee:transform>
-
-                                <os:store key="#[vars.jobId]"
+								<os:store key="#[vars.jobId]"
                                           objectStore="jobStore"
                                           doc:name="OS Store finalized Job Record"
                                           doc:id="b9c0d1e2-0009-0009-0009-000000000026">

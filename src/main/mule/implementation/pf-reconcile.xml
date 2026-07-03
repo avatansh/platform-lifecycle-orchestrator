@@ -28,11 +28,14 @@
         <os:retrieve-all-keys objectStore="jobStore"
                               doc:name="OS Retrieve All Keys" doc:id="pfrc0001-0001-0001-0001-000000000004" />
 
-        <set-variable variableName="jobKeys" doc:name="PV SET jobKeys" doc:id="pfrc0001-0001-0001-0001-000000000005"
-                      value="#[(payload default []) filter ($ startsWith 'job-')]" />
-
-        <set-variable variableName="fixed" doc:name="PV INIT fixed=0" doc:id="pfrc0001-0001-0001-0001-000000000006"
-                      value="#[0]" />
+        <ee:transform doc:name="PV SET jobKeys and INIT fixed" doc:id="d7f70474-11f5-4bfa-84ad-d90b6dc3377f" >
+			<ee:message >
+			</ee:message>
+			<ee:variables >
+				<ee:set-variable variableName="jobKeys" ><![CDATA[(payload default []) filter ($ startsWith 'job-')]]></ee:set-variable>
+				<ee:set-variable variableName="fixed" ><![CDATA[0]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
 
         <foreach collection="#[vars.jobKeys]" doc:name="FOR EACH job key" doc:id="pfrc0001-0001-0001-0001-000000000007">
 
@@ -128,14 +131,16 @@
                         <choice doc:name="CHOICE verify enabled?" doc:id="pfrc0001-0001-0001-0001-000000000041">
                             <when expression="#[(p('anypoint.verify.enabled') default 'true') == 'true']"
                                   doc:name="verify enabled" doc:id="pfrc0001-0001-0001-0001-000000000042">
-
-                                <set-variable variableName="vfyApp" value="#[vars.rec.appName]"
-                                              doc:name="PV SET vfyApp" doc:id="pfrc0001-0001-0001-0001-000000000043" />
-                                <set-variable variableName="vfyEnv" value="#[vars.rec.environment default '']"
-                                              doc:name="PV SET vfyEnv" doc:id="pfrc0001-0001-0001-0001-000000000044" />
-                                <set-variable variableName="vfyOrgId" value="#[vars.rec.coords.orgId default p('anypoint.defaultOrgId')]"
-                                              doc:name="PV SET vfyOrgId" doc:id="pfrc0001-0001-0001-0001-000000000045" />
-                                <flow-ref name="pf-verify-deployment" doc:name="pf-verify-deployment"
+                                <ee:transform doc:name="PV SET vfy - app, env, orgId" doc:id="fcf7357f-b3b1-4e43-8cf7-fdfbbf93f25d">
+									<ee:message>
+									</ee:message>
+									<ee:variables >
+										<ee:set-variable variableName="vfyApp" ><![CDATA[vars.rec.appName]]></ee:set-variable>
+										<ee:set-variable variableName="vfyEnv" ><![CDATA[vars.rec.environment default '']]></ee:set-variable>
+										<ee:set-variable variableName="vfyOrgId" ><![CDATA[vars.rec.coords.orgId default p('anypoint.defaultOrgId')]]></ee:set-variable>
+									</ee:variables>
+								</ee:transform>
+								<flow-ref name="pf-verify-deployment" doc:name="pf-verify-deployment"
                                           doc:id="pfrc0001-0001-0001-0001-000000000046" />
 
                                 <choice doc:name="CHOICE platform verdict?" doc:id="pfrc0001-0001-0001-0001-000000000047">
@@ -176,11 +181,10 @@
 
                                     <when expression="#[(vars.verify.verified default false) and not (vars.verify.healthy default false)]"
                                           doc:name="platform unhealthy → FAILED_DEPLOY" doc:id="pfrc0001-0001-0001-0001-000000000058">
-                                        <os:retrieve key="#[vars.k]" objectStore="jobStore"
-                                                     doc:name="OS Re-retrieve before FAILED_DEPLOY" doc:id="pfrc0001-0001-0001-0001-000000000059">
+										<os:retrieve key="#[vars.k]" objectStore="jobStore" doc:name="OS Re-retrieve before FAILED_DEPLOY" doc:id="pfrc0001-0001-0001-0001-000000000059">
                                             <os:default-value>#[{}]</os:default-value>
                                         </os:retrieve>
-                                        <ee:transform doc:name="DW FAILED_DEPLOY (reconciled)" doc:id="pfrc0001-0001-0001-0001-000000000060">
+										<ee:transform doc:name="DW FAILED_DEPLOY (reconciled)" doc:id="pfrc0001-0001-0001-0001-000000000060">
                                             <ee:message><ee:set-payload><![CDATA[%dw 2.0 output application/json
 --- payload ++ { status: "FAILED_DEPLOY",
     error: "cd-result timed out; platform status=" ++ (vars.verify.status default "UNKNOWN"),
@@ -188,7 +192,7 @@
     completedAt: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
     updatedAt: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"} }]]></ee:set-payload></ee:message>
                                         </ee:transform>
-                                        <os:store key="#[vars.k]" objectStore="jobStore"
+										<os:store key="#[vars.k]" objectStore="jobStore"
                                                   doc:name="OS Store FAILED_DEPLOY" doc:id="pfrc0001-0001-0001-0001-000000000061">
                                             <os:value>#[payload]</os:value>
                                         </os:store>

@@ -93,23 +93,17 @@
 
         <!-- Snapshot inbound payload FIRST so vars.requestBody is the tool-parameters object,
              not a later-overwritten value (e.g. after pf-load-matrix clobbers payload). -->
-        <set-variable variableName="requestBody"
-                      value="#[payload]"
-                      doc:name="PV SET requestBody"
-                      doc:id="mc1a0001-0001-0001-0001-000000000007" />
+        <ee:transform doc:name="PV SET vars" doc:id="881095c6-148c-4e18-8d58-0716c03b5a3a" >
+			<ee:message >
+			</ee:message>
+			<ee:variables >
+				<ee:set-variable variableName="requestBody" ><![CDATA[payload]]></ee:set-variable>
+				<ee:set-variable variableName="appName" ><![CDATA[payload.appName]]></ee:set-variable>
+				<ee:set-variable variableName="environment" ><![CDATA[payload.environment]]></ee:set-variable>
+				<ee:set-variable variableName="jiraTicketId" ><![CDATA[payload.jiraTicketId default null]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
         <!-- Map MCP tool parameters to variables consumed by the shared sub-flow -->
-        <set-variable variableName="appName"
-                      value="#[payload.appName]"
-                      doc:name="PV SET appName"
-                      doc:id="mc1a0001-0001-0001-0001-000000000003" />
-        <set-variable variableName="environment"
-                      value="#[payload.environment]"
-                      doc:name="PV SET environment"
-                      doc:id="mc1a0001-0001-0001-0001-000000000004" />
-        <set-variable variableName="jiraTicketId"
-                      value="#[payload.jiraTicketId default null]"
-                      doc:name="PV SET jiraTicketId"
-                      doc:id="mc1a0001-0001-0001-0001-000000000005" />
 
         <flow-ref name="pf-assess-app"
                   doc:name="pf-assess-app"
@@ -189,27 +183,17 @@
         </mcp:tool-listener>
 
         <!-- Snapshot inbound payload FIRST so vars.requestBody is the tool-parameters object. -->
-        <set-variable variableName="requestBody"
-                      value="#[payload]"
-                      doc:name="PV SET requestBody"
-                      doc:id="mc2b0002-0002-0002-0002-000000000008" />
+        <ee:transform doc:name="PV SET vars" doc:id="43ec1165-86ef-4da3-a3f1-99b084fb698a">
+			<ee:message />
+			<ee:variables>
+				<ee:set-variable variableName="requestBody"><![CDATA[payload]]></ee:set-variable>
+				<ee:set-variable variableName="appName"><![CDATA[payload.appName]]></ee:set-variable>
+				<ee:set-variable variableName="environment"><![CDATA[payload.environment]]></ee:set-variable>
+				<ee:set-variable variableName="jiraTicketId"><![CDATA[payload.jiraTicketId default null]]></ee:set-variable>
+				<ee:set-variable variableName="approvedChangePlan" ><![CDATA[payload.approvedChangePlan]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
         <!-- Map MCP tool parameters to variables consumed by the shared sub-flow -->
-        <set-variable variableName="appName"
-                      value="#[payload.appName]"
-                      doc:name="PV SET appName"
-                      doc:id="mc2b0002-0002-0002-0002-000000000003" />
-        <set-variable variableName="environment"
-                      value="#[payload.environment]"
-                      doc:name="PV SET environment"
-                      doc:id="mc2b0002-0002-0002-0002-000000000004" />
-        <set-variable variableName="jiraTicketId"
-                      value="#[payload.jiraTicketId]"
-                      doc:name="PV SET jiraTicketId"
-                      doc:id="mc2b0002-0002-0002-0002-000000000005" />
-        <set-variable variableName="approvedChangePlan"
-                      value="#[payload.approvedChangePlan]"
-                      doc:name="PV SET approvedChangePlan"
-                      doc:id="mc2b0002-0002-0002-0002-000000000006" />
 
         <flow-ref name="pf-start-upgrade"
                   doc:name="pf-start-upgrade"

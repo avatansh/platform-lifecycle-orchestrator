@@ -42,14 +42,14 @@ output application/java
                  doc:name="FOR EACH changed file"
                  doc:id="pf000004-0004-0004-0004-000000000004">
 
-            <set-variable variableName="currentPath"
-                          value="#[payload.path]"
-                          doc:name="PV SET currentPath"
-                          doc:id="pf000004-0004-0004-0004-000000000005" />
-            <set-variable variableName="currentFileEdits"
-                          value="#[payload.edits]"
-                          doc:name="PV SET currentFileEdits"
-                          doc:id="pf000004-0004-0004-0004-000000000006" />
+            <ee:transform doc:name="PV SET currentPath and currentFileEdits" doc:id="de932832-6df8-4a3f-814e-06bbd87793de" >
+				<ee:message >
+				</ee:message>
+				<ee:variables >
+					<ee:set-variable variableName="currentPath" ><![CDATA[payload.path]]></ee:set-variable>
+					<ee:set-variable variableName="currentFileEdits" ><![CDATA[payload.edits]]></ee:set-variable>
+				</ee:variables>
+			</ee:transform>
 
             <http:request method="GET"
                           config-ref="GitHub_Request"

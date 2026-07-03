@@ -23,8 +23,8 @@
                            logException="false"
                            doc:name="APIKIT Bad Request"
                            doc:id="c3d4e5f6-0003-0003-0003-000000000002">
-            <logger level="WARN"
-                    doc:name="LOG WARN Bad Request"
+            <logger level="ERROR"
+                    doc:name="LOG ERROR Bad Request"
                     doc:id="c3d4e5f6-0003-0003-0003-000000000003"
                     message="#[output application/java --- 'LOG WARN | flow=' ++ (vars.flowName default 'unknown') ++ ' | correlationId=' ++ correlationId ++ ' | status=400 | ' ++ error.description]" />
             <ee:transform doc:name="DW Set 400 Response" doc:id="c3d4e5f6-0003-0003-0003-000000000004">
@@ -46,8 +46,8 @@ output application/json
                            logException="false"
                            doc:name="APIKIT Not Found"
                            doc:id="c3d4e5f6-0003-0003-0003-000000000005">
-            <logger level="WARN"
-                    doc:name="LOG WARN Not Found"
+            <logger level="ERROR"
+                    doc:name="LOG ERROR Not Found"
                     doc:id="c3d4e5f6-0003-0003-0003-000000000006"
                     message="#[output application/java --- 'LOG WARN | flow=' ++ (vars.flowName default 'unknown') ++ ' | correlationId=' ++ correlationId ++ ' | status=404 | ' ++ error.description]" />
             <ee:transform doc:name="DW Set 404 Response" doc:id="c3d4e5f6-0003-0003-0003-000000000007">
@@ -69,8 +69,8 @@ output application/json
                            logException="false"
                            doc:name="APIKIT Method Not Allowed"
                            doc:id="c3d4e5f6-0003-0003-0003-000000000008">
-            <logger level="WARN"
-                    doc:name="LOG WARN Method Not Allowed"
+            <logger level="ERROR"
+                    doc:name="LOG ERROR Method Not Allowed"
                     doc:id="c3d4e5f6-0003-0003-0003-000000000009"
                     message="#[output application/java --- 'LOG WARN | flow=' ++ (vars.flowName default 'unknown') ++ ' | correlationId=' ++ correlationId ++ ' | status=405 | ' ++ error.description]" />
             <ee:transform doc:name="DW Set 405 Response" doc:id="c3d4e5f6-0003-0003-0003-000000000010">
@@ -92,8 +92,8 @@ output application/json
                            logException="false"
                            doc:name="APIKIT Not Acceptable"
                            doc:id="c3d4e5f6-0003-0003-0003-000000000011">
-            <logger level="WARN"
-                    doc:name="LOG WARN Not Acceptable"
+            <logger level="ERROR"
+                    doc:name="LOG ERROR Not Acceptable"
                     doc:id="c3d4e5f6-0003-0003-0003-000000000012"
                     message="#[output application/java --- 'LOG WARN | flow=' ++ (vars.flowName default 'unknown') ++ ' | correlationId=' ++ correlationId ++ ' | status=406 | ' ++ error.description]" />
             <ee:transform doc:name="DW Set 406 Response" doc:id="c3d4e5f6-0003-0003-0003-000000000013">
@@ -115,8 +115,8 @@ output application/json
                            logException="false"
                            doc:name="APIKIT Unsupported Media Type"
                            doc:id="c3d4e5f6-0003-0003-0003-000000000014">
-            <logger level="WARN"
-                    doc:name="LOG WARN Unsupported Media Type"
+            <logger level="ERROR"
+                    doc:name="LOG ERROR Unsupported Media Type"
                     doc:id="c3d4e5f6-0003-0003-0003-000000000015"
                     message="#[output application/java --- 'LOG WARN | flow=' ++ (vars.flowName default 'unknown') ++ ' | correlationId=' ++ correlationId ++ ' | status=415 | ' ++ error.description]" />
             <ee:transform doc:name="DW Set 415 Response" doc:id="c3d4e5f6-0003-0003-0003-000000000016">
@@ -138,8 +138,8 @@ output application/json
                            logException="false"
                            doc:name="Object Store Key Not Found"
                            doc:id="c3d4e5f6-0003-0003-0003-000000000017">
-            <logger level="WARN"
-                    doc:name="LOG WARN Job Not Found"
+            <logger level="ERROR"
+                    doc:name="LOG ERROR Job Not Found"
                     doc:id="c3d4e5f6-0003-0003-0003-000000000018"
                     message="#[output application/java --- 'LOG WARN | flow=' ++ (vars.flowName default 'unknown') ++ ' | correlationId=' ++ correlationId ++ ' | status=404 | jobId not found: ' ++ (vars.jobId default 'unknown')]" />
             <ee:transform doc:name="DW Set 404 Job Not Found" doc:id="c3d4e5f6-0003-0003-0003-000000000019">
@@ -166,8 +166,8 @@ output application/json
                            logException="false"
                            doc:name="Validation Bad Request"
                            doc:id="c3d4e5f6-0003-0003-0003-000000000023">
-            <logger level="WARN"
-                    doc:name="LOG WARN Validation"
+            <logger level="ERROR"
+                    doc:name="LOG ERROR Validation"
                     doc:id="c3d4e5f6-0003-0003-0003-000000000024"
                     message="#[output application/java --- 'LOG WARN | flow=' ++ (vars.flowName default 'unknown') ++ ' | correlationId=' ++ correlationId ++ ' | status=400 | errorType=' ++ error.errorType.identifier ++ ' | ' ++ error.description]" />
             <ee:transform doc:name="DW Set 400 Validation Response" doc:id="c3d4e5f6-0003-0003-0003-000000000025">
@@ -191,8 +191,8 @@ output application/json
                            logException="false"
                            doc:name="Conflict"
                            doc:id="c3d4e5f6-0003-0003-0003-000000000026">
-            <logger level="WARN"
-                    doc:name="LOG WARN Conflict"
+            <logger level="ERROR"
+                    doc:name="LOG ERROR Conflict"
                     doc:id="c3d4e5f6-0003-0003-0003-000000000027"
                     message="#[output application/java --- 'LOG WARN | flow=' ++ (vars.flowName default 'unknown') ++ ' | correlationId=' ++ correlationId ++ ' | status=409 | errorType=' ++ error.errorType.identifier ++ ' | ' ++ error.description]" />
             <ee:transform doc:name="DW Set 409 Conflict Response" doc:id="c3d4e5f6-0003-0003-0003-000000000028">

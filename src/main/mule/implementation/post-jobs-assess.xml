@@ -1,9 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+<mule xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns="http://www.mulesoft.org/schema/mule/core"
       xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
-      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-      xsi:schemaLocation="
-        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd">
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
 
     <!--
         REST entry point for POST /jobs/assess.
@@ -18,28 +19,21 @@
 
         <!-- Snapshot inbound HTTP body FIRST — before any sub-flow call overwrites payload.
              vars.requestBody is read by pf-resolve-coordinates for Tier-2 coordinate overrides. -->
-        <set-variable variableName="requestBody"
-                      value="#[payload]"
-                      doc:name="PV SET requestBody"
-                      doc:id="e5f6a7b8-0005-0005-0005-000000000009" />
-        <logger level="DEBUG"
+        <ee:transform doc:name="PV SET vars" doc:id="c8192ad3-9cb6-4f85-b43c-7a061713781e">
+			<ee:message />
+			<ee:variables>
+				<ee:set-variable variableName="requestBody"><![CDATA[payload]]></ee:set-variable>
+				<ee:set-variable variableName="appName"><![CDATA[payload.appName]]></ee:set-variable>
+				<ee:set-variable variableName="environment"><![CDATA[payload.environment]]></ee:set-variable>
+				<ee:set-variable variableName="jiraTicketId"><![CDATA[payload.jiraTicketId]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+		<logger level="DEBUG"
                 doc:name="LOG DEBUG Request"
                 doc:id="e5f6a7b8-0005-0005-0005-000000000002"
                 message="#[output application/java --- 'LOG DEBUG | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | app=' ++ (payload.appName default 'unknown') ++ ' | env=' ++ (payload.environment default 'unknown')]" />
 
         <!-- Map HTTP request body fields to variables expected by pf-assess-app -->
-        <set-variable variableName="appName"
-                      value="#[payload.appName]"
-                      doc:name="PV SET appName"
-                      doc:id="e5f6a7b8-0005-0005-0005-000000000003" />
-        <set-variable variableName="environment"
-                      value="#[payload.environment]"
-                      doc:name="PV SET environment"
-                      doc:id="e5f6a7b8-0005-0005-0005-000000000004" />
-        <set-variable variableName="jiraTicketId"
-                      value="#[payload.jiraTicketId default null]"
-                      doc:name="PV SET jiraTicketId"
-                      doc:id="e5f6a7b8-0005-0005-0005-000000000005" />
 
         <!-- Delegate to the shared sub-flow (also used by MCP assess_app tool) -->
         <flow-ref name="pf-assess-app"

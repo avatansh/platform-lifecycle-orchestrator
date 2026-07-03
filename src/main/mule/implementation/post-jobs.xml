@@ -21,32 +21,23 @@
 
         <!-- Snapshot inbound HTTP body FIRST — before any sub-flow call overwrites payload.
              vars.requestBody is read by pf-resolve-coordinates for Tier-2 coordinate overrides. -->
-        <set-variable variableName="requestBody"
-                      value="#[payload]"
-                      doc:name="PV SET requestBody"
-                      doc:id="f6a7b8c9-0006-0006-0006-000000000009" />
-        <logger level="DEBUG"
+        <ee:transform doc:name="PV SET vars" doc:id="98ce5115-7877-4aa8-ac40-4cfb98e0a71b" >
+			<ee:message >
+			</ee:message>
+			<ee:variables >
+				<ee:set-variable variableName="requestBody" ><![CDATA[payload]]></ee:set-variable>
+				<ee:set-variable variableName="appName" ><![CDATA[payload.appName]]></ee:set-variable>
+				<ee:set-variable variableName="environment" ><![CDATA[payload.environment]]></ee:set-variable>
+				<ee:set-variable variableName="jiraTicketId" ><![CDATA[payload.jiraTicketId]]></ee:set-variable>
+				<ee:set-variable variableName="approvedChangePlan" ><![CDATA[payload.approvedChangePlan]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+		<logger level="DEBUG"
                 doc:name="LOG DEBUG Request"
                 doc:id="f6a7b8c9-0006-0006-0006-000000000002"
                 message="#[output application/java --- 'LOG DEBUG | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | app=' ++ (payload.appName default 'unknown')]" />
 
         <!-- Map HTTP request body fields to variables expected by pf-start-upgrade -->
-        <set-variable variableName="appName"
-                      value="#[payload.appName]"
-                      doc:name="PV SET appName"
-                      doc:id="f6a7b8c9-0006-0006-0006-000000000003" />
-        <set-variable variableName="environment"
-                      value="#[payload.environment]"
-                      doc:name="PV SET environment"
-                      doc:id="f6a7b8c9-0006-0006-0006-000000000004" />
-        <set-variable variableName="jiraTicketId"
-                      value="#[payload.jiraTicketId]"
-                      doc:name="PV SET jiraTicketId"
-                      doc:id="f6a7b8c9-0006-0006-0006-000000000005" />
-        <set-variable variableName="approvedChangePlan"
-                      value="#[payload.approvedChangePlan]"
-                      doc:name="PV SET approvedChangePlan"
-                      doc:id="f6a7b8c9-0006-0006-0006-000000000006" />
 
         <!-- Delegate to the shared sub-flow (also used by MCP start_upgrade tool) -->
         <flow-ref name="pf-start-upgrade"

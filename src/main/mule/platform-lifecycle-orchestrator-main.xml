@@ -1,13 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<mule xmlns:apikit="http://www.mulesoft.org/schema/mule/mule-apikit"
+<mule xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns:apikit="http://www.mulesoft.org/schema/mule/mule-apikit"
       xmlns:http="http://www.mulesoft.org/schema/mule/http"
       xmlns="http://www.mulesoft.org/schema/mule/core"
       xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
-      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-      xsi:schemaLocation="
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="
         http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
         http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
-        http://www.mulesoft.org/schema/mule/mule-apikit http://www.mulesoft.org/schema/mule/mule-apikit/current/mule-apikit.xsd">
+        http://www.mulesoft.org/schema/mule/mule-apikit http://www.mulesoft.org/schema/mule/mule-apikit/current/mule-apikit.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
 
     <!--
         Main entry-point flow for the Platform Lifecycle Orchestrator API.
@@ -32,18 +33,20 @@
         </http:listener>
 
         <!-- Capture flow name for use in log and error messages -->
-        <set-variable
-            variableName="flowName"
-            value="#[flow.name]"
-            doc:name="PV SET flowName"
-            doc:id="d4e5f6a7-0004-0004-0004-000000000003" />
+        <ee:transform doc:name="PV SET vars" doc:id="9ea17760-bb72-438f-834a-b4310f33bd60" >
+			<ee:message >
+			</ee:message>
+			<ee:variables >
+				<ee:set-variable variableName="flowName" ><![CDATA[flow.name]]></ee:set-variable>
+				<ee:set-variable variableName="externalTranId" ><![CDATA[attributes.headers['x-correlation-id'] default correlationId]]></ee:set-variable>
+				<ee:set-variable variableName="rawBody" ><![CDATA[write(payload, 'application/json') as Binary]]></ee:set-variable>
+				<ee:set-variable variableName="ghSignature" ><![CDATA[attributes.headers['x-hub-signature-256'] default '']]></ee:set-variable>
+				<ee:set-variable variableName="ghDelivery" ><![CDATA[attributes.headers['x-github-delivery'] default '']]></ee:set-variable>
+				<ee:set-variable variableName="ghEvent" ><![CDATA[attributes.headers['x-github-event'] default '']]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
 
         <!-- Capture inbound X-Correlation-Id header for distributed tracing -->
-        <set-variable
-            variableName="externalTranId"
-            value="#[attributes.headers['x-correlation-id'] default correlationId]"
-            doc:name="PV SET externalTranId"
-            doc:id="d4e5f6a7-0004-0004-0004-000000000004" />
 
         <logger
             level="INFO"
@@ -56,29 +59,6 @@
             parses the payload. These are cheap set-variable steps that are harmless for
             non-webhook routes; repeatable streams ensure APIkit can still read the body.
         -->
-        <set-variable variableName="rawBody"
-                      value="#[write(payload, 'application/json') as Binary]"
-                      doc:name="PV SET rawBody"
-                      doc:id="d4e5f6a7-0004-0004-0004-000000000020"
-                      doc:description="Raw request bytes used for GitHub HMAC signature verification. Uses write() because this runtime presents the JSON body as a parsed Object, which 'payload as Binary' cannot coerce directly." />
-
-        <set-variable variableName="ghSignature"
-                      value="#[attributes.headers['x-hub-signature-256'] default '']"
-                      doc:name="PV SET ghSignature"
-                      doc:id="d4e5f6a7-0004-0004-0004-000000000021"
-                      doc:description="GitHub HMAC-SHA256 signature header sent with every webhook delivery" />
-
-        <set-variable variableName="ghDelivery"
-                      value="#[attributes.headers['x-github-delivery'] default '']"
-                      doc:name="PV SET ghDelivery"
-                      doc:id="d4e5f6a7-0004-0004-0004-000000000022"
-                      doc:description="GitHub unique delivery UUID — used as idempotency key" />
-
-        <set-variable variableName="ghEvent"
-                      value="#[attributes.headers['x-github-event'] default '']"
-                      doc:name="PV SET ghEvent"
-                      doc:id="d4e5f6a7-0004-0004-0004-000000000023"
-                      doc:description="GitHub event type (e.g. pull_request, push, ping)" />
 
         <apikit:router
             config-ref="platform-lifecycle-orchestrator-config"
