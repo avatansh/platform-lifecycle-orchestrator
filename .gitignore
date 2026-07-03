@@ -26,6 +26,8 @@ target-test.log
 test-run.log
 .mvn/
 docs/
+munit-verify.log
+
 
 
 # ─────────────────────────────────────────────────────────────

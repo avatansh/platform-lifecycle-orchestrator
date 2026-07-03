@@ -1911,7 +1911,7 @@ output application/json
                     <logger level="WARN"
                             doc:name="LOG WARN failure notification itself failed"
                             doc:id="pfnf0001-0001-0001-0001-000000000011"
-                            message="#['LOG WARN | flow=pf-notify-failure | correlationId=' ++ correlationId ++ ' | jobId=' ++ (vars.jobId default '?') ++ ' | failure notification error swallowed: ' ++ (error.description default 'unknown')]" />
+                            message="#['LOG WARN | flow=pf-notify-failure | correlationId=$(correlationId) | jobId=$(vars.jobId default &quot;?&quot;) | failure notification error swallowed: $(error.description default &quot;unknown&quot;)']" />
                 </on-error-continue>
             </error-handler>
         </try>
@@ -2120,7 +2120,7 @@ payload ++ {
                     <logger level="WARN"
                             doc:name="LOG WARN pf-rollback failed"
                             doc:id="pfrl0001-0001-0001-0001-000000000026"
-                            message="#['LOG WARN | flow=pf-rollback | correlationId=' ++ correlationId ++ ' | jobId=' ++ (vars.jobId default '?') ++ ' | rollback error swallowed: ' ++ (error.description default 'unknown')]" />
+                            message="#['LOG WARN | flow=pf-rollback | correlationId=$(correlationId) | jobId=$(vars.jobId default &quot;?&quot;) | rollback error swallowed: $(error.description default &quot;unknown&quot;)']" />
                 </on-error-continue>
             </error-handler>
         </try>

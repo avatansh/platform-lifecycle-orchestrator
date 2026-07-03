@@ -360,7 +360,7 @@ output application/json
                         <logger level="INFO"
                                 doc:name="LOG INFO CD Result Already Final"
                                 doc:id="b9c0d1e2-0009-0009-0009-000000000020"
-                                message="#['LOG INFO | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | cd-result already final, skipping | jobId=' ++ vars.jobId ++ ' | status=' ++ vars.curStatus]" />
+                                message="#['LOG INFO | flow=$(flow.name) | correlationId=$(correlationId) | cd-result already final, skipping | jobId=$(vars.jobId) | status=$(vars.curStatus)']" />
 
                         <ee:transform doc:name="DW Set 200 Idempotent Acknowledgement"
                                       doc:id="b9c0d1e2-0009-0009-0009-000000000021">
@@ -513,7 +513,7 @@ output application/json
                                                     <logger level="WARN"
                                                             doc:name="LOG WARN Slack DEPLOYED notification failed"
                                                             doc:id="b9c0d1e2-0009-0009-0009-000000000036"
-                                                            message="#['LOG WARN | flow=' ++ flow.name ++ ' | Slack DEPLOYED notification error swallowed: ' ++ (error.description default 'unknown')]" />
+                                                            message="#['LOG WARN | flow=$(flow.name) | Slack DEPLOYED notification error swallowed: $(error.description default &quot;unknown&quot;)']" />
                                                 </on-error-continue>
                                             </error-handler>
                                         </try>
@@ -529,7 +529,7 @@ output application/json
                                 <logger level="INFO"
                                         doc:name="LOG INFO Job finalized"
                                         doc:id="b9c0d1e2-0009-0009-0009-000000000037"
-                                        message="#['LOG INFO | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | status=' ++ vars.deployVerdict ++ ' | platformVerified=' ++ ((vars.verify.verified default false) as String) ++ ' | platformStatus=' ++ (vars.verify.status default 'n/a') ++ (if (vars.deployUrl != null) (' | deployUrl=' ++ vars.deployUrl) else '')]" />
+                                        message="#['LOG INFO | flow=$(flow.name) | correlationId=$(correlationId) | jobId=$(vars.jobId) | status=$(vars.deployVerdict) | platformVerified=$(vars.verify.verified default false) | platformStatus=$(vars.verify.status default &quot;n/a&quot;) | deployUrl=$(vars.deployUrl default &quot;n/a&quot;)']" />
 
                                 <ee:transform doc:name="DW Set 200 finalized Acknowledgement"
                                               doc:id="b9c0d1e2-0009-0009-0009-000000000038">
