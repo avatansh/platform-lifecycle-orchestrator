@@ -20,7 +20,7 @@
         <logger level="DEBUG"
                 doc:name="LOG DEBUG apply-transforms enter"
                 doc:id="pf000004-0004-0004-0004-000000000002"
-                message="#['LOG DEBUG | flow=pf-apply-transforms | correlationId=' ++ correlationId ++ ' | files=' ++ sizeOf((vars.changePlan.fileEdits default []) map $.file distinctBy $)]" />
+                message="#[output application/java --- 'LOG DEBUG | flow=pf-apply-transforms | correlationId=' ++ correlationId ++ ' | files=' ++ sizeOf((vars.changePlan.fileEdits default []) map $.file distinctBy $)]" />
 
         <!-- Group edits by file → [{ path, edits }]; initialise the staging accumulator. -->
         <ee:transform doc:name="DW Group edits by file"
@@ -112,7 +112,7 @@ vars.stagedFiles default []]]></ee:set-payload>
         <logger level="INFO"
                 doc:name="LOG INFO staged files"
                 doc:id="pf000004-0004-0004-0004-000000000011"
-                message="#['LOG INFO | flow=pf-apply-transforms | correlationId=' ++ correlationId ++ ' | staged=' ++ sizeOf(vars.stagedFiles default [])]" />
+                message="#[output application/java --- 'LOG INFO | flow=pf-apply-transforms | correlationId=' ++ correlationId ++ ' | staged=' ++ sizeOf(vars.stagedFiles default [])]" />
 
     </sub-flow>
 </mule>

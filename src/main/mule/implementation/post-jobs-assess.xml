@@ -25,7 +25,7 @@
         <logger level="DEBUG"
                 doc:name="LOG DEBUG Request"
                 doc:id="e5f6a7b8-0005-0005-0005-000000000002"
-                message="#['LOG DEBUG | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | app=' ++ (payload.appName default 'unknown') ++ ' | env=' ++ (payload.environment default 'unknown')]" />
+                message="#[output application/java --- 'LOG DEBUG | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | app=' ++ (payload.appName default 'unknown') ++ ' | env=' ++ (payload.environment default 'unknown')]" />
 
         <!-- Map HTTP request body fields to variables expected by pf-assess-app -->
         <set-variable variableName="appName"

@@ -23,7 +23,7 @@
         </scheduler>
 
         <logger level="INFO" doc:name="LOG INFO sweep start" doc:id="pfrc0001-0001-0001-0001-000000000003"
-                message="#['LOG INFO | flow=pf-reconcile | correlationId=' ++ correlationId ++ ' | reconcile sweep starting']" />
+                message="#[output application/java --- 'LOG INFO | flow=pf-reconcile | correlationId=' ++ correlationId ++ ' | reconcile sweep starting']" />
 
         <os:retrieve-all-keys objectStore="jobStore"
                               doc:name="OS Retrieve All Keys" doc:id="pfrc0001-0001-0001-0001-000000000004" />
@@ -75,7 +75,7 @@
                                 <set-variable variableName="fixed" value="#[vars.fixed + 1]"
                                               doc:name="PV fixed++" doc:id="pfrc0001-0001-0001-0001-000000000020" />
                                 <logger level="INFO" doc:name="LOG INFO PR_OPEN→DEPLOYING" doc:id="pfrc0001-0001-0001-0001-000000000021"
-                                        message="#['LOG INFO | flow=pf-reconcile | reconciled PR_OPEN→DEPLOYING (missed merge webhook) | jobId=' ++ vars.k]" />
+                                        message="#[output application/java --- 'LOG INFO | flow=pf-reconcile | reconciled PR_OPEN→DEPLOYING (missed merge webhook) | jobId=' ++ vars.k]" />
                             </when>
 
                             <when expression="#[vars.pr.state == 'closed' and vars.pr.merged == false]"
@@ -101,19 +101,19 @@
                                     <error-handler>
                                         <on-error-continue type="ANY" doc:id="pfrc0001-0001-0001-0001-000000000028">
                                             <logger level="DEBUG" doc:name="LOG DEBUG lock skip" doc:id="pfrc0001-0001-0001-0001-000000000029"
-                                                    message="#['LOG DEBUG | flow=pf-reconcile | lock release skipped | app=' ++ (vars.rec.appName default '?')]" />
+                                                    message="#[output application/java --- 'LOG DEBUG | flow=pf-reconcile | lock release skipped | app=' ++ (vars.rec.appName default '?')]" />
                                         </on-error-continue>
                                     </error-handler>
                                 </try>
                                 <set-variable variableName="fixed" value="#[vars.fixed + 1]"
                                               doc:name="PV fixed++" doc:id="pfrc0001-0001-0001-0001-000000000030" />
                                 <logger level="INFO" doc:name="LOG INFO PR_OPEN→FAILED_DEPLOY" doc:id="pfrc0001-0001-0001-0001-000000000031"
-                                        message="#['LOG INFO | flow=pf-reconcile | reconciled PR_OPEN→FAILED_DEPLOY (closed unmerged) | jobId=' ++ vars.k]" />
+                                        message="#[output application/java --- 'LOG INFO | flow=pf-reconcile | reconciled PR_OPEN→FAILED_DEPLOY (closed unmerged) | jobId=' ++ vars.k]" />
                             </when>
 
                             <otherwise doc:name="PR still open" doc:id="pfrc0001-0001-0001-0001-000000000032">
                                 <logger level="DEBUG" doc:name="LOG DEBUG PR still open" doc:id="pfrc0001-0001-0001-0001-000000000033"
-                                        message="#['LOG DEBUG | flow=pf-reconcile | PR still open, leaving as-is | jobId=' ++ vars.k]" />
+                                        message="#[output application/java --- 'LOG DEBUG | flow=pf-reconcile | PR still open, leaving as-is | jobId=' ++ vars.k]" />
                             </otherwise>
 
                         </choice>
@@ -164,14 +164,14 @@
                                             <error-handler>
                                                 <on-error-continue type="ANY" doc:id="pfrc0001-0001-0001-0001-000000000054">
                                                     <logger level="DEBUG" doc:name="LOG DEBUG lock skip" doc:id="pfrc0001-0001-0001-0001-000000000055"
-                                                            message="#['LOG DEBUG | flow=pf-reconcile | lock release skipped | app=' ++ (vars.rec.appName default '?')]" />
+                                                            message="#[output application/java --- 'LOG DEBUG | flow=pf-reconcile | lock release skipped | app=' ++ (vars.rec.appName default '?')]" />
                                                 </on-error-continue>
                                             </error-handler>
                                         </try>
                                         <set-variable variableName="fixed" value="#[vars.fixed + 1]"
                                                       doc:name="PV fixed++" doc:id="pfrc0001-0001-0001-0001-000000000056" />
                                         <logger level="INFO" doc:name="LOG INFO DEPLOYING→DEPLOYED" doc:id="pfrc0001-0001-0001-0001-000000000057"
-                                                message="#['LOG INFO | flow=pf-reconcile | reconciled DEPLOYING→DEPLOYED (missed cd-result, platform confirmed) | jobId=' ++ vars.k ++ ' | platformStatus=' ++ (vars.verify.status default '?')]" />
+                                                message="#[output application/java --- 'LOG INFO | flow=pf-reconcile | reconciled DEPLOYING→DEPLOYED (missed cd-result, platform confirmed) | jobId=' ++ vars.k ++ ' | platformStatus=' ++ (vars.verify.status default '?')]" />
                                     </when>
 
                                     <when expression="#[(vars.verify.verified default false) and not (vars.verify.healthy default false)]"
@@ -199,19 +199,19 @@
                                             <error-handler>
                                                 <on-error-continue type="ANY" doc:id="pfrc0001-0001-0001-0001-000000000064">
                                                     <logger level="DEBUG" doc:name="LOG DEBUG lock skip" doc:id="pfrc0001-0001-0001-0001-000000000065"
-                                                            message="#['LOG DEBUG | flow=pf-reconcile | lock release skipped | app=' ++ (vars.rec.appName default '?')]" />
+                                                            message="#[output application/java --- 'LOG DEBUG | flow=pf-reconcile | lock release skipped | app=' ++ (vars.rec.appName default '?')]" />
                                                 </on-error-continue>
                                             </error-handler>
                                         </try>
                                         <set-variable variableName="fixed" value="#[vars.fixed + 1]"
                                                       doc:name="PV fixed++" doc:id="pfrc0001-0001-0001-0001-000000000066" />
                                         <logger level="WARN" doc:name="LOG WARN DEPLOYING→FAILED_DEPLOY" doc:id="pfrc0001-0001-0001-0001-000000000067"
-                                                message="#['LOG WARN | flow=pf-reconcile | reconciled DEPLOYING→FAILED_DEPLOY (missed cd-result, platform unhealthy) | jobId=' ++ vars.k ++ ' | platformStatus=' ++ (vars.verify.status default '?')]" />
+                                                message="#[output application/java --- 'LOG WARN | flow=pf-reconcile | reconciled DEPLOYING→FAILED_DEPLOY (missed cd-result, platform unhealthy) | jobId=' ++ vars.k ++ ' | platformStatus=' ++ (vars.verify.status default '?')]" />
                                     </when>
 
                                     <otherwise doc:name="platform unverified → leave" doc:id="pfrc0001-0001-0001-0001-000000000068">
                                         <logger level="DEBUG" doc:name="LOG DEBUG platform unreachable" doc:id="pfrc0001-0001-0001-0001-000000000069"
-                                                message="#['LOG DEBUG | flow=pf-reconcile | DEPLOYING stale but platform unverified, retry next sweep | jobId=' ++ vars.k]" />
+                                                message="#[output application/java --- 'LOG DEBUG | flow=pf-reconcile | DEPLOYING stale but platform unverified, retry next sweep | jobId=' ++ vars.k]" />
                                     </otherwise>
 
                                 </choice>
@@ -219,7 +219,7 @@
                             </when>
                             <otherwise doc:name="verify disabled → leave" doc:id="pfrc0001-0001-0001-0001-000000000070">
                                 <logger level="DEBUG" doc:name="LOG DEBUG DEPLOYING awaiting cd-result" doc:id="pfrc0001-0001-0001-0001-000000000035"
-                                        message="#['LOG DEBUG | flow=pf-reconcile | still DEPLOYING beyond threshold, verify disabled, awaiting cd-result | jobId=' ++ vars.k]" />
+                                        message="#[output application/java --- 'LOG DEBUG | flow=pf-reconcile | still DEPLOYING beyond threshold, verify disabled, awaiting cd-result | jobId=' ++ vars.k]" />
                             </otherwise>
                         </choice>
 
@@ -227,7 +227,7 @@
 
                     <otherwise doc:name="not stale or non-reconcilable" doc:id="pfrc0001-0001-0001-0001-000000000036">
                         <logger level="DEBUG" doc:name="LOG DEBUG job not reconcilable" doc:id="pfrc0001-0001-0001-0001-000000000037"
-                                message="#['LOG DEBUG | flow=pf-reconcile | not stale or non-reconcilable | jobId=' ++ vars.k ++ ' | status=' ++ (vars.rec.status default '?') ++ ' | stale=' ++ vars.isStale]" />
+                                message="#[output application/java --- 'LOG DEBUG | flow=pf-reconcile | not stale or non-reconcilable | jobId=' ++ vars.k ++ ' | status=' ++ (vars.rec.status default '?') ++ ' | stale=' ++ vars.isStale]" />
                     </otherwise>
 
                 </choice>
@@ -235,7 +235,7 @@
                 <error-handler>
                     <on-error-continue type="ANY" doc:id="pfrc0001-0001-0001-0001-000000000038">
                         <logger level="WARN" doc:name="LOG WARN per-job reconcile error" doc:id="pfrc0001-0001-0001-0001-000000000039"
-                                message="#['LOG WARN | flow=pf-reconcile | error reconciling job ' ++ (vars.k default '?') ++ ': ' ++ (error.description default 'unknown')]" />
+                                message="#[output application/java --- 'LOG WARN | flow=pf-reconcile | error reconciling job ' ++ (vars.k default '?') ++ ': ' ++ (error.description default 'unknown')]" />
                     </on-error-continue>
                 </error-handler>
             </try>
@@ -243,7 +243,7 @@
         </foreach>
 
         <logger level="INFO" doc:name="LOG INFO sweep done" doc:id="pfrc0001-0001-0001-0001-000000000040"
-                message="#['LOG INFO | flow=pf-reconcile | correlationId=' ++ correlationId ++ ' | reconcile sweep done | fixed=' ++ vars.fixed ++ ' | scanned=' ++ sizeOf(vars.jobKeys default [])]" />
+                message="#[output application/java --- 'LOG INFO | flow=pf-reconcile | correlationId=' ++ correlationId ++ ' | reconcile sweep done | fixed=' ++ vars.fixed ++ ' | scanned=' ++ sizeOf(vars.jobKeys default [])]" />
 
     </flow>
 

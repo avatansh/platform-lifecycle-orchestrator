@@ -49,7 +49,7 @@
             level="INFO"
             doc:name="LOG INFO Request Received"
             doc:id="d4e5f6a7-0004-0004-0004-000000000005"
-            message="#['LOG INFO REQUEST RECEIVED | flow=' ++ vars.flowName ++ ' | correlationId=' ++ correlationId ++ ' | externalTranId=' ++ vars.externalTranId ++ ' | method=' ++ attributes.method ++ ' | path=' ++ attributes.requestPath]" />
+            message="#[output application/java --- 'LOG INFO REQUEST RECEIVED | flow=' ++ vars.flowName ++ ' | correlationId=' ++ correlationId ++ ' | externalTranId=' ++ vars.externalTranId ++ ' | method=' ++ attributes.method ++ ' | path=' ++ attributes.requestPath]" />
 
         <!--
             Capture raw body bytes and GitHub webhook headers BEFORE the APIkit router
@@ -89,7 +89,7 @@
             level="INFO"
             doc:name="LOG INFO Response Sent"
             doc:id="d4e5f6a7-0004-0004-0004-000000000007"
-            message="#['LOG INFO RESPONSE SENT | flow=' ++ vars.flowName ++ ' | correlationId=' ++ correlationId ++ ' | status=' ++ (vars.httpStatus default 200 as String)]" />
+            message="#[output application/java --- 'LOG INFO RESPONSE SENT | flow=' ++ vars.flowName ++ ' | correlationId=' ++ correlationId ++ ' | status=' ++ vars.httpStatus default 200]" />
 
         <error-handler ref="global-error-handler" doc:name="Global Error Handler" doc:id="d4e5f6a7-0004-0004-0004-000000000008" />
 

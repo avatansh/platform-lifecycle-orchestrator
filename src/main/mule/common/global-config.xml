@@ -196,10 +196,15 @@
         doc:name="Exchange Maven Facade Request Config"
         doc:id="a1b2c3d4-0001-0001-0001-000000000013"
         basePath="/">
-        <http:request-connection host="maven.anypoint.mulesoft.com" port="443" protocol="HTTPS" />
-        <http:default-headers>
-            <http:default-header key="Authorization" value="#['Basic ' ++ toBase64('~~~Client~~~:' ++ p('secure::anypoint.clientId') ++ '~?~' ++ p('secure::anypoint.clientSecret'))]" />
-        </http:default-headers>
+        <!-- Native HTTP Basic auth (preemptive). The connector base64-encodes
+             "<username>:<password>" for us, so no DataWeave toBase64 is needed.
+             Exchange facade format: username=~~~Client~~~ , password=<clientId>~?~<clientSecret> -->
+        <http:request-connection host="maven.anypoint.mulesoft.com" port="443" protocol="HTTPS">
+            <http:authentication>
+                <http:basic-authentication username="~~~Client~~~"
+                                           password="#[p('secure::anypoint.clientId') ++ '~?~' ++ p('secure::anypoint.clientSecret')]" />
+            </http:authentication>
+        </http:request-connection>
     </http:request-config>
 
     <!--
@@ -229,9 +234,15 @@
         doc:name="Jira Cloud Request Config"
         doc:id="a1b2c3d4-0001-0001-0001-000000000011"
         basePath="/">
-        <http:request-connection host="${jira.host}" port="443" protocol="HTTPS" />
+        <!-- Native HTTP Basic auth (preemptive): connector base64-encodes
+             "<email>:<apiToken>", so no DataWeave toBase64 is needed. -->
+        <http:request-connection host="${jira.host}" port="443" protocol="HTTPS">
+            <http:authentication>
+                <http:basic-authentication username="#[p('secure::jira.email')]"
+                                           password="#[p('secure::jira.apiToken')]" />
+            </http:authentication>
+        </http:request-connection>
         <http:default-headers>
-            <http:default-header key="Authorization" value="#['Basic ' ++ toBase64(p('secure::jira.email') ++ ':' ++ p('secure::jira.apiToken'))]" />
             <http:default-header key="Accept"        value="application/json" />
             <http:default-header key="Content-Type"  value="application/json" />
         </http:default-headers>

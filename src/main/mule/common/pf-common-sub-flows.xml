@@ -83,7 +83,7 @@
         <logger level="DEBUG"
                 doc:name="LOG DEBUG pf-load-matrix enter"
                 doc:id="pflm0001-0001-0001-0001-000000000002"
-                message="#['LOG DEBUG | flow=pf-load-matrix | correlationId=' ++ correlationId ++ ' | loading compatibility matrix | source=' ++ (p('matrix.source') default 'classpath')]" />
+                message="#[output application/java --- 'LOG DEBUG | flow=pf-load-matrix | correlationId=' ++ correlationId ++ ' | loading compatibility matrix | source=' ++ (p('matrix.source') default 'classpath')]" />
 
         <!--
             Cache scope — key comes from matrixCachingStrategy.
@@ -143,7 +143,7 @@ var meta = read(payload, "application/xml")
                         <logger level="DEBUG"
                                 doc:name="LOG DEBUG resolved matrix version"
                                 doc:id="pflm0001-0001-0001-0001-000000000022"
-                                message="#['LOG DEBUG | flow=pf-load-matrix | correlationId=' ++ correlationId ++ ' | resolved matrix version=' ++ (vars.matrixVersion default 'unknown') ++ ' | source=' ++ (p('matrix.source') default 'classpath')]" />
+                                message="#[output application/java --- 'LOG DEBUG | flow=pf-load-matrix | correlationId=' ++ correlationId ++ ' | resolved matrix version=' ++ (vars.matrixVersion default 'unknown') ++ ' | source=' ++ (p('matrix.source') default 'classpath')]" />
 
                         <!-- Step 2 — download the resolved asset version -->
                         <http:request method="GET"
@@ -169,7 +169,7 @@ read(payload, "application/yaml")]]></ee:set-payload>
                                 <logger level="WARN"
                                         doc:name="LOG WARN Exchange fetch failed"
                                         doc:id="pflm0001-0001-0001-0001-000000000013"
-                                        message="#['LOG WARN | flow=pf-load-matrix | correlationId=' ++ correlationId ++ ' | Exchange matrix fetch failed (' ++ (error.description default 'unknown error') ++ ') - falling back to bundled classpath matrix']" />
+                                        message="#[output application/java --- 'LOG WARN | flow=pf-load-matrix | correlationId=' ++ correlationId ++ ' | Exchange matrix fetch failed (' ++ (error.description default 'unknown error') ++ ') - falling back to bundled classpath matrix']" />
                                 <ee:transform doc:name="DW readUrl classpath fallback"
                                               doc:id="pflm0001-0001-0001-0001-000000000014">
                                     <ee:message>
@@ -209,7 +209,7 @@ readUrl("classpath://matrix/compatibility-matrix.yaml", "application/yaml")]]></
         <logger level="DEBUG"
                 doc:name="LOG DEBUG pf-load-matrix done"
                 doc:id="pflm0001-0001-0001-0001-000000000006"
-                message="#['LOG DEBUG | flow=pf-load-matrix | correlationId=' ++ correlationId ++ ' | matrix loaded | schemaVersion=' ++ (vars.matrix.schemaVersion default 'unknown') ++ ' | targetRuntime=' ++ (vars.matrix.target.runtime default 'unknown')]" />
+                message="#[output application/java --- 'LOG DEBUG | flow=pf-load-matrix | correlationId=' ++ correlationId ++ ' | matrix loaded | schemaVersion=' ++ (vars.matrix.schemaVersion default 'unknown') ++ ' | targetRuntime=' ++ (vars.matrix.target.runtime default 'unknown')]" />
 
     </sub-flow>
 
@@ -262,7 +262,7 @@ readUrl("classpath://matrix/compatibility-matrix.yaml", "application/yaml")]]></
         <logger level="DEBUG"
                 doc:name="LOG DEBUG pf-resolve-coordinates enter"
                 doc:id="pfrc0001-0001-0001-0001-000000000002"
-                message="#['LOG DEBUG | flow=pf-resolve-coordinates | correlationId=' ++ correlationId ++ ' | app=' ++ (vars.appName default 'unknown')]" />
+                message="#[output application/java --- 'LOG DEBUG | flow=pf-resolve-coordinates | correlationId=' ++ correlationId ++ ' | app=' ++ (vars.appName default 'unknown')]" />
 
         <!--
             Cache scope — key 'app-registry-static' is constant.
@@ -310,9 +310,9 @@ readUrl("classpath://registry/app-registry.yaml", "application/yaml")]]></ee:set
                 <logger level="WARN"
                         doc:name="LOG WARN App Not Allow-Listed"
                         doc:id="pfrc0001-0001-0001-0001-000000000009"
-                        message="#['LOG WARN | flow=pf-resolve-coordinates | correlationId=' ++ correlationId ++ ' | app=' ++ vars.appName ++ ' not in registry and enforceAllowList=true — rejecting']" />
+                        message="#[output application/java --- 'LOG WARN | flow=pf-resolve-coordinates | correlationId=' ++ correlationId ++ ' | app=' ++ vars.appName ++ ' not in registry and enforceAllowList=true — rejecting']" />
                 <raise-error type="VALIDATION:APP_NOT_REGISTERED"
-                             description="#['App &quot;' ++ vars.appName ++ '&quot; is not in the allow-list registry. Add an entry to app-registry.yaml or set registry.enforceAllowList=false.']"
+                             description="#[output application/java --- 'App &quot;' ++ vars.appName ++ '&quot; is not in the allow-list registry. Add an entry to app-registry.yaml or set registry.enforceAllowList=false.']"
                              doc:name="RAISE VALIDATION:APP_NOT_REGISTERED (allow-list)"
                              doc:id="pfrc0001-0001-0001-0001-000000000010" />
             </when>
@@ -321,7 +321,7 @@ readUrl("classpath://registry/app-registry.yaml", "application/yaml")]]></ee:set
                 <logger level="DEBUG"
                         doc:name="LOG DEBUG Allow-List Check Passed"
                         doc:id="pfrc0001-0001-0001-0001-000000000012"
-                        message="#['LOG DEBUG | flow=pf-resolve-coordinates | correlationId=' ++ correlationId ++ ' | allow-list check passed for app=' ++ vars.appName ++ ' | enforceAllowList=' ++ p('registry.enforceAllowList')]" />
+                        message="#[output application/java --- 'LOG DEBUG | flow=pf-resolve-coordinates | correlationId=' ++ correlationId ++ ' | allow-list check passed for app=' ++ vars.appName ++ ' | enforceAllowList=' ++ p('registry.enforceAllowList')]" />
             </otherwise>
         </choice>
 
@@ -424,9 +424,9 @@ var resolvedBranch =
                 <logger level="WARN"
                         doc:name="LOG WARN Incomplete Coordinates"
                         doc:id="pfrc0001-0001-0001-0001-000000000016"
-                        message="#['LOG WARN | flow=pf-resolve-coordinates | correlationId=' ++ correlationId ++ ' | app=' ++ vars.appName ++ ' | owner=' ++ (vars.coords.owner default 'null') ++ ' | repo=' ++ (vars.coords.repo default 'null') ++ ' — cannot locate repo without owner and repo coordinates']" />
+                        message="#[output application/java --- 'LOG WARN | flow=pf-resolve-coordinates | correlationId=' ++ correlationId ++ ' | app=' ++ vars.appName ++ ' | owner=' ++ (vars.coords.owner default 'null') ++ ' | repo=' ++ (vars.coords.repo default 'null') ++ ' — cannot locate repo without owner and repo coordinates']" />
                 <raise-error type="VALIDATION:APP_NOT_REGISTERED"
-                             description="#['Cannot resolve repo coordinates for app &quot;' ++ vars.appName ++ '&quot;. Please provide owner and repo by adding an entry to app-registry.yaml or including owner/repo in the request body.']"
+                             description="#[output application/java --- 'Cannot resolve repo coordinates for app &quot;' ++ vars.appName ++ '&quot;. Please provide owner and repo by adding an entry to app-registry.yaml or including owner/repo in the request body.']"
                              doc:name="RAISE VALIDATION:APP_NOT_REGISTERED (missing owner or repo)"
                              doc:id="pfrc0001-0001-0001-0001-000000000017" />
             </when>
@@ -435,7 +435,7 @@ var resolvedBranch =
                 <logger level="DEBUG"
                         doc:name="LOG DEBUG Coordinates Resolved"
                         doc:id="pfrc0001-0001-0001-0001-000000000019"
-                        message="#['LOG DEBUG | flow=pf-resolve-coordinates | correlationId=' ++ correlationId ++ ' | app=' ++ vars.appName ++ ' | owner=' ++ (vars.coords.owner default '') ++ ' | repo=' ++ (vars.coords.repo default '') ++ ' | appPath=' ++ (vars.coords.appPath default '') ++ ' | orgId=' ++ (vars.coords.orgId default '') ++ ' | defaultBranch=' ++ (vars.coords.defaultBranch default '')]" />
+                        message="#[output application/java --- 'LOG DEBUG | flow=pf-resolve-coordinates | correlationId=' ++ correlationId ++ ' | app=' ++ vars.appName ++ ' | owner=' ++ (vars.coords.owner default '') ++ ' | repo=' ++ (vars.coords.repo default '') ++ ' | appPath=' ++ (vars.coords.appPath default '') ++ ' | orgId=' ++ (vars.coords.orgId default '') ++ ' | defaultBranch=' ++ (vars.coords.defaultBranch default '')]" />
             </otherwise>
         </choice>
 
@@ -480,7 +480,7 @@ output text/plain
                     <logger level="DEBUG"
                             doc:name="LOG DEBUG default_branch discovered"
                             doc:id="pfbr0001-0001-0001-0001-000000000008"
-                            message="#['LOG DEBUG | flow=pf-resolve-coordinates | correlationId=' ++ correlationId ++ ' | discovered default_branch=' ++ (vars.coords.defaultBranch default '?') ++ ' for ' ++ (vars.coords.owner default '') ++ '/' ++ (vars.coords.repo default '')]" />
+                            message="#[output application/java --- 'LOG DEBUG | flow=pf-resolve-coordinates | correlationId=' ++ correlationId ++ ' | discovered default_branch=' ++ (vars.coords.defaultBranch default '?') ++ ' for ' ++ (vars.coords.owner default '') ++ '/' ++ (vars.coords.repo default '')]" />
                     <error-handler>
                         <on-error-continue type="ANY"
                                            doc:name="On Error - config branch fallback"
@@ -492,7 +492,7 @@ output text/plain
                             <logger level="WARN"
                                     doc:name="LOG WARN default_branch discovery failed"
                                     doc:id="pfbr0001-0001-0001-0001-000000000011"
-                                    message="#['LOG WARN | flow=pf-resolve-coordinates | correlationId=' ++ correlationId ++ ' | default_branch discovery failed (' ++ (error.description default 'unknown') ++ ') — using config default ' ++ (p('github.defaultBranch') default '')]" />
+                                    message="#[output application/java --- 'LOG WARN | flow=pf-resolve-coordinates | correlationId=' ++ correlationId ++ ' | default_branch discovery failed (' ++ (error.description default 'unknown') ++ ') — using config default ' ++ (p('github.defaultBranch') default '')]" />
                         </on-error-continue>
                     </error-handler>
                 </try>
@@ -502,7 +502,7 @@ output text/plain
                 <logger level="DEBUG"
                         doc:name="LOG DEBUG branch preset"
                         doc:id="pfbr0001-0001-0001-0001-000000000013"
-                        message="#['LOG DEBUG | flow=pf-resolve-coordinates | correlationId=' ++ correlationId ++ ' | branch from caller/registry=' ++ (vars.coords.defaultBranch default '?')]" />
+                        message="#[output application/java --- 'LOG DEBUG | flow=pf-resolve-coordinates | correlationId=' ++ correlationId ++ ' | branch from caller/registry=' ++ (vars.coords.defaultBranch default '?')]" />
             </otherwise>
         </choice>
 

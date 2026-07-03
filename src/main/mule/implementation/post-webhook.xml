@@ -50,7 +50,7 @@ output text/plain
                 <logger level="WARN"
                         doc:name="LOG WARN Invalid Webhook Signature"
                         doc:id="b8c9d0e1-0008-0008-0008-000000000024"
-                        message="#['LOG WARN | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | INVALID webhook signature | delivery=' ++ vars.ghDelivery ++ ' | event=' ++ vars.ghEvent]" />
+                        message="#[output application/java --- 'LOG WARN | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | INVALID webhook signature | delivery=' ++ vars.ghDelivery ++ ' | event=' ++ vars.ghEvent]" />
 
                 <set-variable variableName="httpStatus"
                               value="401"
@@ -94,7 +94,7 @@ output application/json
                         <logger level="INFO"
                                 doc:name="LOG INFO Duplicate Delivery Skipped"
                                 doc:id="b8c9d0e1-0008-0008-0008-000000000031"
-                                message="#['LOG INFO | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | duplicate delivery, skipping | delivery=' ++ vars.ghDelivery]" />
+                                message="#[output application/java --- 'LOG INFO | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | duplicate delivery, skipping | delivery=' ++ vars.ghDelivery]" />
 
                         <ee:transform doc:name="DW Set 200 Duplicate Acknowledgement"
                                       doc:id="b8c9d0e1-0008-0008-0008-000000000032">
@@ -121,7 +121,7 @@ output application/json
                         <logger level="DEBUG"
                                 doc:name="LOG DEBUG Webhook Received"
                                 doc:id="b8c9d0e1-0008-0008-0008-000000000002"
-                                message="#['LOG DEBUG | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | webhook event=' ++ vars.ghEvent ++ ' | action=' ++ ((payload.action default 'unknown') as String) ++ ' | delivery=' ++ vars.ghDelivery]" />
+                                message="#[output application/java --- 'LOG DEBUG | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | webhook event=' ++ vars.ghEvent ++ ' | action=' ++ (payload.action default 'unknown') ++ ' | delivery=' ++ vars.ghDelivery]" />
 
                         <!--
                             Only process pull_request events where the PR was merged.
@@ -146,7 +146,7 @@ output application/json
                                 <logger level="INFO"
                                         doc:name="LOG INFO PR Merged"
                                         doc:id="b8c9d0e1-0008-0008-0008-000000000006"
-                                        message="#['LOG INFO | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | PR merged | branch=' ++ vars.mergedBranch ++ ' | prUrl=' ++ vars.prUrl]" />
+                                        message="#[output application/java --- 'LOG INFO | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | PR merged | branch=' ++ vars.mergedBranch ++ ' | prUrl=' ++ vars.prUrl]" />
 
                                 <!-- get-or-empty: an untracked merged branch has no key. A null
                                      os:default-value would throw OS:KEY_NOT_FOUND, so default to ""
@@ -200,7 +200,7 @@ payload ++ {
                                         <logger level="INFO"
                                                 doc:name="LOG INFO Job DEPLOYING"
                                                 doc:id="b8c9d0e1-0008-0008-0008-000000000012"
-                                                message="#['LOG INFO | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobIdFromBranch ++ ' | status=DEPLOYING | awaiting CD pipeline callback']" />
+                                                message="#[output application/java --- 'LOG INFO | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobIdFromBranch ++ ' | status=DEPLOYING | awaiting CD pipeline callback']" />
 
                                     </when>
 
@@ -208,7 +208,7 @@ payload ++ {
                                         <logger level="DEBUG"
                                                 doc:name="LOG DEBUG Branch Not Tracked"
                                                 doc:id="b8c9d0e1-0008-0008-0008-000000000013"
-                                                message="#['LOG DEBUG | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | branch not tracked, ignoring | branch=' ++ vars.mergedBranch]" />
+                                                message="#[output application/java --- 'LOG DEBUG | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | branch not tracked, ignoring | branch=' ++ vars.mergedBranch]" />
                                     </otherwise>
 
                                 </choice>
@@ -219,7 +219,7 @@ payload ++ {
                                 <logger level="DEBUG"
                                         doc:name="LOG DEBUG Non-Merge Event Ignored"
                                         doc:id="b8c9d0e1-0008-0008-0008-000000000014"
-                                        message="#['LOG DEBUG | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | webhook event ignored | event=' ++ vars.ghEvent ++ ' | action=' ++ (payload.action default 'unknown')]" />
+                                        message="#[output application/java --- 'LOG DEBUG | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | webhook event ignored | event=' ++ vars.ghEvent ++ ' | action=' ++ (payload.action default 'unknown')]" />
                             </otherwise>
 
                         </choice>
@@ -266,7 +266,7 @@ output application/json
                 <logger level="WARN"
                         doc:name="LOG WARN Invalid CD Token"
                         doc:id="b9c0d1e2-0009-0009-0009-000000000003"
-                        message="#['LOG WARN | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | invalid X-CD-Token — rejecting']" />
+                        message="#[output application/java --- 'LOG WARN | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | invalid X-CD-Token — rejecting']" />
 
                 <set-variable variableName="httpStatus"
                               value="401"
@@ -368,7 +368,7 @@ output application/json
                         <logger level="INFO"
                                 doc:name="LOG INFO CD Result Already Final"
                                 doc:id="b9c0d1e2-0009-0009-0009-000000000020"
-                                message="#['LOG INFO | flow=' ++ (flow.name as String) ++ ' | correlationId=' ++ (correlationId as String) ++ ' | cd-result already final, skipping | jobId=' ++ (vars.jobId as String) ++ ' | status=' ++ (vars.curStatus as String)]" />
+                                message="#[output application/java --- 'LOG INFO | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | cd-result already final, skipping | jobId=' ++ vars.jobId ++ ' | status=' ++ vars.curStatus]" />
 
                         <ee:transform doc:name="DW Set 200 Idempotent Acknowledgement"
                                       doc:id="b9c0d1e2-0009-0009-0009-000000000021">
@@ -477,7 +477,7 @@ vars.jobRec ++ {
                                             <logger level="DEBUG"
                                                     doc:name="LOG DEBUG lock already released"
                                                     doc:id="b9c0d1e2-0009-0009-0009-000000000030"
-                                                    message="#['LOG DEBUG | flow=' ++ flow.name ++ ' | lock release skipped (already removed) | app=' ++ (vars.appName default '?')]" />
+                                                    message="#[output application/java --- 'LOG DEBUG | flow=' ++ flow.name ++ ' | lock release skipped (already removed) | app=' ++ (vars.appName default '?')]" />
                                         </on-error-continue>
                                     </error-handler>
                                 </try>
@@ -521,7 +521,7 @@ output application/json
                                                     <logger level="WARN"
                                                             doc:name="LOG WARN Slack DEPLOYED notification failed"
                                                             doc:id="b9c0d1e2-0009-0009-0009-000000000036"
-                                                            message="#['LOG WARN | flow=' ++ (flow.name as String) ++ ' | Slack DEPLOYED notification error swallowed: ' ++ ((error.description default 'unknown') as String)]" />
+                                                            message="#[output application/java --- 'LOG WARN | flow=' ++ flow.name ++ ' | Slack DEPLOYED notification error swallowed: ' ++ (error.description default 'unknown')]" />
                                                 </on-error-continue>
                                             </error-handler>
                                         </try>
@@ -553,7 +553,7 @@ output application/json
                                 <logger level="INFO"
                                         doc:name="LOG INFO Job finalized"
                                         doc:id="b9c0d1e2-0009-0009-0009-000000000037"
-                                        message="#['LOG INFO | flow=' ++ (flow.name as String) ++ ' | correlationId=' ++ (correlationId as String) ++ ' | jobId=' ++ (vars.jobId as String) ++ ' | status=' ++ (vars.deployVerdict as String) ++ ' | platformVerified=' ++ ((vars.verify.verified default false) as String) ++ ' | platformStatus=' ++ ((vars.verify.status default 'n/a') as String) ++ ' | deployUrl=' ++ ((vars.deployUrl default 'n/a') as String)]" />
+                                        message="#[output application/java --- 'LOG INFO | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | status=' ++ vars.deployVerdict ++ ' | platformVerified=' ++ (vars.verify.verified default false) ++ ' | platformStatus=' ++ (vars.verify.status default 'n/a') ++ ' | deployUrl=' ++ (vars.deployUrl default 'n/a')]" />
 
                                 <ee:transform doc:name="DW Set 200 finalized Acknowledgement"
                                               doc:id="b9c0d1e2-0009-0009-0009-000000000038">
@@ -612,7 +612,7 @@ vars.jobRec ++ {
                                             <logger level="DEBUG"
                                                     doc:name="LOG DEBUG lock already released (failure)"
                                                     doc:id="b9c0d1e2-0009-0009-0009-000000000046"
-                                                    message="#['LOG DEBUG | flow=' ++ flow.name ++ ' | lock release skipped (already removed) | app=' ++ (vars.appName default '?')]" />
+                                                    message="#[output application/java --- 'LOG DEBUG | flow=' ++ flow.name ++ ' | lock release skipped (already removed) | app=' ++ (vars.appName default '?')]" />
                                         </on-error-continue>
                                     </error-handler>
                                 </try>
@@ -637,7 +637,7 @@ vars.jobRec ++ {
                                 <logger level="WARN"
                                         doc:name="LOG WARN Job FAILED_DEPLOY"
                                         doc:id="b9c0d1e2-0009-0009-0009-000000000048"
-                                        message="#['LOG WARN | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | status=FAILED_DEPLOY']" />
+                                        message="#[output application/java --- 'LOG WARN | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | status=FAILED_DEPLOY']" />
 
                                 <ee:transform doc:name="DW Set 200 FAILED_DEPLOY Acknowledgement"
                                               doc:id="b9c0d1e2-0009-0009-0009-000000000049">
@@ -658,7 +658,7 @@ output application/json
                                 <logger level="WARN"
                                         doc:name="LOG WARN Unknown CD Result"
                                         doc:id="b9c0d1e2-0009-0009-0009-000000000051"
-                                        message="#['LOG WARN | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | unknown cdResult=' ++ vars.cdResult]" />
+                                        message="#[output application/java --- 'LOG WARN | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | unknown cdResult=' ++ vars.cdResult]" />
 
                                 <set-variable variableName="httpStatus"
                                               value="400"

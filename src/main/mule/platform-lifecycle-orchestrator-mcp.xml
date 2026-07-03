@@ -279,7 +279,7 @@
         <logger level="DEBUG"
                 doc:name="LOG DEBUG pf-assess-app enter"
                 doc:id="pf000001-0001-0001-0001-000000000002"
-                message="#['LOG DEBUG | flow=pf-assess-app | correlationId=' ++ correlationId ++ ' | app=' ++ (vars.appName default 'unknown') ++ ' | env=' ++ (vars.environment default 'unknown')]" />
+                message="#[output application/java --- 'LOG DEBUG | flow=pf-assess-app | correlationId=' ++ correlationId ++ ' | app=' ++ (vars.appName default 'unknown') ++ ' | env=' ++ (vars.environment default 'unknown')]" />
 
         <!-- ── Step 1: Load matrix (→ vars.matrix) and resolve coordinates (→ vars.coords) ── -->
         <flow-ref name="pf-load-matrix"
@@ -306,7 +306,7 @@
                 <logger level="DEBUG"
                         doc:name="LOG DEBUG env present"
                         doc:id="pf000001-0001-0001-0001-000000000016"
-                        message="#['LOG DEBUG | flow=pf-assess-app | env=' ++ vars.environment ++ ' | owner=' ++ (vars.coords.owner default '') ++ ' | repo=' ++ (vars.coords.repo default '')]" />
+                        message="#[output application/java --- 'LOG DEBUG | flow=pf-assess-app | env=' ++ vars.environment ++ ' | owner=' ++ (vars.coords.owner default '') ++ ' | repo=' ++ (vars.coords.repo default '')]" />
             </otherwise>
         </choice>
 
@@ -320,7 +320,7 @@
                   doc:name="owner or repo null"
                   doc:id="pf000001-0001-0001-0001-000000000018">
                 <raise-error type="VALIDATION:APP_NOT_REGISTERED"
-                             description="#['Cannot resolve repo coordinates for app &quot;' ++ vars.appName ++ '&quot;. Provide owner/repo in the registry or request body.']"
+                             description="#[output application/java --- 'Cannot resolve repo coordinates for app &quot;' ++ vars.appName ++ '&quot;. Provide owner/repo in the registry or request body.']"
                              doc:name="RAISE VALIDATION:APP_NOT_REGISTERED"
                              doc:id="pf000001-0001-0001-0001-000000000019" />
             </when>
@@ -329,7 +329,7 @@
                 <logger level="DEBUG"
                         doc:name="LOG DEBUG coords present"
                         doc:id="pf000001-0001-0001-0001-00000000020b"
-                        message="#['LOG DEBUG | flow=pf-assess-app | coords ok | owner=' ++ (vars.coords.owner default '') ++ ' | repo=' ++ (vars.coords.repo default '')]" />
+                        message="#[output application/java --- 'LOG DEBUG | flow=pf-assess-app | coords ok | owner=' ++ (vars.coords.owner default '') ++ ' | repo=' ++ (vars.coords.repo default '')]" />
             </otherwise>
         </choice>
 
@@ -581,7 +581,7 @@ var nextPath      = if (resolvedFile != null and (treePaths contains resolvedFil
                 <logger level="DEBUG"
                         doc:name="LOG DEBUG no level-1 parent"
                         doc:id="pf000001-0001-0001-0001-000000000046"
-                        message="#['LOG DEBUG | flow=pf-assess-app | app=' ++ vars.appName ++ ' | chain depth=1 (APP_STANDALONE)']" />
+                        message="#[output application/java --- 'LOG DEBUG | flow=pf-assess-app | app=' ++ vars.appName ++ ' | chain depth=1 (APP_STANDALONE)']" />
             </otherwise>
         </choice>
 
@@ -636,7 +636,7 @@ var parsedPom  = read(rawContent, "application/xml")
                 <logger level="DEBUG"
                         doc:name="LOG DEBUG grandparent not present"
                         doc:id="pf000001-0001-0001-0001-000000000056"
-                        message="#['LOG DEBUG | flow=pf-assess-app | app=' ++ vars.appName ++ ' | chain depth=' ++ sizeOf(vars.chain) ++ ' — no grandparent pom']" />
+                        message="#[output application/java --- 'LOG DEBUG | flow=pf-assess-app | app=' ++ vars.appName ++ ' | chain depth=' ++ sizeOf(vars.chain) ++ ' — no grandparent pom']" />
             </otherwise>
         </choice>
 
@@ -988,7 +988,7 @@ var all = propEdits ++ appEdits
         <logger level="DEBUG"
                 doc:name="LOG DEBUG pf-assess-app done"
                 doc:id="pf000001-0001-0001-0001-000000000090"
-                message="#['LOG DEBUG | flow=pf-assess-app | correlationId=' ++ correlationId ++ ' | app=' ++ vars.appName ++ ' | topology=' ++ (vars.topology default 'unknown') ++ ' | fileEdits=' ++ sizeOf(payload.changePlan.fileEdits default []) ++ ' | warnings=' ++ sizeOf(payload.warnings default [])]" />
+                message="#[output application/java --- 'LOG DEBUG | flow=pf-assess-app | correlationId=' ++ correlationId ++ ' | app=' ++ vars.appName ++ ' | topology=' ++ (vars.topology default 'unknown') ++ ' | fileEdits=' ++ sizeOf(payload.changePlan.fileEdits default []) ++ ' | warnings=' ++ sizeOf(payload.warnings default [])]" />
 
     </sub-flow>
 
@@ -1004,7 +1004,7 @@ var all = propEdits ++ appEdits
         <logger level="INFO"
                 doc:name="LOG INFO pf-start-upgrade enter"
                 doc:id="pf000002-0002-0002-0002-000000000002"
-                message="#['LOG INFO | flow=pf-start-upgrade | correlationId=' ++ correlationId ++ ' | app=' ++ (vars.appName default 'unknown') ++ ' | env=' ++ (vars.environment default 'unknown')]" />
+                message="#[output application/java --- 'LOG INFO | flow=pf-start-upgrade | correlationId=' ++ correlationId ++ ' | app=' ++ (vars.appName default 'unknown') ++ ' | env=' ++ (vars.environment default 'unknown')]" />
 
         <!-- Step 1: Assign jobId -->
         <set-variable variableName="jobId"
@@ -1020,7 +1020,7 @@ var all = propEdits ++ appEdits
         <logger level="INFO"
                 doc:name="LOG INFO coords resolved"
                 doc:id="pf000002-0002-0002-0002-000000000011"
-                message="#['LOG INFO | flow=pf-start-upgrade | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | owner=' ++ (vars.coords.owner default '') ++ ' | repo=' ++ (vars.coords.repo default '')]" />
+                message="#[output application/java --- 'LOG INFO | flow=pf-start-upgrade | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | owner=' ++ (vars.coords.owner default '') ++ ' | repo=' ++ (vars.coords.repo default '')]" />
 
         <!-- Step 3: Single-flight lock — prevent concurrent upgrades for the same app -->
         <os:retrieve key="#['lock::' ++ vars.appName]"
@@ -1040,9 +1040,9 @@ var all = propEdits ++ appEdits
                 <logger level="WARN"
                         doc:name="LOG WARN upgrade in progress"
                         doc:id="pf000002-0002-0002-0002-000000000015"
-                        message="#['LOG WARN | flow=pf-start-upgrade | correlationId=' ++ correlationId ++ ' | app=' ++ vars.appName ++ ' already has an upgrade in progress — jobId=' ++ (vars.existingLock as String)]" />
+                        message="#[output application/java --- 'LOG WARN | flow=pf-start-upgrade | correlationId=' ++ correlationId ++ ' | app=' ++ vars.appName ++ ' already has an upgrade in progress — jobId=' ++ vars.existingLock]" />
                 <raise-error type="CONFLICT:UPGRADE_IN_PROGRESS"
-                             description="#['An upgrade for app &quot;' ++ vars.appName ++ '&quot; is already in progress (jobId=' ++ (vars.existingLock as String) ++ '). Wait for it to complete or fail before starting a new one.']"
+                             description="#[output application/java --- 'An upgrade for app &quot;' ++ vars.appName ++ '&quot; is already in progress (jobId=' ++ vars.existingLock ++ '). Wait for it to complete or fail before starting a new one.']"
                              doc:name="RAISE CONFLICT:UPGRADE_IN_PROGRESS"
                              doc:id="pf000002-0002-0002-0002-000000000016" />
             </when>
@@ -1057,7 +1057,7 @@ var all = propEdits ++ appEdits
                 <logger level="INFO"
                         doc:name="LOG INFO lock acquired"
                         doc:id="pf000002-0002-0002-0002-000000000019"
-                        message="#['LOG INFO | flow=pf-start-upgrade | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | lock acquired for app=' ++ vars.appName]" />
+                        message="#[output application/java --- 'LOG INFO | flow=pf-start-upgrade | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | lock acquired for app=' ++ vars.appName]" />
             </otherwise>
         </choice>
 
@@ -1096,7 +1096,7 @@ output application/json
         <logger level="INFO"
                 doc:name="LOG INFO job record stored"
                 doc:id="pf000002-0002-0002-0002-000000000006"
-                message="#['LOG INFO | flow=pf-start-upgrade | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | status=PROCESSING | app=' ++ vars.appName]" />
+                message="#[output application/java --- 'LOG INFO | flow=pf-start-upgrade | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | status=PROCESSING | app=' ++ vars.appName]" />
 
         <!-- Step 5: Return 202 immediately — caller gets jobId before async work starts -->
         <ee:transform doc:name="DW Return jobId"
@@ -1129,7 +1129,7 @@ output application/json
                 <logger level="INFO"
                         doc:name="LOG INFO assessment complete"
                         doc:id="pf000002-0002-0002-0002-000000000033"
-                        message="#['LOG INFO | flow=pf-start-upgrade | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | assessment complete']" />
+                        message="#[output application/java --- 'LOG INFO | flow=pf-start-upgrade | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | assessment complete']" />
 
                 <!-- Required handoff: downstream flows read vars.changePlan, not payload -->
                 <set-variable variableName="changePlan"
@@ -1151,7 +1151,7 @@ output application/json
                 <logger level="INFO"
                         doc:name="LOG INFO transforms applied"
                         doc:id="pf000002-0002-0002-0002-000000000038"
-                        message="#['LOG INFO | flow=pf-start-upgrade | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | stagedFiles=' ++ sizeOf(vars.stagedFiles default [])]" />
+                        message="#[output application/java --- 'LOG INFO | flow=pf-start-upgrade | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | stagedFiles=' ++ sizeOf(vars.stagedFiles default [])]" />
 
                 <!-- Stage e: commit -->
                 <flow-ref name="pf-atomic-commit"
@@ -1167,7 +1167,7 @@ output application/json
                 <logger level="INFO"
                         doc:name="LOG INFO committed"
                         doc:id="pf000002-0002-0002-0002-000000000042"
-                        message="#['LOG INFO | flow=pf-start-upgrade | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | changes committed to branch']" />
+                        message="#[output application/java --- 'LOG INFO | flow=pf-start-upgrade | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | changes committed to branch']" />
 
                 <!-- Stage f: open PR -->
                 <flow-ref name="pf-open-pr"
@@ -1183,7 +1183,7 @@ output application/json
                 <logger level="INFO"
                         doc:name="LOG INFO PR open"
                         doc:id="pf000002-0002-0002-0002-000000000046"
-                        message="#['LOG INFO | flow=pf-start-upgrade | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | PR opened']" />
+                        message="#[output application/java --- 'LOG INFO | flow=pf-start-upgrade | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | PR opened']" />
 
                 <!-- Stage g: notify success -->
                 <flow-ref name="pf-notify"
@@ -1199,7 +1199,7 @@ output application/json
                         <logger level="ERROR"
                                 doc:name="LOG ERROR async stage failed"
                                 doc:id="pf000002-0002-0002-0002-000000000051"
-                                message="#['LOG ERROR | flow=pf-start-upgrade | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | errorType=' ++ (error.errorType.namespace default '') ++ ':' ++ (error.errorType.identifier default '') ++ ' | ' ++ (error.description default '')]" />
+                                message="#[output application/java --- 'LOG ERROR | flow=pf-start-upgrade | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | errorType=' ++ (error.errorType.namespace default '') ++ ':' ++ (error.errorType.identifier default '') ++ ' | ' ++ (error.description default '')]" />
 
                         <!-- Classify failure status from error type -->
                         <ee:transform doc:name="DW Determine failureStatus"
@@ -1252,7 +1252,7 @@ payload ++ {
                         <logger level="INFO"
                                 doc:name="LOG INFO job marked failed + lock released"
                                 doc:id="pf000002-0002-0002-0002-000000000057"
-                                message="#['LOG INFO | flow=pf-start-upgrade | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | status=' ++ (vars.failureStatus default 'FAILED') ++ ' | lock released']" />
+                                message="#[output application/java --- 'LOG INFO | flow=pf-start-upgrade | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | status=' ++ (vars.failureStatus default 'FAILED') ++ ' | lock released']" />
 
                         <flow-ref name="pf-notify-failure"
                                   doc:name="pf-notify-failure"
@@ -1278,7 +1278,7 @@ payload ++ {
         <logger level="DEBUG"
                 doc:name="LOG DEBUG pf-set-status"
                 doc:id="pfss0001-0001-0001-0001-000000000002"
-                message="#['LOG DEBUG | flow=pf-set-status | correlationId=' ++ correlationId ++ ' | jobId=' ++ (vars.jobId default '?') ++ ' | targetStatus=' ++ (vars.targetStatus default '?')]" />
+                message="#[output application/java --- 'LOG DEBUG | flow=pf-set-status | correlationId=' ++ correlationId ++ ' | jobId=' ++ (vars.jobId default '?') ++ ' | targetStatus=' ++ (vars.targetStatus default '?')]" />
 
         <os:retrieve key="#[vars.jobId]"
                      objectStore="jobStore"
@@ -1328,7 +1328,7 @@ payload ++ {
         <logger level="INFO"
                 doc:name="LOG INFO pf-atomic-commit enter"
                 doc:id="pfac0001-0001-0001-0001-000000000002"
-                message="#['LOG INFO | flow=pf-atomic-commit | correlationId=' ++ correlationId ++ ' | jobId=' ++ (vars.jobId default '?') ++ ' | stagedFiles=' ++ sizeOf(vars.stagedFiles default []) ++ ' | headSha=' ++ (vars.changePlan.headSha default '?')]" />
+                message="#[output application/java --- 'LOG INFO | flow=pf-atomic-commit | correlationId=' ++ correlationId ++ ' | jobId=' ++ (vars.jobId default '?') ++ ' | stagedFiles=' ++ sizeOf(vars.stagedFiles default []) ++ ' | headSha=' ++ (vars.changePlan.headSha default '?')]" />
 
         <!-- ── Step 1: Stale-plan guard ───────────────────────────────────────────────────
              Verify the branch HEAD has not moved since assessment. If it has, the
@@ -1351,9 +1351,9 @@ payload ++ {
                 <logger level="WARN"
                         doc:name="LOG WARN stale plan"
                         doc:id="pfac0001-0001-0001-0001-000000000006"
-                        message="#['LOG WARN | flow=pf-atomic-commit | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | stale plan: repo HEAD=' ++ (vars.headCheck.sha default '?') ++ ' != plan headSha=' ++ (vars.changePlan.headSha default '?')]" />
+                        message="#[output application/java --- 'LOG WARN | flow=pf-atomic-commit | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | stale plan: repo HEAD=' ++ (vars.headCheck.sha default '?') ++ ' != plan headSha=' ++ (vars.changePlan.headSha default '?')]" />
                 <raise-error type="CONFLICT:STALE_PLAN"
-                             description="#['The repo HEAD moved since assessment (current=' ++ (vars.headCheck.sha default '?') ++ ', plan=' ++ (vars.changePlan.headSha default '?') ++ '). Re-run assess_app to get a fresh changePlan.']"
+                             description="#[output application/java --- 'The repo HEAD moved since assessment (current=' ++ (vars.headCheck.sha default '?') ++ ', plan=' ++ (vars.changePlan.headSha default '?') ++ '). Re-run assess_app to get a fresh changePlan.']"
                              doc:name="RAISE CONFLICT:STALE_PLAN"
                              doc:id="pfac0001-0001-0001-0001-000000000007" />
             </when>
@@ -1362,7 +1362,7 @@ payload ++ {
                 <logger level="DEBUG"
                         doc:name="LOG DEBUG stale-plan check passed"
                         doc:id="pfac0001-0001-0001-0001-000000000008a"
-                        message="#['LOG DEBUG | flow=pf-atomic-commit | stale-plan check passed | headSha matches plan']" />
+                        message="#[output application/java --- 'LOG DEBUG | flow=pf-atomic-commit | stale-plan check passed | headSha matches plan']" />
             </otherwise>
         </choice>
 
@@ -1405,7 +1405,7 @@ var candidates = [base] ++ ((1 to 50) map ((n) -> base ++ "-" ++ (n as String)))
         <logger level="INFO"
                 doc:name="LOG INFO branch name computed"
                 doc:id="pfac0001-0001-0001-0001-000000000010"
-                message="#['LOG INFO | flow=pf-atomic-commit | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | branchBase=' ++ vars.branchBase ++ ' | branchName=' ++ vars.branchName ++ ' | existing=' ++ sizeOf(vars.existingRefs default [])]" />
+                message="#[output application/java --- 'LOG INFO | flow=pf-atomic-commit | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | branchBase=' ++ vars.branchBase ++ ' | branchName=' ++ vars.branchName ++ ' | existing=' ++ sizeOf(vars.existingRefs default [])]" />
 
         <!-- ── Step 3: Create branch ref ──────────────────────────────────────────────────
              POST /repos/{owner}/{repo}/git/refs
@@ -1542,7 +1542,7 @@ output application/json
         <logger level="INFO"
                 doc:name="LOG INFO commit created"
                 doc:id="pfac0001-0001-0001-0001-000000000024"
-                message="#['LOG INFO | flow=pf-atomic-commit | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | branchName=' ++ vars.branchName ++ ' | commitSha=' ++ (vars.commitSha default '?')]" />
+                message="#[output application/java --- 'LOG INFO | flow=pf-atomic-commit | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | branchName=' ++ vars.branchName ++ ' | commitSha=' ++ (vars.commitSha default '?')]" />
 
         <!-- ── Step 7: Move branch ref to the new commit ──────────────────────────────────
              PATCH /repos/{owner}/{repo}/git/refs/heads/{branchName}
@@ -1612,7 +1612,7 @@ payload ++ {
         <logger level="INFO"
                 doc:name="LOG INFO pf-atomic-commit done"
                 doc:id="pfac0001-0001-0001-0001-000000000031"
-                message="#['LOG INFO | flow=pf-atomic-commit | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | branchName=' ++ vars.branchName ++ ' | commitSha=' ++ (vars.commitSha default '?') ++ ' | stagedFiles=' ++ sizeOf(vars.stagedFiles default [])]" />
+                message="#[output application/java --- 'LOG INFO | flow=pf-atomic-commit | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | branchName=' ++ vars.branchName ++ ' | commitSha=' ++ (vars.commitSha default '?') ++ ' | stagedFiles=' ++ sizeOf(vars.stagedFiles default [])]" />
 
     </sub-flow>
 
@@ -1634,7 +1634,7 @@ payload ++ {
         <logger level="INFO"
                 doc:name="LOG INFO pf-open-pr enter"
                 doc:id="pfop0001-0001-0001-0001-000000000002"
-                message="#['LOG INFO | flow=pf-open-pr | correlationId=' ++ correlationId ++ ' | jobId=' ++ (vars.jobId default '?') ++ ' | branchName=' ++ (vars.branchName default '?')]" />
+                message="#[output application/java --- 'LOG INFO | flow=pf-open-pr | correlationId=' ++ correlationId ++ ' | jobId=' ++ (vars.jobId default '?') ++ ' | branchName=' ++ (vars.branchName default '?')]" />
 
         <!-- ── Step 1: Build PR body ──────────────────────────────────────────────────── -->
         <ee:transform doc:name="DW Build create-PR body"
@@ -1716,7 +1716,7 @@ payload ++ {
         <logger level="INFO"
                 doc:name="LOG INFO PR created"
                 doc:id="pfop0001-0001-0001-0001-000000000010"
-                message="#['LOG INFO | flow=pf-open-pr | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | prNumber=' ++ vars.prNumber ++ ' | prUrl=' ++ (vars.prUrl default '?')]" />
+                message="#[output application/java --- 'LOG INFO | flow=pf-open-pr | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | prNumber=' ++ vars.prNumber ++ ' | prUrl=' ++ (vars.prUrl default '?')]" />
 
     </sub-flow>
 
@@ -1740,7 +1740,7 @@ payload ++ {
             <logger level="INFO"
                     doc:name="LOG INFO pf-notify enter"
                     doc:id="pfnt0001-0001-0001-0001-000000000003"
-                    message="#['LOG INFO | flow=pf-notify | correlationId=' ++ correlationId ++ ' | jobId=' ++ (vars.jobId default '?') ++ ' | prUrl=' ++ (vars.prUrl default '(none)')]" />
+                    message="#[output application/java --- 'LOG INFO | flow=pf-notify | correlationId=' ++ correlationId ++ ' | jobId=' ++ (vars.jobId default '?') ++ ' | prUrl=' ++ (vars.prUrl default '(none)')]" />
 
             <!-- 2. Slack success message -->
             <ee:transform doc:name="DW Build Slack success message"
@@ -1792,7 +1792,7 @@ output application/json
                     <logger level="WARN"
                             doc:name="LOG WARN notification failed"
                             doc:id="pfnt0001-0001-0001-0001-000000000014"
-                            message="#['LOG WARN | flow=pf-notify | correlationId=' ++ correlationId ++ ' | jobId=' ++ (vars.jobId default '?') ++ ' | notification error swallowed: ' ++ (error.description default 'unknown')]" />
+                            message="#[output application/java --- 'LOG WARN | flow=pf-notify | correlationId=' ++ correlationId ++ ' | jobId=' ++ (vars.jobId default '?') ++ ' | notification error swallowed: ' ++ (error.description default 'unknown')]" />
                 </on-error-continue>
             </error-handler>
         </try>
@@ -1866,7 +1866,7 @@ var hasUrl  = url != ""
                             <logger level="WARN"
                                     doc:name="LOG WARN jira comment failed"
                                     doc:id="pfjc0001-0001-0001-0001-000000000008"
-                                    message="#['LOG WARN | flow=pf-jira-comment | jira comment error swallowed: ' ++ ((error.description default 'unknown') as String)]" />
+                                    message="#[output application/java --- 'LOG WARN | flow=pf-jira-comment | jira comment error swallowed: ' ++ (error.description default 'unknown')]" />
                         </on-error-continue>
                     </error-handler>
                 </try>
@@ -1877,7 +1877,7 @@ var hasUrl  = url != ""
                 <logger level="DEBUG"
                         doc:name="LOG DEBUG no jira ticket (final)"
                         doc:id="pfjc0001-0001-0001-0001-000000000010"
-                        message="#['LOG DEBUG | flow=pf-jira-comment | no jira ticket — skipping comment']" />
+                        message="#[output application/java --- 'LOG DEBUG | flow=pf-jira-comment | no jira ticket — skipping comment']" />
             </otherwise>
         </choice>
 
@@ -1902,7 +1902,7 @@ var hasUrl  = url != ""
             <logger level="WARN"
                     doc:name="LOG WARN pf-notify-failure enter"
                     doc:id="pfnf0001-0001-0001-0001-000000000003"
-                    message="#['LOG WARN | flow=pf-notify-failure | correlationId=' ++ correlationId ++ ' | jobId=' ++ (vars.jobId default '?') ++ ' | sending failure notification']" />
+                    message="#[output application/java --- 'LOG WARN | flow=pf-notify-failure | correlationId=' ++ correlationId ++ ' | jobId=' ++ (vars.jobId default '?') ++ ' | sending failure notification']" />
 
             <!-- 2. Read authoritative failure data from the job record -->
             <os:retrieve key="#[vars.jobId]"
@@ -1959,7 +1959,7 @@ output application/json
                     <logger level="WARN"
                             doc:name="LOG WARN failure notification itself failed"
                             doc:id="pfnf0001-0001-0001-0001-000000000011"
-                            message="#['LOG WARN | flow=pf-notify-failure | correlationId=' ++ (correlationId as String) ++ ' | jobId=' ++ ((vars.jobId default '?') as String) ++ ' | failure notification error swallowed: ' ++ ((error.description default 'unknown') as String)]" />
+                            message="#[output application/java --- 'LOG WARN | flow=pf-notify-failure | correlationId=' ++ correlationId ++ ' | jobId=' ++ (vars.jobId default '?') ++ ' | failure notification error swallowed: ' ++ (error.description default 'unknown')]" />
                 </on-error-continue>
             </error-handler>
         </try>
@@ -1988,7 +1988,7 @@ output application/json
             <logger level="INFO"
                     doc:name="LOG INFO pf-rollback enter"
                     doc:id="pfrl0001-0001-0001-0001-000000000004"
-                    message="#['LOG INFO | flow=pf-rollback | correlationId=' ++ correlationId ++ ' | jobId=' ++ (vars.jobId default '?') ++ ' | branchName=' ++ (vars.branchName default '?')]" />
+                    message="#[output application/java --- 'LOG INFO | flow=pf-rollback | correlationId=' ++ correlationId ++ ' | jobId=' ++ (vars.jobId default '?') ++ ' | branchName=' ++ (vars.branchName default '?')]" />
 
             <!-- Step 2: GET upgrade commit → find pre-upgrade base SHA (parents[0]) -->
             <http:request method="GET"
@@ -2159,7 +2159,7 @@ payload ++ {
             <logger level="INFO"
                     doc:name="LOG INFO rollback PR opened"
                     doc:id="pfrl0001-0001-0001-0001-000000000024"
-                    message="#['LOG INFO | flow=pf-rollback | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | revertPrUrl=' ++ (vars.revertPrUrl default '?')]" />
+                    message="#[output application/java --- 'LOG INFO | flow=pf-rollback | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | revertPrUrl=' ++ (vars.revertPrUrl default '?')]" />
 
             <!-- Non-fatal error handler — swallow any failure so the caller's FAILED_DEPLOY merge still runs -->
             <error-handler>
@@ -2168,7 +2168,7 @@ payload ++ {
                     <logger level="WARN"
                             doc:name="LOG WARN pf-rollback failed"
                             doc:id="pfrl0001-0001-0001-0001-000000000026"
-                            message="#['LOG WARN | flow=pf-rollback | correlationId=' ++ (correlationId as String) ++ ' | jobId=' ++ ((vars.jobId default '?') as String) ++ ' | rollback error swallowed: ' ++ ((error.description default 'unknown') as String)]" />
+                            message="#[output application/java --- 'LOG WARN | flow=pf-rollback | correlationId=' ++ correlationId ++ ' | jobId=' ++ (vars.jobId default '?') ++ ' | rollback error swallowed: ' ++ (error.description default 'unknown')]" />
                 </on-error-continue>
             </error-handler>
         </try>
@@ -2199,7 +2199,7 @@ payload ++ {
         <logger level="DEBUG"
                 doc:name="LOG DEBUG Status Lookup"
                 doc:id="pf000003-0003-0003-0003-000000000002"
-                message="#['LOG DEBUG | flow=pf-get-job-status | correlationId=' ++ correlationId ++ ' | jobId=' ++ (vars.jobId default 'unknown')]" />
+                message="#[output application/java --- 'LOG DEBUG | flow=pf-get-job-status | correlationId=' ++ correlationId ++ ' | jobId=' ++ (vars.jobId default 'unknown')]" />
 
         <os:retrieve key="#[vars.jobId]"
                      objectStore="jobStore"
@@ -2246,7 +2246,7 @@ var meta = statusMeta[payload.status]
         <logger level="DEBUG"
                 doc:name="LOG DEBUG Status Found"
                 doc:id="pf000003-0003-0003-0003-000000000005"
-                message="#['LOG DEBUG | flow=pf-get-job-status | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | status=' ++ payload.status]" />
+                message="#[output application/java --- 'LOG DEBUG | flow=pf-get-job-status | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | status=' ++ payload.status]" />
 
     </sub-flow>
 

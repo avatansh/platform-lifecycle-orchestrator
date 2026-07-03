@@ -27,7 +27,7 @@
         <logger level="DEBUG"
                 doc:name="LOG DEBUG Request"
                 doc:id="a7b8c9d0-0007-0007-0007-000000000003"
-                message="#['LOG DEBUG | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId]" />
+                message="#[output application/java --- 'LOG DEBUG | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId]" />
 
         <!-- Delegate to the shared sub-flow (also used by MCP get_job_status tool) -->
         <flow-ref name="pf-get-job-status"
