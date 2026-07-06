@@ -246,7 +246,7 @@
 		<dependency>
 			<groupId>2e14f8c6-4d60-481b-bfb6-798695efc8f4</groupId>
 			<artifactId>platform-lifecycle-orchestrator-api</artifactId>
-			<version>1.0.0</version>
+			<version>1.0.1</version>
 			<classifier>raml</classifier>
 			<type>zip</type>
 		</dependency>

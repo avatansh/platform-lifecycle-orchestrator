@@ -45,6 +45,12 @@ matrix:
     classifier: "custom"                     # Exchange custom-asset classifier ("" if none)
     packaging: "yaml"                        # main file extension of the published asset
 
+jira:
+  # Constant defaults; env files override. autoCreate defaults OFF for safety so no
+  # environment creates tickets unless it explicitly opts in (and sets projectKey).
+  autoCreate: "false"                        # when true AND no jiraTicketId supplied → create a migration ticket
+  issueType:  "Task"                         # Jira issue type used for auto-created migration tickets
+
 registry:
   path: "registry/app-registry.yaml"         # appName → repo coordinates
 

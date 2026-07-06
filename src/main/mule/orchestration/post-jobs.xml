@@ -123,6 +123,7 @@ output application/json
 		</ee:transform>
 		<async doc:name="ASYNC upgrade pipeline" doc:id="f0ee3f5d-4386-4b12-aa3a-64de565a5b05" >
 			<try doc:name="TRY upgrade stages" doc:id="f7708698-783d-4357-8bdb-6a8b7ba13548" >
+				<flow-ref doc:name="pf-jira-create-issue" doc:id="pfji0001-0001-0001-0001-000000000020" name="pf-jira-create-issue" />
 				<set-variable value="ASSESSING" doc:name="PV SET targetStatus=ASSESSING" doc:id="995a3d71-1f63-4ee6-abe5-09bfcab6f8ae" variableName="targetStatus" />
 				<flow-ref doc:name="pf-set-status (ASSESSING)" doc:id="bc2a8cfe-90c9-4f8c-b0df-2b206d574087" name="pf-set-status" />
 				<flow-ref doc:name="pf-assess-app" doc:id="37e3babe-25f5-461e-ab1a-143631c56c23" name="pf-assess-app" />

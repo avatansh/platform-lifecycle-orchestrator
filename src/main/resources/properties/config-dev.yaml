@@ -27,6 +27,8 @@ jira:
   # Non-secret Jira Cloud site coordinates. email + apiToken are encrypted in config-secure-dev.yaml.
   baseUrl: "https://avatansh-sharma.atlassian.net"   # Atlassian Cloud site (project key: J1U)
   host: "avatansh-sharma.atlassian.net"
+  autoCreate: "true"                                 # auto-create a migration ticket when none is supplied
+  projectKey: "J1U"                                  # Jira project the auto-created ticket lands in
 
 matrix:
   exchange:

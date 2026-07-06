@@ -41,23 +41,61 @@ types:
 
   FileEdit:
     type: object
-    description: Describes a single file-level change within a ChangePlan
+    description: |
+      A single file-level edit computed by assess_app. This mirrors the engine's
+      ACTUAL output shape (file / kind / from / to + optional coordinate fields), so
+      the fileEdits returned by assess can be round-tripped verbatim into an
+      approvedChangePlan without failing request validation. The upgrade worker keys
+      off `kind` to decide how to apply each edit.
     properties:
-      path:
+      file:
         type: string
-        description: Repository-relative path of the file being changed
-      operation:
+        description: |
+          Repository-relative path of the file being edited (the OWNER file — in a
+          monorepo this may be a shared parent/BOM pom inherited by other modules).
+      kind:
         type: string
-        enum: [ADD, MODIFY, DELETE, RENAME]
-        description: Type of edit operation
-      previousPath:
+        enum: [pomProperty, depVersion, pluginVersion, munitRuntimeVersion, muleArtifactJson, ciWorkflow]
+        description: |
+          Category of edit, which tells the worker how to apply it:
+          pomProperty (a <properties> value), depVersion / pluginVersion (an inline
+          dependency/plugin version), munitRuntimeVersion (MUnit plugin runtime),
+          muleArtifactJson (minMuleVersion + javaSpecificationVersions), ciWorkflow
+          (target Java version in the CI workflow).
+      property:
         type: string
         required: false
-        description: Original path, populated only when operation is RENAME
-      patchSummary:
+        description: For pomProperty/dependency/plugin edits, the Maven property or coordinate key involved
+      groupId:
         type: string
         required: false
-        description: Brief description of what changed within the file
+        description: Dependency groupId (present for depVersion edits)
+      artifactId:
+        type: string
+        required: false
+        description: Dependency artifactId (present for depVersion edits)
+      pluginGroupId:
+        type: string
+        required: false
+        description: Plugin groupId (present for pluginVersion edits)
+      pluginArtifactId:
+        type: string
+        required: false
+        description: Plugin artifactId (present for pluginVersion edits)
+      from:
+        type: any
+        required: false
+        description: |
+          Current value before the edit. Usually a string (e.g. a version); for
+          muleArtifactJson it is an object ({ minMuleVersion, javaSpecificationVersions }).
+      to:
+        type: any
+        required: false
+        description: Target value after the edit. Same shape as `from`.
+      change:
+        type: string
+        required: false
+        description: Flag/reason indicating why this edit is needed (e.g. the gating rule that triggered it)
 
   AssessmentResult:
     type: object

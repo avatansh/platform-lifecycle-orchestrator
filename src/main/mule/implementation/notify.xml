@@ -97,6 +97,75 @@ var hasUrl  = url != ""
 		</choice>
 	</sub-flow>
 	
+	<!-- ==========================================================================
+	     pf-jira-create-issue  (auto-create migration ticket — JIRA Feature 2)
+	     When NO jiraTicketId was supplied AND jira.autoCreate=true, create a Jira
+	     issue in jira.projectKey and adopt its key as vars.jiraTicketId for the rest
+	     of the pipeline (assessment comment, PR body, Slack, final decision comment).
+	     Self-guarding + NON-FATAL: any failure is logged at WARN and swallowed so the
+	     upgrade still proceeds ticket-less. Runs early in the async pipeline (pre-assess).
+	     Inputs: vars.appName, vars.jobId ; Config: jira.autoCreate/projectKey/issueType
+	     ========================================================================== -->
+	<sub-flow name="pf-jira-create-issue" doc:id="pfji0001-0001-0001-0001-000000000001" doc:description="Auto-create a Jira migration ticket when none supplied. Self-guarding + non-fatal.">
+		<choice doc:name="CHOICE auto-create ticket?" doc:id="pfji0001-0001-0001-0001-000000000002">
+			<when expression="#[(vars.jiraTicketId default null) == null and (p('jira.autoCreate') default 'false') == 'true']" doc:id="pfji0001-0001-0001-0001-000000000003">
+				<try doc:name="TRY jira create (non-fatal)" doc:id="pfji0001-0001-0001-0001-000000000004">
+					<ee:transform doc:name="DW Build Jira create-issue body" doc:id="pfji0001-0001-0001-0001-000000000005">
+						<ee:message>
+							<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    fields: {
+        project:   { key: p('jira.projectKey') },
+        issuetype: { name: (p('jira.issueType') default 'Task') },
+        summary:   ("Java 17 upgrade: " ++ (vars.appName default 'unknown app')),
+        description: {
+            "type": "doc",
+            version: 1,
+            content: [
+                {
+                    "type": "paragraph",
+                    content: [ { "type": "text", text: ("Automated migration ticket created by the Platform Lifecycle Orchestrator for app '" ++ (vars.appName default 'unknown') ++ "' (job " ++ (vars.jobId default '?') ++ "). Progress and the final decision will be posted here.") } ]
+                }
+            ]
+        }
+    }
+}]]></ee:set-payload>
+						</ee:message>
+					</ee:transform>
+					<http:request doc:name="POST create Jira issue" doc:id="pfji0001-0001-0001-0001-000000000006" doc:description="Create the migration issue; response contains the new issue key" config-ref="Jira_Request" method="POST" path="/rest/api/3/issue" target="createdIssue" />
+					<set-variable variableName="jiraTicketId" value="#[vars.createdIssue.key]" doc:name="PV SET jiraTicketId (auto-created)" doc:id="pfji0001-0001-0001-0001-000000000007" />
+					<os:retrieve doc:name="OS Retrieve job record for jira update" doc:id="pfji0001-0001-0001-0001-000000000008" key="#[vars.jobId]" objectStore="jobStore">
+						<os:default-value><![CDATA[#[{}]]]></os:default-value>
+					</os:retrieve>
+					<ee:transform doc:name="DW Merge jiraTicketId into job record" doc:id="pfji0001-0001-0001-0001-000000000009">
+						<ee:message>
+							<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+import mergeWith from dw::core::Objects
+---
+payload mergeWith {
+    jiraTicketId: vars.jiraTicketId,
+    updatedAt:    (now() >> |+00:00|) as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+}]]></ee:set-payload>
+						</ee:message>
+					</ee:transform>
+					<os:store doc:name="OS Store job record with jiraTicketId" doc:id="pfji0001-0001-0001-0001-000000000010" key="#[vars.jobId]" objectStore="jobStore" />
+					<logger level="INFO" doc:name="LOG INFO jira ticket auto-created" doc:id="pfji0001-0001-0001-0001-000000000011" message="#[output application/java --- 'LOG INFO | flow=pf-jira-create-issue | correlationId=' ++ correlationId ++ ' | jobId=' ++ (vars.jobId default '?') ++ ' | auto-created jiraTicketId=' ++ (vars.jiraTicketId default '?')]" />
+					<error-handler>
+						<on-error-continue enableNotifications="true" logException="true" doc:name="swallow jira create error" doc:id="pfji0001-0001-0001-0001-000000000012" type="ANY">
+							<logger level="WARN" doc:name="LOG WARN jira create failed" doc:id="pfji0001-0001-0001-0001-000000000013" message="#[output application/java --- 'LOG WARN | flow=pf-jira-create-issue | correlationId=' ++ correlationId ++ ' | jobId=' ++ (vars.jobId default '?') ++ ' | auto-create failed, proceeding ticket-less: ' ++ (error.description default 'unknown')]" />
+						</on-error-continue>
+					</error-handler>
+				</try>
+			</when>
+			<otherwise doc:id="pfji0001-0001-0001-0001-000000000015">
+				<logger level="DEBUG" doc:name="LOG DEBUG jira auto-create skipped" doc:id="pfji0001-0001-0001-0001-000000000016" message="#[output application/java --- 'LOG DEBUG | flow=pf-jira-create-issue | skipped (ticket supplied or autoCreate off)']" />
+			</otherwise>
+		</choice>
+	</sub-flow>
+
     <!-- ==========================================================================
          pf-notify-failure  (failure — upgrade pipeline errored)
          Reads the authoritative status + error from the job record in Object Store
