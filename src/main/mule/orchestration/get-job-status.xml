@@ -62,7 +62,8 @@ var statusMeta = {
     FAILED_ASSESS: { message: "Assessment failed. See error for details.",                  nextPollSeconds: 0  },
     FAILED_COMMIT: { message: "Commit/transform stage failed. See error for details.",      nextPollSeconds: 0  },
     FAILED_CI:     { message: "CI build/tests failed after merge. See error for details.",  nextPollSeconds: 0  },
-    FAILED_DEPLOY: { message: "Deployment failed. See error for details.",                  nextPollSeconds: 0  }
+    FAILED_DEPLOY: { message: "Deployment failed. See error for details.",                  nextPollSeconds: 0  },
+    FAILED_INTERRUPTED: { message: "Upgrade was interrupted before completion (runtime restart/crash) and was automatically failed. Re-submit to retry.", nextPollSeconds: 0 }
 }
 var meta = statusMeta[payload.status]
            default { message: ("Status: " ++ (payload.status default "UNKNOWN")), nextPollSeconds: 10 }

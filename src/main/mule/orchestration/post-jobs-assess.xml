@@ -523,6 +523,16 @@ var appEdits = []
   ++ (if (ciNeeds)
         [{ file: vars.ciWorkflowPath, kind: "ciWorkflow", from: ciCur, to: m.target.javaVersion }] else [])
 var all = propEdits ++ appEdits
+// BLAST-RADIUS: property/dependency/plugin edits can land on a shared parent or BOM
+// pom (any chain entry other than the app's OWN module pom at chain[0]). Editing those
+// upgrades every module that inherits from them, so surface it as an explicit warning.
+var appPomPath     = vars.chain[0].path default ''
+var sharedPomFiles = ((propEdits map $.file) distinctBy $) filter ((f) -> f != appPomPath)
+var blastWarnings  = if (isEmpty(sharedPomFiles)) []
+    else [ ("BLAST RADIUS: this upgrade edits shared build file(s) [" ++ (sharedPomFiles joinBy ", ")
+            ++ "] that are inherited by other modules in the repository. Approving it upgrades EVERY module that inherits from these files, not just "
+            ++ (vars.appName default "this app")
+            ++ " — every inheriting module's build and MUnit tests must pass in CI. Review the wider impact before approving.") ]
 ---
 {
   appName: vars.appName,
@@ -539,7 +549,7 @@ var all = propEdits ++ appEdits
     hasCustomJavaCode: vars.customJavaFound default false,
     hasLookupFunction: vars.lookupFound default false
   },
-  warnings: vars.warnings default []
+  warnings: (vars.warnings default []) ++ blastWarnings
 }]]></ee:set-payload>
 			</ee:message>
 		</ee:transform>

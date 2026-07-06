@@ -1,3 +1,10 @@
+# =============================================================================
+# config.yaml — ENVIRONMENT-CONSTANT settings ONLY.
+# Values here are identical across dev / test / prod. Anything that varies per
+# environment (owners, org IDs, hosts, channels, governance toggles) lives in
+# config-<env>.yaml, which is loaded FIRST and therefore overrides this file.
+# =============================================================================
+
 app:
   name: "platform-lifecycle-orchestrator"
   version: "1.0.0"
@@ -6,67 +13,50 @@ api:
   majorVersion: "v1"
 
 http:
-  host: "0.0.0.0"
-  port: "8081"
+  host: "0.0.0.0"                        # bind address is the same everywhere (port is per-env)
 
 mcp:
   serverName: "platform-lifecycle-orchestrator"
   serverVersion: "1.0.0"
 
 github:
-  apiBase: "https://api.github.com"   # override per-app for GitHub Enterprise
-  defaultOwner: "Avatansh-GitHub"    # convention fallback: org/user that owns target repos
-  defaultBranch: "main"             # fallback only; ARM/GitHub/registry/request can override
-  
-naming:                            # convention used when an app is NOT in the registry
-  repoEqualsAppName: "true"       # repo = appName
-  appPathAtRoot: "true"          # app module sits at repo root ("." )
-  
+  apiBase: "https://api.github.com"      # constant (override in an env file only for GitHub Enterprise)
+  defaultBranch: "main"                  # convention fallback; registry/request/discovery can override
+
+naming:                                  # convention used when an app is NOT in the registry
+  repoEqualsAppName: "true"              # repo = appName
+  appPathAtRoot: "true"                  # app module sits at repo root (".")
+
 anypoint:
   apiBase: "https://anypoint.mulesoft.com"
-  defaultOrgId: "2e14f8c6-4d60-481b-bfb6-798695efc8f4"  # used if ARM lookup not run
-  tokenPath: "/accounts/api/v2/oauth2/token"            # Connected App client_credentials token endpoint
-  tokenRefreshSeconds: "3300"                            # cache bearer ~55 min (platform TTL is 60 min)
+  tokenPath: "/accounts/api/v2/oauth2/token"   # Connected App client_credentials token endpoint
+  tokenRefreshSeconds: "3300"                  # cache bearer ~55 min (platform TTL is 60 min)
   verify:
-    enabled: "true"                                      # post-deploy platform confirmation (event-driven, no polling)
     # AMC/CH2.0 deployment statuses treated as a healthy/successful deploy (comma-separated, upper-case).
     healthyStatuses: "RUNNING,APPLIED,STARTED,PARTIALLY_STARTED"
-  
-slack:    { channel: "#java17-upgrades" }
-
-jira:     { baseUrl: "https://your-org.atlassian.net", host: "your-org.atlassian.net" }
 
 matrix:
   path: "matrix/compatibility-matrix.yaml"   # classpath copy — packaged in the app; used as fallback
-  source: "exchange-latest"                  # exchange | exchange-latest | classpath.
-                                             #   exchange        = central governance at the pinned version below
-                                             #   exchange-latest = auto-adopt newest published version (reads maven-metadata.xml)
-                                             #   classpath       = bundled copy only (offline/tests)
-  refreshSeconds: "86400"                     # matrix cache TTL = 1 day. Override in Runtime Manager
-                                              #   (Settings → Properties) to change without a redeploy.
-                                              #   Key is bucketed (floor(epoch/refreshSeconds)) so the
-                                              #   matrix re-fetches ~once per UTC day.
-  exchange:                                   # coordinates of the matrix asset published to Anypoint Exchange
-    orgId: "2e14f8c6-4d60-481b-bfb6-798695efc8f4"
+  source: "exchange-latest"                  # exchange | exchange-latest | classpath
+  refreshSeconds: "86400"                    # matrix cache TTL = 1 day (bucketed floor(epoch/refreshSeconds))
+  exchange:                                  # Exchange asset IDENTITY (orgId is env-specific → env file)
     assetId: "java17-compatibility-matrix"
-    version: "1.0.1"                          # bump when you publish a new matrix version (or use source=exchange-latest)
-    classifier: "custom"                      # Exchange custom-asset classifier — part of the Maven filename ("" if none)
-    packaging: "yaml"                         # main file extension of the published asset
+    version: "1.0.1"                         # bump when you publish a new matrix version (or use source=exchange-latest)
+    classifier: "custom"                     # Exchange custom-asset classifier ("" if none)
+    packaging: "yaml"                        # main file extension of the published asset
 
-registry:                          # OPTIONAL — see governance note
-  path: "registry/app-registry.yaml"   # appName → repo coordinates
-  enforceAllowList: "false"      # true = ONLY registered apps may be upgraded (governance)
-  
-osv2:                                      # Object Store v2 — one allocation per app; these are
-                                           #   TTLs for the separate named partitions (stores).
-  jobTtlSeconds:         "2592000"        # jobStore        — job records, 30d rolling
-  lockTtlSeconds:        "86400"          # locksStore      — single-flight locks, 1d safety net
-                                          #   (normally released explicitly on terminal state)
-  idempotencyTtlSeconds: "172800"         # idempotencyStore— webhook delivery de-dup keys, 2d
-  indexTtlSeconds:       "2592000"        # indexStore      — branch→jobId correlation index, 30d
+registry:
+  path: "registry/app-registry.yaml"         # appName → repo coordinates
 
-job:      { maxConcurrentPerApp: "1" }     # single-flight
+osv2:                                        # Object Store v2 partition TTLs (seconds)
+  jobTtlSeconds:         "2592000"           # jobStore         — job records, 30d rolling
+  lockTtlSeconds:        "86400"             # locksStore       — single-flight locks, 1d safety net
+  idempotencyTtlSeconds: "172800"            # idempotencyStore — webhook delivery de-dup keys, 2d
+  indexTtlSeconds:       "2592000"           # indexStore       — branch→jobId correlation index, 30d
 
-reconcile:                                 # self-healing sweep
-  frequencyMillis: "300000"               # run every 5 minutes
-  staleSeconds:    "900"                  # job is stale after 15 minutes without updatedAt change
+job:
+  maxConcurrentPerApp: "1"                   # single-flight
+
+reconcile:                                   # self-healing sweep — production defaults
+  frequencyMillis: "300000"                  # run every 5 minutes  (dev overrides to 30s)
+  staleSeconds:    "900"                     # job stale after 15 minutes idle (dev overrides to 2 min)

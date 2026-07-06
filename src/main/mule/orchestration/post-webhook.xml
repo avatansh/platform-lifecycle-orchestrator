@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="UTF-8"?>
+﻿<?xml version="1.0" encoding="UTF-8"?>
 <mule xmlns:http="http://www.mulesoft.org/schema/mule/http"
       xmlns:os="http://www.mulesoft.org/schema/mule/os"
       xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
@@ -19,15 +19,15 @@
         Idempotency: delivery UUID de-duplicated via Object Store.
 
         Job status transitions triggered here:
-          PR_OPEN → DEPLOYING  (on successful merge — CI/CD outcome handled by /webhook/cd-result)
+          PR_OPEN â†’ DEPLOYING  (on successful merge â€” CI/CD outcome handled by /webhook/cd-result)
     -->
     <flow name="mf-impl-post-webhook" doc:id="b8c9d0e1-0008-0008-0008-000000000001">
 
-        <!-- ── HMAC signature validation ─────────────────────────────────────────────────
+        <!-- â”€â”€ HMAC signature validation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
              Compute expected = "sha256=" ++ HMAC-SHA256(webhookSecret, rawBody).
              vars.rawBody and vars.ghSignature were captured in the main flow BEFORE APIkit
              parsed the payload, so rawBody is the exact bytes GitHub signed.
-             ──────────────────────────────────────────────────────────────────────────────── -->
+             â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
         <ee:transform doc:name="DW Compute Expected HMAC Signature"
                       doc:id="b8c9d0e1-0008-0008-0008-000000000020"
                       doc:description="Compute sha256=HEX(HMAC-SHA256(webhookSecret, rawBody)) for comparison with x-hub-signature-256">
@@ -68,13 +68,13 @@ output application/json
                 </ee:transform>
 
             </when>
-            <otherwise doc:name="signature valid — proceed"
+            <otherwise doc:name="signature valid â€” proceed"
                        doc:id="b8c9d0e1-0008-0008-0008-000000000027">
 
-                <!-- ── Idempotency: de-duplicate by GitHub delivery UUID ─────────────────────
+                <!-- â”€â”€ Idempotency: de-duplicate by GitHub delivery UUID â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                      NOTE: os:retrieve treats a NULL os:default-value as "no default" and throws
                      OS:KEY_NOT_FOUND on a missing key. A brand-new delivery (the common case) has
-                     no key, so we default to `false` (not seen) — this also preserves the payload,
+                     no key, so we default to `false` (not seen) â€” this also preserves the payload,
                      which a null default + error handler would not. -->
                 <os:retrieve key="#['delivery::' ++ vars.ghDelivery]"
                              objectStore="idempotencyStore"
@@ -88,7 +88,7 @@ output application/json
                         doc:id="b8c9d0e1-0008-0008-0008-000000000029"
                         doc:description="Skip processing if this delivery UUID was already handled">
                     <when expression="#[vars.seenDelivery == true]"
-                          doc:name="duplicate delivery — skip"
+                          doc:name="duplicate delivery â€” skip"
                           doc:id="b8c9d0e1-0008-0008-0008-000000000030">
 
                         <logger level="INFO"
@@ -107,7 +107,7 @@ output application/json
                         </ee:transform>
 
                     </when>
-                    <otherwise doc:name="new delivery — process"
+                    <otherwise doc:name="new delivery â€” process"
                                doc:id="b8c9d0e1-0008-0008-0008-000000000033">
 
                         <!-- Mark this delivery as processed before touching any job state -->
@@ -150,7 +150,7 @@ output application/json
 
                                 <!-- get-or-empty: an untracked merged branch has no key. A null
                                      os:default-value would throw OS:KEY_NOT_FOUND, so default to ""
-                                     (no mapping) — this also preserves the payload. -->
+                                     (no mapping) â€” this also preserves the payload. -->
                                 <os:retrieve key="#['branch::' ++ vars.mergedBranch]"
                                              objectStore="indexStore"
                                              target="jobIdFromBranch"
@@ -171,7 +171,7 @@ output application/json
                                                      doc:id="b8c9d0e1-0008-0008-0008-000000000009" />
 
                                         <!--
-                                            Transition to DEPLOYING — the final DEPLOYED/FAILED_DEPLOY
+                                            Transition to DEPLOYING â€” the final DEPLOYED/FAILED_DEPLOY
                                             transition is set by the CD pipeline via /webhook/cd-result.
                                             completedAt is NOT set here; it belongs to the terminal state.
                                         -->
@@ -180,12 +180,13 @@ output application/json
                                             <ee:message>
                                                 <ee:set-payload><![CDATA[%dw 2.0
 output application/json
+import mergeWith from dw::core::Objects
 ---
-payload ++ {
+payload mergeWith {
     status:     "DEPLOYING",
     prUrl:      vars.prUrl,
     branchName: vars.mergedBranch,
-    updatedAt:  now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+    updatedAt:  (now() >> |+00:00|) as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
 }]]></ee:set-payload>
                                             </ee:message>
                                         </ee:transform>
@@ -244,7 +245,7 @@ output application/json
     </flow>
 
     <!--
-        mf-impl-post-cd-result — POST /webhook/cd-result
+        mf-impl-post-cd-result â€” POST /webhook/cd-result
         Called by the GitHub Actions CD pipeline after deployment.
         Body: { jobId: String, result: "success"|"failure", deployUrl?: String }
         Auth: X-CD-Token header must match secure::github.webhookSecret (shared secret).
@@ -255,7 +256,7 @@ output application/json
           doc:name="mf-impl-post-cd-result"
           doc:description="Receive CD pipeline result callback; authenticate, finalize job status, release lock.">
 
-        <!-- ── Step 1: Shared-token authentication ──────────────────────────────────────── -->
+        <!-- â”€â”€ Step 1: Shared-token authentication â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
         <choice doc:name="CHOICE X-CD-Token valid?"
                 doc:id="b9c0d1e2-0009-0009-0009-000000000001"
                 doc:description="Reject requests whose X-CD-Token header does not match the shared webhook secret">
@@ -266,7 +267,7 @@ output application/json
                 <logger level="WARN"
                         doc:name="LOG WARN Invalid CD Token"
                         doc:id="b9c0d1e2-0009-0009-0009-000000000003"
-                        message="#[output application/java --- 'LOG WARN | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | invalid X-CD-Token — rejecting']" />
+                        message="#[output application/java --- 'LOG WARN | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | invalid X-CD-Token â€” rejecting']" />
 
                 <set-variable variableName="httpStatus"
                               value="401"
@@ -284,12 +285,12 @@ output application/json
                 </ee:transform>
 
             </when>
-            <otherwise doc:name="token valid — proceed"
+            <otherwise doc:name="token valid â€” proceed"
                        doc:id="b9c0d1e2-0009-0009-0009-000000000006">
 
-                <!-- ── Step 2: Parse CD callback body ─────────────────────────────────────── -->
+                <!-- â”€â”€ Step 2: Parse CD callback body â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
 
-                <!-- ── Step 3: Load job record (throws OS:KEY_NOT_FOUND → 404 if missing) ── -->
+                <!-- â”€â”€ Step 3: Load job record (throws OS:KEY_NOT_FOUND â†’ 404 if missing) â”€â”€ -->
                 <ee:transform doc:name="PV SET payload vars" doc:id="63c02425-9a3f-4309-ad9b-850f577a592d">
 					<ee:message>
 					</ee:message>
@@ -305,7 +306,7 @@ output application/json
                              doc:name="OS Retrieve Job Record"
                              doc:id="b9c0d1e2-0009-0009-0009-000000000011" />
 
-                <!-- ── Step 4: Capture record fields before any transform overwrites payload ─
+                <!-- â”€â”€ Step 4: Capture record fields before any transform overwrites payload â”€
                      jobRec holds the full record; downstream sub-flows (verify/rollback) run
                      HTTP calls that clobber `payload`, so finalize transforms build from jobRec. -->
 				<ee:transform doc:name="PVT SET record vars" doc:id="665264f0-76f0-4ddb-8e2d-4b2478119611">
@@ -325,9 +326,9 @@ output application/json
 					</ee:variables>
 										</ee:transform>
 
-                <!-- ── Step 5: Idempotency / terminal guard ─────────────────────────────────
+                <!-- â”€â”€ Step 5: Idempotency / terminal guard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                      If the job is already in a terminal state, return 200 and skip re-processing.
-                     ──────────────────────────────────────────────────────────────────────────── -->
+                     â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
 				<choice doc:name="CHOICE already terminal?"
                         doc:id="b9c0d1e2-0009-0009-0009-000000000018"
                         doc:description="Skip if the job was already finalized by a previous cd-result callback">
@@ -351,26 +352,26 @@ output application/json
                         </ee:transform>
 
                     </when>
-                    <otherwise doc:name="job not yet terminal — proceed"
+                    <otherwise doc:name="job not yet terminal â€” proceed"
                                doc:id="b9c0d1e2-0009-0009-0009-000000000022">
 
-                        <!-- ── Step 6: Outcome branch ────────────────────────────────────────── -->
+                        <!-- â”€â”€ Step 6: Outcome branch â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
                         <choice doc:name="CHOICE cdResult success|failure|unknown?"
                                 doc:id="b9c0d1e2-0009-0009-0009-000000000023"
                                 doc:description="Finalize job as DEPLOYED (success) or FAILED_DEPLOY (failure)">
 
-                            <!-- ── 6a: SUCCESS (CI-reported) — confirm on platform before finalizing ─ -->
+                            <!-- â”€â”€ 6a: SUCCESS (CI-reported) â€” confirm on platform before finalizing â”€ -->
                             <when expression="#[vars.cdResult == 'success']"
                                   doc:name="success"
                                   doc:id="b9c0d1e2-0009-0009-0009-000000000024">
 
-                                <!-- ── 6a-i: Post-deploy platform confirmation (ADR-015) ──────────────
+                                <!-- â”€â”€ 6a-i: Post-deploy platform confirmation (ADR-015) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                                      CI said success. Make ONE Application Manager call to confirm the
                                      app is actually healthy on CH2.0:
-                                       - platform verified + healthy  → DEPLOYED
-                                       - platform verified + unhealthy → FAILED_DEPLOY (discrepancy)
-                                       - platform unreachable/disabled → trust CI signal → DEPLOYED
-                                     ──────────────────────────────────────────────────────────────── -->
+                                       - platform verified + healthy  â†’ DEPLOYED
+                                       - platform verified + unhealthy â†’ FAILED_DEPLOY (discrepancy)
+                                       - platform unreachable/disabled â†’ trust CI signal â†’ DEPLOYED
+                                     â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
                                 <choice doc:name="CHOICE verify enabled?"
                                         doc:id="b9c0d1e2-0009-0009-0009-00000000006a">
                                     <when expression="#[(p('anypoint.verify.enabled') default 'true') == 'true']"
@@ -380,9 +381,9 @@ output application/json
 											<ee:message>
 											</ee:message>
 											<ee:variables>
-												<ee:set-variable variableName="vfyEnv"><![CDATA[vars.environment default '']]></ee:set-variable>
-												<ee:set-variable variableName="vfyOrgId"><![CDATA[vars.coords.orgId default p('anypoint.defaultOrgId')]]></ee:set-variable>
-												<ee:set-variable variableName="vfyApp"><![CDATA[vars.appName]]></ee:set-variable>
+												<ee:set-variable variableName="vfyEnv"><![CDATA[output application/java --- (vars.environment default '') as String]]></ee:set-variable>
+												<ee:set-variable variableName="vfyOrgId"><![CDATA[output application/java --- (vars.coords.orgId default p('anypoint.defaultOrgId')) as String]]></ee:set-variable>
+												<ee:set-variable variableName="vfyApp"><![CDATA[output application/java --- (vars.appName default '') as String]]></ee:set-variable>
 											</ee:variables>
 										</ee:transform>
                                         <flow-ref name="pf-verify-deployment"
@@ -413,17 +414,18 @@ output application/java
                                     <ee:message>
                                         <ee:set-payload><![CDATA[%dw 2.0
 output application/json
+import mergeWith from dw::core::Objects
 ---
-vars.jobRec ++ {
+vars.jobRec mergeWith {
     status:                 vars.deployVerdict,
     deployUrl:              vars.deployUrl,
     platformVerified:       (vars.verify.verified default false),
     platformStatus:         (vars.verify.status default null),
     platformRuntimeVersion: (vars.verify.runtimeVersion default null),
-    completedAt:            now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
-    updatedAt:              now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+    completedAt:            (now() >> |+00:00|) as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
+    updatedAt:              (now() >> |+00:00|) as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
 }
-++ (if (vars.deployVerdict == "FAILED_DEPLOY")
+mergeWith (if (vars.deployVerdict == "FAILED_DEPLOY")
       { error: "CD reported success but platform status=" ++ (vars.verify.status default "UNKNOWN") }
     else {})]]></ee:set-payload>
                                     </ee:message>
@@ -435,31 +437,19 @@ vars.jobRec ++ {
                                     <os:value>#[payload]</os:value>
                                 </os:store>
 
-                                <!-- Release single-flight lock — non-fatal -->
-                                <try doc:name="TRY release lock (non-fatal)"
-                                     doc:id="b9c0d1e2-0009-0009-0009-000000000027">
-                                    <os:remove key="#['lock::' ++ vars.appName]"
-                                               objectStore="locksStore"
-                                               doc:name="OS Remove upgrade lock (finalized)"
-                                               doc:id="b9c0d1e2-0009-0009-0009-000000000028" />
-                                    <error-handler>
-                                        <on-error-continue type="ANY"
-                                                           doc:id="b9c0d1e2-0009-0009-0009-000000000029">
-                                            <logger level="DEBUG"
-                                                    doc:name="LOG DEBUG lock already released"
-                                                    doc:id="b9c0d1e2-0009-0009-0009-000000000030"
-                                                    message="#[output application/java --- 'LOG DEBUG | flow=' ++ flow.name ++ ' | lock release skipped (already removed) | app=' ++ (vars.appName default '?')]" />
-                                        </on-error-continue>
-                                    </error-handler>
-                                </try>
+                                <!-- Release single-flight lock â€” idempotent + non-fatal -->
+                                <set-variable variableName="lockApp" value="#[vars.appName default '']"
+                                              doc:name="PV lockApp" doc:id="b9c0d1e2-0009-0009-0009-000000000027" />
+                                <flow-ref name="pf-release-lock" doc:name="pf-release-lock (finalized)"
+                                          doc:id="b9c0d1e2-0009-0009-0009-000000000028" />
 
-                                <!-- ── 6a-ii: Notify by verdict ───────────────────────────────────── -->
+                                <!-- â”€â”€ 6a-ii: Notify by verdict â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
                                 <choice doc:name="CHOICE notify by verdict?"
                                         doc:id="b9c0d1e2-0009-0009-0009-000000000073">
                                     <when expression="#[vars.deployVerdict == 'DEPLOYED']"
-                                          doc:name="DEPLOYED — Slack success"
+                                          doc:name="DEPLOYED â€” Slack success"
                                           doc:id="b9c0d1e2-0009-0009-0009-000000000074">
-                                        <!-- Slack success notification — non-fatal -->
+                                        <!-- Slack success notification â€” non-fatal -->
                                         <try doc:name="TRY Slack DEPLOYED notification (non-fatal)"
                                              doc:id="b9c0d1e2-0009-0009-0009-000000000031">
                                             <ee:transform doc:name="DW Build Slack DEPLOYED message"
@@ -470,9 +460,10 @@ output application/json
 ---
 {
     channel: p('slack.channel'),
-    text: (":white_check_mark: *Java 17 upgrade DEPLOYED* — " ++ vars.appName
+    text: (":white_check_mark: *Java 17 upgrade DEPLOYED* â€” " ++ vars.appName
            ++ "\nJob " ++ vars.jobId
            ++ (if ((vars.verify.verified default false)) ("\nPlatform status: " ++ (vars.verify.status default "UNKNOWN")) else "\nPlatform: unverified (trusting CI)")
+           ++ (if (vars.jiraTicketId != null) ("\nJira: <" ++ (p('jira.baseUrl') default '') ++ "/browse/" ++ (vars.jiraTicketId as String) ++ "|" ++ (vars.jiraTicketId as String) ++ ">") else "")
            ++ (if (vars.deployUrl != null) ("\n" ++ vars.deployUrl) else ""))
 }]]></ee:set-payload>
                                                 </ee:message>
@@ -497,7 +488,7 @@ output application/json
                                             </error-handler>
                                         </try>
                                     </when>
-                                    <otherwise doc:name="FAILED_DEPLOY — discrepancy notify"
+                                    <otherwise doc:name="FAILED_DEPLOY â€” discrepancy notify"
                                                doc:id="b9c0d1e2-0009-0009-0009-000000000075">
                                         <flow-ref name="pf-notify-failure"
                                                   doc:name="pf-notify-failure (platform discrepancy)"
@@ -505,7 +496,7 @@ output application/json
                                     </otherwise>
                                 </choice>
 
-                                <!-- ── 6a-iii: Jira comment on the final decision (with PR link) ──── -->
+                                <!-- â”€â”€ 6a-iii: Jira comment on the final decision (with PR link) â”€â”€â”€â”€ -->
 <set-variable variableName="jiraCommentText"
               value="#[output text/plain
 ---
@@ -540,7 +531,7 @@ output application/json
 
                             </when>
 
-                            <!-- ── 6b: FAILURE ──────────────────────────────────────────────── -->
+                            <!-- â”€â”€ 6b: FAILURE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
                             <when expression="#[vars.cdResult == 'failure']"
                                   doc:name="failure"
                                   doc:id="b9c0d1e2-0009-0009-0009-000000000039">
@@ -554,13 +545,14 @@ output application/json
                                     <ee:message>
                                         <ee:set-payload><![CDATA[%dw 2.0
 output application/json
+import mergeWith from dw::core::Objects
 ---
-vars.jobRec ++ {
+vars.jobRec mergeWith {
     status:      "FAILED_DEPLOY",
     error:       (vars.cdError default "CD pipeline reported failure"),
     rolledBack:  true,
-    completedAt: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
-    updatedAt:   now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+    completedAt: (now() >> |+00:00|) as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
+    updatedAt:   (now() >> |+00:00|) as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
 }]]></ee:set-payload>
                                     </ee:message>
                                 </ee:transform>
@@ -572,35 +564,23 @@ vars.jobRec ++ {
                                     <os:value>#[payload]</os:value>
                                 </os:store>
 
-                                <!-- Release single-flight lock — non-fatal -->
-                                <try doc:name="TRY release lock on failure (non-fatal)"
-                                     doc:id="b9c0d1e2-0009-0009-0009-000000000043">
-                                    <os:remove key="#['lock::' ++ vars.appName]"
-                                               objectStore="locksStore"
-                                               doc:name="OS Remove upgrade lock (failed deploy)"
-                                               doc:id="b9c0d1e2-0009-0009-0009-000000000044" />
-                                    <error-handler>
-                                        <on-error-continue type="ANY"
-                                                           doc:id="b9c0d1e2-0009-0009-0009-000000000045">
-                                            <logger level="DEBUG"
-                                                    doc:name="LOG DEBUG lock already released (failure)"
-                                                    doc:id="b9c0d1e2-0009-0009-0009-000000000046"
-                                                    message="#[output application/java --- 'LOG DEBUG | flow=' ++ flow.name ++ ' | lock release skipped (already removed) | app=' ++ (vars.appName default '?')]" />
-                                        </on-error-continue>
-                                    </error-handler>
-                                </try>
+                                <!-- Release single-flight lock â€” idempotent + non-fatal -->
+                                <set-variable variableName="lockApp" value="#[vars.appName default '']"
+                                              doc:name="PV lockApp" doc:id="b9c0d1e2-0009-0009-0009-000000000043" />
+                                <flow-ref name="pf-release-lock" doc:name="pf-release-lock (failed deploy)"
+                                          doc:id="b9c0d1e2-0009-0009-0009-000000000044" />
 
                                 <flow-ref name="pf-notify-failure"
                                           doc:name="pf-notify-failure (FAILED_DEPLOY)"
                                           doc:id="b9c0d1e2-0009-0009-0009-000000000047" />
 
-                                <!-- Jira comment on the final decision (with PR link) -->
+                                <!-- Jira comment on the final decision (link to the ROLLBACK PR when one was opened) -->
                                 <set-variable variableName="jiraCommentText"
-                                              value="#[output text/plain --- ('Java 17 upgrade FAILED_DEPLOY for ' ++ (vars.appName as String) ++ ' (job ' ++ (vars.jobId as String) ++ '). ' ++ ((vars.cdError default 'CD pipeline reported failure') as String) ++ ' Rollback attempted.')]"
+                                              value="#[output text/plain --- ('Java 17 upgrade FAILED_DEPLOY for ' ++ (vars.appName as String) ++ ' (job ' ++ (vars.jobId as String) ++ '). ' ++ ((vars.cdError default 'CD pipeline reported failure') as String) ++ (if ((vars.revertPrUrl default '') != '') ' A rollback (revert) PR has been opened to restore the pre-upgrade state.' else ' Rollback attempted.'))]"
                                               doc:name="PV SET vars.jiraCommentText (failure)"
                                               doc:id="b9c0d1e2-0009-0009-0009-000000000047a" />
                                 <set-variable variableName="jiraCommentUrl"
-                                              value="#[vars.prUrl default null]"
+                                              value="#[vars.revertPrUrl default vars.prUrl default null]"
                                               doc:name="PV SET vars.jiraCommentUrl (failure)"
                                               doc:id="b9c0d1e2-0009-0009-0009-000000000047b" />
                                 <flow-ref name="pf-jira-comment"
@@ -624,8 +604,8 @@ output application/json
 
                             </when>
 
-                            <!-- ── 6c: UNKNOWN result ───────────────────────────────────────── -->
-                            <otherwise doc:name="unknown result — reject"
+                            <!-- â”€â”€ 6c: UNKNOWN result â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
+                            <otherwise doc:name="unknown result â€” reject"
                                        doc:id="b9c0d1e2-0009-0009-0009-000000000050">
 
                                 <logger level="WARN"

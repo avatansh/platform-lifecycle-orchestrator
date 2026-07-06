@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="UTF-8"?>
+﻿<?xml version="1.0" encoding="UTF-8"?>
 
 <mule xmlns:os="http://www.mulesoft.org/schema/mule/os" xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
 	xmlns:http="http://www.mulesoft.org/schema/mule/http"
@@ -42,7 +42,7 @@ output application/json
 output application/json
 ---
 {
-    message: ("Revert Java 17 upgrade (" ++ vars.jobId ++ ") — deploy failed"),
+    message: ("Revert Java 17 upgrade (" ++ vars.jobId ++ ") â€” deploy failed"),
     tree:    vars.baseTreeSha,
     parents: [vars.defHeadSha]
 }]]></ee:set-payload>
@@ -67,7 +67,8 @@ output application/json
     title:                ("Revert: Java 17 upgrade " ++ vars.appName),
     head:                 vars.revertBranch,
     base:                 vars.coords.defaultBranch,
-    body:                 ("Automated rollback for job " ++ vars.jobId ++ " — the CD deploy failed."),
+    body:                 ("Automated rollback for job " ++ vars.jobId ++ " â€” the CD deploy failed."
+                          ++ (if (vars.jiraTicketId != null) ("\n\n- Jira: [" ++ (vars.jiraTicketId as String) ++ "](" ++ (p('jira.baseUrl') default '') ++ "/browse/" ++ (vars.jiraTicketId as String) ++ ")") else "")),
     maintainer_can_modify: true
 }]]></ee:set-payload>
 				</ee:message>
@@ -81,10 +82,11 @@ output application/json
 				<ee:message >
 					<ee:set-payload ><![CDATA[%dw 2.0
 output application/json
+import mergeWith from dw::core::Objects
 ---
-payload ++ {
+payload mergeWith {
     revertPrUrl: vars.revertPrUrl,
-    updatedAt:   now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+    updatedAt:   (now() >> |+00:00|) as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
 }]]></ee:set-payload>
 				</ee:message>
 			</ee:transform>
@@ -109,7 +111,7 @@ payload ++ {
                   vars.branchName, vars.commitSha, vars.appName, vars.jobId
                   vars.jiraTicketId (optional)
          Outputs: vars.prNumber, vars.prUrl persisted to job record in OS.
-                  Status is NOT changed here — pf-start-upgrade sets PR_OPEN.
+                  Status is NOT changed here â€” pf-start-upgrade sets PR_OPEN.
          ========================================================================== -->
 	
 	<sub-flow name="pf-open-pr" doc:id="56e634c3-1676-4a91-885b-eed8156ac3d1" doc:description="Open a GitHub Pull Request for the upgrade branch and persist prUrl to the job record." >
@@ -120,7 +122,7 @@ payload ++ {
 output application/json
 ---
 {
-    title: ("Java 17 upgrade: " ++ vars.appName ++ " → " ++ vars.changePlan.targetRuntime ++ " / Java " ++ vars.changePlan.targetJavaVersion),
+    title: ("Java 17 upgrade: " ++ vars.appName ++ " â†’ " ++ vars.changePlan.targetRuntime ++ " / Java " ++ vars.changePlan.targetJavaVersion),
     head:  vars.branchName,
     base:  vars.coords.defaultBranch,
     body:  ("Automated Java 17 upgrade for **" ++ vars.appName ++ "**.\n\n"
@@ -128,7 +130,7 @@ output application/json
            ++ "- Target Java: " ++ vars.changePlan.targetJavaVersion ++ "\n"
            ++ "- Commit: " ++ vars.commitSha ++ "\n"
            ++ "- Job: " ++ vars.jobId
-           ++ (if (vars.jiraTicketId != null) ("\n- Jira: " ++ vars.jiraTicketId) else "")),
+           ++ (if (vars.jiraTicketId != null) ("\n- Jira: [" ++ (vars.jiraTicketId as String) ++ "](" ++ (p('jira.baseUrl') default '') ++ "/browse/" ++ (vars.jiraTicketId as String) ++ ")") else "")),
     maintainer_can_modify: true,
     draft: false
 }]]></ee:set-payload>
@@ -140,15 +142,16 @@ output application/json
 		<os:retrieve doc:name="OS Retrieve job record for PR update" doc:id="02061d28-a470-4cbd-a708-1271d6013198" key="#[vars.jobId]" objectStore="jobStore" >
 			<os:default-value ><![CDATA[#[{}]]]></os:default-value>
 		</os:retrieve>
-		<ee:transform doc:name="DW Merge prNumber + prUrl into job record" doc:id="04e7ba46-d910-474d-a1cb-bff4fc64e0ac" doc:description="Persist prNumber and prUrl; status unchanged — caller sets PR_OPEN via pf-set-status" >
+		<ee:transform doc:name="DW Merge prNumber + prUrl into job record" doc:id="04e7ba46-d910-474d-a1cb-bff4fc64e0ac" doc:description="Persist prNumber and prUrl; status unchanged â€” caller sets PR_OPEN via pf-set-status" >
 			<ee:message >
 				<ee:set-payload ><![CDATA[%dw 2.0
 output application/json
+import mergeWith from dw::core::Objects
 ---
-payload ++ {
+payload mergeWith {
     prNumber:  vars.prNumber,
     prUrl:     vars.prUrl,
-    updatedAt: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+    updatedAt: (now() >> |+00:00|) as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
 }]]></ee:set-payload>
 			</ee:message>
 		</ee:transform>
@@ -159,13 +162,13 @@ payload ++ {
     <!-- ==========================================================================
          pf-atomic-commit
          Commits all vars.stagedFiles as ONE commit on a new branch via the GitHub
-         Git Data API (low-level: blob → tree → commit → update ref).
+         Git Data API (low-level: blob â†’ tree â†’ commit â†’ update ref).
          Inputs:  vars.coords {owner,repo,defaultBranch}
                   vars.changePlan {headSha,targetRuntime,targetJavaVersion}
                   vars.stagedFiles [{path,content}]
                   vars.appName, vars.jobId, vars.jiraTicketId (optional)
          Outputs: vars.branchName, vars.commitSha written to job record in OS.
-                  Status is NOT changed here — pf-start-upgrade sets COMMITTED.
+                  Status is NOT changed here â€” pf-start-upgrade sets COMMITTED.
          ========================================================================== -->
 	
 	<sub-flow name="pf-atomic-commit" doc:id="d38f3f65-a652-403f-aaa8-32aa8bafb57d" doc:description="Commit all staged files as one Git commit on a new branch via GitHub Git Data API." >
@@ -209,7 +212,7 @@ output application/json
 		</ee:transform>
 		<http:request doc:name="POST create branch ref" doc:id="7d482156-0891-4412-9cd0-1a0e2a6af275" doc:description="Create the upgrade branch at the current HEAD SHA" config-ref="GitHub_Request" method="POST" path="#['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/git/refs']" />
 		<set-variable value="#[[]]" doc:name="PV INIT blobs accumulator" doc:id="9de61471-b6da-4790-8019-3ad42ad004bd" variableName="blobs" />
-		<foreach doc:name="FOR EACH staged file — create blob" doc:id="5c8e6fea-ae7c-4c92-9921-e1fcca65e85d" collection="#[vars.stagedFiles]" >
+		<foreach doc:name="FOR EACH staged file â€” create blob" doc:id="5c8e6fea-ae7c-4c92-9921-e1fcca65e85d" collection="#[vars.stagedFiles]" >
 			<set-variable value="#[payload]" doc:name="PV SET currentFile" doc:id="32345aeb-ffad-49a8-b265-ecdd50ed8e65" variableName="currentFile" />
 			<ee:transform doc:name="DW Build create-blob body" doc:id="cbdfb2b3-4bfa-4997-a117-85db8391c5f1" >
 				<ee:message >
@@ -223,7 +226,7 @@ output application/json
 				</ee:message>
 			</ee:transform>
 			<http:request doc:name="POST create blob" doc:id="d0ff3732-40ca-4ee5-a7d2-136749caa4c9" doc:description="Upload file content as a Git blob; response contains the blob SHA" config-ref="GitHub_Request" method="POST" path="#['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/git/blobs']" target="blobResp" />
-			<set-variable value="#[(vars.blobs default []) ++ [{ path: vars.currentFile.path, blobSha: vars.blobResp.sha }]]" doc:name="PV APPEND blob to accumulator" doc:id="a61caf57-07ca-40a1-b850-d8413a522813" variableName="blobs" />
+			<set-variable value="#[output application/java --- (vars.blobs default []) ++ [{ path: vars.currentFile.path, blobSha: (vars.blobResp.sha as String) }]]" doc:name="PV APPEND blob to accumulator" doc:id="a61caf57-07ca-40a1-b850-d8413a522813" variableName="blobs" />
 		</foreach>
 		<ee:transform doc:name="DW Build create-tree body" doc:id="d16a6bdb-1a84-4277-9052-04836ae323ae" >
 			<ee:message >
@@ -270,7 +273,7 @@ output application/json
 			</ee:message>
 		</ee:transform>
 		<http:request doc:name="PATCH move branch ref to commit" doc:id="7daea571-dd8b-4553-8937-dbb547c0e2fe" doc:description="Point the upgrade branch at the new commit SHA" config-ref="GitHub_Request" method="PATCH" path="#['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/git/refs/heads/' ++ vars.branchName]" />
-		<os:store doc:name="OS Store branch index (branch→jobId)" doc:id="2edd8e57-d424-4761-b504-06dd67a7fb2f" doc:description="Index entry read by the webhook handler to map an incoming branch event back to a jobId" key="#['branch::' ++ vars.branchName]" objectStore="indexStore" >
+		<os:store doc:name="OS Store branch index (branchâ†’jobId)" doc:id="2edd8e57-d424-4761-b504-06dd67a7fb2f" doc:description="Index entry read by the webhook handler to map an incoming branch event back to a jobId" key="#['branch::' ++ vars.branchName]" objectStore="indexStore" >
 			<os:value ><![CDATA[#[vars.jobId]]]></os:value>
 		</os:store>
 		<os:retrieve doc:name="OS Retrieve job record for branch/commit update" doc:id="7fd04aa6-8cab-4cc2-9736-b276e117cdbc" key="#[vars.jobId]" objectStore="jobStore" >
@@ -280,11 +283,12 @@ output application/json
 			<ee:message >
 				<ee:set-payload ><![CDATA[%dw 2.0
 output application/json
+import mergeWith from dw::core::Objects
 ---
-payload ++ {
+payload mergeWith {
     branchName: vars.branchName,
     commitSha:  vars.commitSha,
-    updatedAt:  now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+    updatedAt:  (now() >> |+00:00|) as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
 }]]></ee:set-payload>
 			</ee:message>
 		</ee:transform>

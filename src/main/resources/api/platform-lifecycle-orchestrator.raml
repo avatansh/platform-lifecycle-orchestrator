@@ -81,7 +81,7 @@ types:
         type: string
       status:
         type: string
-        enum: [PROCESSING, ASSESSING, COMMITTING, COMMITTED, PR_OPEN, DEPLOYING, DEPLOYED, ROLLED_BACK, FAILED_ASSESS, FAILED_COMMIT, FAILED_CI, FAILED_DEPLOY]
+        enum: [PROCESSING, ASSESSING, COMMITTING, COMMITTED, PR_OPEN, DEPLOYING, DEPLOYED, ROLLED_BACK, FAILED_ASSESS, FAILED_COMMIT, FAILED_CI, FAILED_DEPLOY, FAILED_INTERRUPTED]
       message:
         type: string
         required: false
@@ -96,6 +96,10 @@ types:
       branchName:
         type: string
         required: false
+      prNumber:
+        type: integer
+        required: false
+        description: GitHub pull request number, populated once the PR is opened.
       completedAt:
         type: string
         required: false
@@ -155,8 +159,19 @@ types:
         type: string
       jiraTicketId:
         type: string
+        required: false
+        description: |
+          Optional. Jira ticket ID to link this migration to. When present, progress/decision
+          comments are posted to it and PR/Slack notifications include a link. When absent, the
+          job still runs end-to-end with Jira integration simply skipped.
       approvedChangePlan:
         type: ChangePlan
+        required: false
+        description: |
+          Optional, audit-only. The human-approved plan from assess_app, recorded on the job
+          record for traceability. The upgrade worker re-runs assessment internally and drives
+          the actual edits from its freshly-computed fileEdits — this value is NOT trusted for
+          the edits themselves, so omitting it does not change the upgrade outcome.
 
 /jobs:
   /assess:

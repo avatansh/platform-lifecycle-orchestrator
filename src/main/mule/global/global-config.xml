@@ -106,7 +106,7 @@
     <!-- References the local RAML spec. Update to Exchange resource URI after publishing. -->
     <apikit:config
         name="platform-lifecycle-orchestrator-config"
-        api="api/platform-lifecycle-orchestrator.raml"
+        api="resource::2e14f8c6-4d60-481b-bfb6-798695efc8f4:platform-lifecycle-orchestrator-api:1.0.0:raml:zip:platform-lifecycle-orchestrator.raml"
         outboundHeadersMapName="outboundHeaders"
         httpStatusVarName="httpStatus"
         doc:name="APIkit Config"

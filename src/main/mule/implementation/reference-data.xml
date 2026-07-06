@@ -474,7 +474,7 @@ output text/plain
                         </ee:transform>
                     </ee:cache>
                     <set-variable variableName="coords"
-                                  value="#[vars.coords ++ { defaultBranch: (if (isEmpty(payload as String)) p('github.defaultBranch') else (payload as String)) }]"
+                                  value="#[output application/java --- (vars.coords - 'defaultBranch') ++ { defaultBranch: (if (isEmpty(payload as String)) p('github.defaultBranch') else (payload as String)) }]"
                                   doc:name="PV SET coords.defaultBranch (discovered)"
                                   doc:id="pfbr0001-0001-0001-0001-000000000007" />
                     <logger level="DEBUG"
@@ -486,7 +486,7 @@ output text/plain
                                            doc:name="On Error - config branch fallback"
                                            doc:id="pfbr0001-0001-0001-0001-000000000009">
                             <set-variable variableName="coords"
-                                          value="#[vars.coords ++ { defaultBranch: p('github.defaultBranch') }]"
+                                          value="#[output application/java --- (vars.coords - 'defaultBranch') ++ { defaultBranch: p('github.defaultBranch') }]"
                                           doc:name="PV SET coords.defaultBranch (config fallback)"
                                           doc:id="pfbr0001-0001-0001-0001-000000000010" />
                             <logger level="WARN"

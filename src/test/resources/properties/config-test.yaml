@@ -1,17 +1,36 @@
 # Test-environment properties — loaded when env=test
-# Only overrides / additions beyond config.yaml defaults needed for MUnit execution
+# Only overrides / additions beyond config.yaml defaults needed for MUnit execution.
+# NOTE: env-varying keys (owner, orgId, jira host, slack, etc.) were moved OUT of
+# config.yaml, so tests must define them here too. ${jira.host} in particular is
+# resolved at DEPLOY time and would fail the test container if missing.
 
 api:
   id: "00000001"   # dummy API Manager instance ID satisfies API Autodiscovery at test startup
 
-# Tests must never call Exchange — always read the bundled classpath matrix.
-# (env-specific config is loaded before config.yaml, so this overrides matrix.source=exchange.)
-matrix:
-  source: "classpath"
+github:
+  defaultOwner: "test-owner"
 
-# Platform post-deploy verification hits Anypoint (token + AMC deployments). Disabled in
-# tests so the cd-result finalize path is deterministic (verify=DISABLED → trust CI signal)
-# and we don't have to mock three separate Anypoint HTTP calls just to reach DEPLOYED.
 anypoint:
+  defaultOrgId: "00000000-0000-0000-0000-000000000000"
+  # Platform post-deploy verification hits Anypoint (token + AMC deployments). Disabled in
+  # tests so the cd-result finalize path is deterministic (verify=DISABLED → trust CI signal)
+  # and we don't have to mock three separate Anypoint HTTP calls just to reach DEPLOYED.
   verify:
     enabled: "false"
+
+slack:
+  channel: "#test-java17-upgrades"
+
+jira:
+  baseUrl: "https://test.atlassian.net"
+  host: "test.atlassian.net"
+
+# Tests must never call Exchange — always read the bundled classpath matrix.
+# (env-specific config is loaded before config.yaml, so this overrides matrix.source.)
+matrix:
+  source: "classpath"
+  exchange:
+    orgId: "00000000-0000-0000-0000-000000000000"
+
+registry:
+  enforceAllowList: "false"

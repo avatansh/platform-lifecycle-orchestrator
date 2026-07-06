@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="UTF-8"?>
+﻿<?xml version="1.0" encoding="UTF-8"?>
 <mule xmlns:http="http://www.mulesoft.org/schema/mule/http"
       xmlns:os="http://www.mulesoft.org/schema/mule/os"
       xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
@@ -49,11 +49,11 @@
                 </os:retrieve>
 
                 <set-variable variableName="isStale" doc:name="PV SET isStale" doc:id="pfrc0001-0001-0001-0001-000000000011"
-                              value="#[(vars.rec.updatedAt != null) and (((now() as Number) - (vars.rec.updatedAt as DateTime {format: 'yyyy-MM-dd\'T\'HH:mm:ss\'Z\''} as Number)) > (p('reconcile.staleSeconds') as Number))]" />
+                              value="#[output application/java --- (vars.rec.updatedAt != null) and (((now() as Number) - (vars.rec.updatedAt as DateTime as Number)) > (p('reconcile.staleSeconds') as Number))]" />
 
                 <choice doc:name="CHOICE reconcile action?" doc:id="pfrc0001-0001-0001-0001-000000000012">
 
-                    <when expression="#[vars.isStale and vars.rec.status == 'PR_OPEN' and vars.rec.prNumber != null]"
+                    <when expression="#[output application/java --- vars.isStale and vars.rec.status == 'PR_OPEN' and vars.rec.prNumber != null]"
                           doc:name="PR_OPEN stale" doc:id="pfrc0001-0001-0001-0001-000000000013">
 
                         <http:request method="GET" config-ref="GitHub_Request"
@@ -68,8 +68,10 @@
                                     <os:default-value>#[{}]</os:default-value>
                                 </os:retrieve>
                                 <ee:transform doc:name="DW DEPLOYING" doc:id="pfrc0001-0001-0001-0001-000000000018">
-                                    <ee:message><ee:set-payload><![CDATA[%dw 2.0 output application/json
---- payload ++ { status: "DEPLOYING", updatedAt: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"} }]]></ee:set-payload></ee:message>
+                                    <ee:message><ee:set-payload><![CDATA[%dw 2.0
+output application/json
+import mergeWith from dw::core::Objects
+--- payload mergeWith { status: "DEPLOYING", updatedAt: (now() >> |+00:00|) as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"} }]]></ee:set-payload></ee:message>
                                 </ee:transform>
                                 <os:store key="#[vars.k]" objectStore="jobStore"
                                           doc:name="OS Store DEPLOYING" doc:id="pfrc0001-0001-0001-0001-000000000019">
@@ -77,8 +79,8 @@
                                 </os:store>
                                 <set-variable variableName="fixed" value="#[vars.fixed + 1]"
                                               doc:name="PV fixed++" doc:id="pfrc0001-0001-0001-0001-000000000020" />
-                                <logger level="INFO" doc:name="LOG INFO PR_OPEN→DEPLOYING" doc:id="pfrc0001-0001-0001-0001-000000000021"
-                                        message="#[output application/java --- 'LOG INFO | flow=pf-reconcile | reconciled PR_OPEN→DEPLOYING (missed merge webhook) | jobId=' ++ vars.k]" />
+                                <logger level="INFO" doc:name="LOG INFO PR_OPENâ†’DEPLOYING" doc:id="pfrc0001-0001-0001-0001-000000000021"
+                                        message="#[output application/java --- 'LOG INFO | flow=pf-reconcile | reconciled PR_OPENâ†’DEPLOYING (missed merge webhook) | jobId=' ++ vars.k]" />
                             </when>
 
                             <when expression="#[vars.pr.state == 'closed' and vars.pr.merged == false]"
@@ -88,30 +90,24 @@
                                     <os:default-value>#[{}]</os:default-value>
                                 </os:retrieve>
                                 <ee:transform doc:name="DW FAILED_DEPLOY closed-unmerged" doc:id="pfrc0001-0001-0001-0001-000000000024">
-                                    <ee:message><ee:set-payload><![CDATA[%dw 2.0 output application/json
---- payload ++ { status: "FAILED_DEPLOY", error: "PR was closed without merging",
-    completedAt: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
-    updatedAt: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"} }]]></ee:set-payload></ee:message>
+                                    <ee:message><ee:set-payload><![CDATA[%dw 2.0
+output application/json
+import mergeWith from dw::core::Objects
+--- payload mergeWith { status: "FAILED_DEPLOY", error: "PR was closed without merging",
+    completedAt: (now() >> |+00:00|) as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
+    updatedAt: (now() >> |+00:00|) as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"} }]]></ee:set-payload></ee:message>
                                 </ee:transform>
                                 <os:store key="#[vars.k]" objectStore="jobStore"
                                           doc:name="OS Store FAILED_DEPLOY" doc:id="pfrc0001-0001-0001-0001-000000000025">
                                     <os:value>#[payload]</os:value>
                                 </os:store>
-                                <try doc:name="TRY release lock (non-fatal)" doc:id="pfrc0001-0001-0001-0001-000000000026">
-                                    <os:remove key="#['lock::' ++ (vars.rec.appName default '')]"
-                                               objectStore="locksStore"
-                                               doc:name="OS Remove lock" doc:id="pfrc0001-0001-0001-0001-000000000027" />
-                                    <error-handler>
-                                        <on-error-continue type="ANY" doc:id="pfrc0001-0001-0001-0001-000000000028">
-                                            <logger level="DEBUG" doc:name="LOG DEBUG lock skip" doc:id="pfrc0001-0001-0001-0001-000000000029"
-                                                    message="#[output application/java --- 'LOG DEBUG | flow=pf-reconcile | lock release skipped | app=' ++ (vars.rec.appName default '?')]" />
-                                        </on-error-continue>
-                                    </error-handler>
-                                </try>
+                                <set-variable variableName="lockApp" value="#[vars.rec.appName default '']"
+                                              doc:name="PV lockApp" doc:id="pfrc0001-0001-0001-0001-000000000026" />
+                                <flow-ref name="pf-release-lock" doc:name="pf-release-lock" doc:id="pfrc0001-0001-0001-0001-000000000027" />
                                 <set-variable variableName="fixed" value="#[vars.fixed + 1]"
                                               doc:name="PV fixed++" doc:id="pfrc0001-0001-0001-0001-000000000030" />
-                                <logger level="INFO" doc:name="LOG INFO PR_OPEN→FAILED_DEPLOY" doc:id="pfrc0001-0001-0001-0001-000000000031"
-                                        message="#[output application/java --- 'LOG INFO | flow=pf-reconcile | reconciled PR_OPEN→FAILED_DEPLOY (closed unmerged) | jobId=' ++ vars.k]" />
+                                <logger level="INFO" doc:name="LOG INFO PR_OPENâ†’FAILED_DEPLOY" doc:id="pfrc0001-0001-0001-0001-000000000031"
+                                        message="#[output application/java --- 'LOG INFO | flow=pf-reconcile | reconciled PR_OPENâ†’FAILED_DEPLOY (closed unmerged) | jobId=' ++ vars.k]" />
                             </when>
 
                             <otherwise doc:name="PR still open" doc:id="pfrc0001-0001-0001-0001-000000000032">
@@ -123,7 +119,7 @@
 
                     </when>
 
-                    <when expression="#[vars.isStale and vars.rec.status == 'DEPLOYING']"
+                    <when expression="#[output application/java --- vars.isStale and vars.rec.status == 'DEPLOYING']"
                           doc:name="DEPLOYING stale" doc:id="pfrc0001-0001-0001-0001-000000000034">
 
                         <!-- Missed cd-result callback (timeout). Per ADR-015, make ONE Application
@@ -146,74 +142,62 @@
                                 <choice doc:name="CHOICE platform verdict?" doc:id="pfrc0001-0001-0001-0001-000000000047">
 
                                     <when expression="#[(vars.verify.verified default false) and (vars.verify.healthy default false)]"
-                                          doc:name="platform healthy → DEPLOYED" doc:id="pfrc0001-0001-0001-0001-000000000048">
+                                          doc:name="platform healthy â†’ DEPLOYED" doc:id="pfrc0001-0001-0001-0001-000000000048">
                                         <os:retrieve key="#[vars.k]" objectStore="jobStore"
                                                      doc:name="OS Re-retrieve before DEPLOYED" doc:id="pfrc0001-0001-0001-0001-000000000049">
                                             <os:default-value>#[{}]</os:default-value>
                                         </os:retrieve>
                                         <ee:transform doc:name="DW DEPLOYED (reconciled)" doc:id="pfrc0001-0001-0001-0001-000000000050">
-                                            <ee:message><ee:set-payload><![CDATA[%dw 2.0 output application/json
---- payload ++ { status: "DEPLOYED", platformVerified: true, platformStatus: (vars.verify.status default null),
+                                            <ee:message><ee:set-payload><![CDATA[%dw 2.0
+output application/json
+import mergeWith from dw::core::Objects
+--- payload mergeWith { status: "DEPLOYED", platformVerified: true, platformStatus: (vars.verify.status default null),
     platformRuntimeVersion: (vars.verify.runtimeVersion default null),
-    completedAt: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
-    updatedAt: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"} }]]></ee:set-payload></ee:message>
+    completedAt: (now() >> |+00:00|) as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
+    updatedAt: (now() >> |+00:00|) as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"} }]]></ee:set-payload></ee:message>
                                         </ee:transform>
                                         <os:store key="#[vars.k]" objectStore="jobStore"
                                                   doc:name="OS Store DEPLOYED" doc:id="pfrc0001-0001-0001-0001-000000000051">
                                             <os:value>#[payload]</os:value>
                                         </os:store>
-                                        <try doc:name="TRY release lock (non-fatal)" doc:id="pfrc0001-0001-0001-0001-000000000052">
-                                            <os:remove key="#['lock::' ++ (vars.rec.appName default '')]"
-                                                       objectStore="locksStore"
-                                                       doc:name="OS Remove lock" doc:id="pfrc0001-0001-0001-0001-000000000053" />
-                                            <error-handler>
-                                                <on-error-continue type="ANY" doc:id="pfrc0001-0001-0001-0001-000000000054">
-                                                    <logger level="DEBUG" doc:name="LOG DEBUG lock skip" doc:id="pfrc0001-0001-0001-0001-000000000055"
-                                                            message="#[output application/java --- 'LOG DEBUG | flow=pf-reconcile | lock release skipped | app=' ++ (vars.rec.appName default '?')]" />
-                                                </on-error-continue>
-                                            </error-handler>
-                                        </try>
+                                        <set-variable variableName="lockApp" value="#[vars.rec.appName default '']"
+                                                      doc:name="PV lockApp" doc:id="pfrc0001-0001-0001-0001-000000000052" />
+                                        <flow-ref name="pf-release-lock" doc:name="pf-release-lock" doc:id="pfrc0001-0001-0001-0001-000000000053" />
                                         <set-variable variableName="fixed" value="#[vars.fixed + 1]"
                                                       doc:name="PV fixed++" doc:id="pfrc0001-0001-0001-0001-000000000056" />
-                                        <logger level="INFO" doc:name="LOG INFO DEPLOYING→DEPLOYED" doc:id="pfrc0001-0001-0001-0001-000000000057"
-                                                message="#[output application/java --- 'LOG INFO | flow=pf-reconcile | reconciled DEPLOYING→DEPLOYED (missed cd-result, platform confirmed) | jobId=' ++ vars.k ++ ' | platformStatus=' ++ (vars.verify.status default '?')]" />
+                                        <logger level="INFO" doc:name="LOG INFO DEPLOYINGâ†’DEPLOYED" doc:id="pfrc0001-0001-0001-0001-000000000057"
+                                                message="#[output application/java --- 'LOG INFO | flow=pf-reconcile | reconciled DEPLOYINGâ†’DEPLOYED (missed cd-result, platform confirmed) | jobId=' ++ vars.k ++ ' | platformStatus=' ++ (vars.verify.status default '?')]" />
                                     </when>
 
                                     <when expression="#[(vars.verify.verified default false) and not (vars.verify.healthy default false)]"
-                                          doc:name="platform unhealthy → FAILED_DEPLOY" doc:id="pfrc0001-0001-0001-0001-000000000058">
+                                          doc:name="platform unhealthy â†’ FAILED_DEPLOY" doc:id="pfrc0001-0001-0001-0001-000000000058">
 										<os:retrieve key="#[vars.k]" objectStore="jobStore" doc:name="OS Re-retrieve before FAILED_DEPLOY" doc:id="pfrc0001-0001-0001-0001-000000000059">
                                             <os:default-value>#[{}]</os:default-value>
                                         </os:retrieve>
 										<ee:transform doc:name="DW FAILED_DEPLOY (reconciled)" doc:id="pfrc0001-0001-0001-0001-000000000060">
-                                            <ee:message><ee:set-payload><![CDATA[%dw 2.0 output application/json
---- payload ++ { status: "FAILED_DEPLOY",
+                                            <ee:message><ee:set-payload><![CDATA[%dw 2.0
+output application/json
+import mergeWith from dw::core::Objects
+--- payload mergeWith { status: "FAILED_DEPLOY",
     error: "cd-result timed out; platform status=" ++ (vars.verify.status default "UNKNOWN"),
     platformVerified: true, platformStatus: (vars.verify.status default null),
-    completedAt: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
-    updatedAt: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"} }]]></ee:set-payload></ee:message>
+    completedAt: (now() >> |+00:00|) as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
+    updatedAt: (now() >> |+00:00|) as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"} }]]></ee:set-payload></ee:message>
                                         </ee:transform>
 										<os:store key="#[vars.k]" objectStore="jobStore"
                                                   doc:name="OS Store FAILED_DEPLOY" doc:id="pfrc0001-0001-0001-0001-000000000061">
                                             <os:value>#[payload]</os:value>
                                         </os:store>
-                                        <try doc:name="TRY release lock (non-fatal)" doc:id="pfrc0001-0001-0001-0001-000000000062">
-                                            <os:remove key="#['lock::' ++ (vars.rec.appName default '')]"
-                                                       objectStore="locksStore"
-                                                       doc:name="OS Remove lock" doc:id="pfrc0001-0001-0001-0001-000000000063" />
-                                            <error-handler>
-                                                <on-error-continue type="ANY" doc:id="pfrc0001-0001-0001-0001-000000000064">
-                                                    <logger level="DEBUG" doc:name="LOG DEBUG lock skip" doc:id="pfrc0001-0001-0001-0001-000000000065"
-                                                            message="#[output application/java --- 'LOG DEBUG | flow=pf-reconcile | lock release skipped | app=' ++ (vars.rec.appName default '?')]" />
-                                                </on-error-continue>
-                                            </error-handler>
-                                        </try>
+                                        <set-variable variableName="lockApp" value="#[vars.rec.appName default '']"
+                                                      doc:name="PV lockApp" doc:id="pfrc0001-0001-0001-0001-000000000062" />
+                                        <flow-ref name="pf-release-lock" doc:name="pf-release-lock" doc:id="pfrc0001-0001-0001-0001-000000000063" />
                                         <set-variable variableName="fixed" value="#[vars.fixed + 1]"
                                                       doc:name="PV fixed++" doc:id="pfrc0001-0001-0001-0001-000000000066" />
-                                        <logger level="WARN" doc:name="LOG WARN DEPLOYING→FAILED_DEPLOY" doc:id="pfrc0001-0001-0001-0001-000000000067"
-                                                message="#[output application/java --- 'LOG WARN | flow=pf-reconcile | reconciled DEPLOYING→FAILED_DEPLOY (missed cd-result, platform unhealthy) | jobId=' ++ vars.k ++ ' | platformStatus=' ++ (vars.verify.status default '?')]" />
+                                        <logger level="WARN" doc:name="LOG WARN DEPLOYINGâ†’FAILED_DEPLOY" doc:id="pfrc0001-0001-0001-0001-000000000067"
+                                                message="#[output application/java --- 'LOG WARN | flow=pf-reconcile | reconciled DEPLOYINGâ†’FAILED_DEPLOY (missed cd-result, platform unhealthy) | jobId=' ++ vars.k ++ ' | platformStatus=' ++ (vars.verify.status default '?')]" />
                                     </when>
 
-                                    <otherwise doc:name="platform unverified → leave" doc:id="pfrc0001-0001-0001-0001-000000000068">
+                                    <otherwise doc:name="platform unverified â†’ leave" doc:id="pfrc0001-0001-0001-0001-000000000068">
                                         <logger level="DEBUG" doc:name="LOG DEBUG platform unreachable" doc:id="pfrc0001-0001-0001-0001-000000000069"
                                                 message="#[output application/java --- 'LOG DEBUG | flow=pf-reconcile | DEPLOYING stale but platform unverified, retry next sweep | jobId=' ++ vars.k]" />
                                     </otherwise>
@@ -221,12 +205,50 @@
                                 </choice>
 
                             </when>
-                            <otherwise doc:name="verify disabled → leave" doc:id="pfrc0001-0001-0001-0001-000000000070">
+                            <otherwise doc:name="verify disabled â†’ leave" doc:id="pfrc0001-0001-0001-0001-000000000070">
                                 <logger level="DEBUG" doc:name="LOG DEBUG DEPLOYING awaiting cd-result" doc:id="pfrc0001-0001-0001-0001-000000000035"
                                         message="#[output application/java --- 'LOG DEBUG | flow=pf-reconcile | still DEPLOYING beyond threshold, verify disabled, awaiting cd-result | jobId=' ++ vars.k]" />
                             </otherwise>
                         </choice>
 
+                    </when>
+
+                    <!-- â”€â”€ Crash recovery: stale EARLY-STAGE orphans â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+                         A job left in a non-terminal early stage (PROCESSING/ASSESSING/COMMITTING/
+                         COMMITTED) that has not advanced within staleSeconds was almost certainly
+                         orphaned by a runtime restart/crash mid-pipeline (the upgrade runs in an
+                         in-memory async scope that does NOT survive a restart). These stages have
+                         no external state to reconcile against, so we finalize the job as
+                         FAILED_INTERRUPTED and release its single-flight lock â€” otherwise the app
+                         would stay un-upgradeable until the 1-day lock TTL expires. Re-submitting
+                         starts a fresh job. (A COMMITTED orphan may leave an unused upgrade branch
+                         on GitHub; that is harmless and can be cleaned up or reused on retry.) -->
+                    <when expression="#[output application/java --- vars.isStale and (['PROCESSING','ASSESSING','COMMITTING','COMMITTED'] contains (vars.rec.status default ''))]"
+                          doc:name="early-stage orphan" doc:id="pfrc0001-0001-0001-0001-000000000100">
+                        <os:retrieve key="#[vars.k]" objectStore="jobStore"
+                                     doc:name="OS Re-retrieve before FAILED_INTERRUPTED" doc:id="pfrc0001-0001-0001-0001-000000000101">
+                            <os:default-value>#[{}]</os:default-value>
+                        </os:retrieve>
+                        <ee:transform doc:name="DW FAILED_INTERRUPTED" doc:id="pfrc0001-0001-0001-0001-000000000102">
+                            <ee:message><ee:set-payload><![CDATA[%dw 2.0
+output application/json
+import mergeWith from dw::core::Objects
+--- payload mergeWith { status: "FAILED_INTERRUPTED",
+    error: "Upgrade was interrupted before completion (likely a runtime restart or crash) and did not advance within the stale threshold. Automatically failed by the reconciler; re-submit to retry.",
+    completedAt: (now() >> |+00:00|) as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
+    updatedAt: (now() >> |+00:00|) as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"} }]]></ee:set-payload></ee:message>
+                        </ee:transform>
+                        <os:store key="#[vars.k]" objectStore="jobStore"
+                                  doc:name="OS Store FAILED_INTERRUPTED" doc:id="pfrc0001-0001-0001-0001-000000000103">
+                            <os:value>#[payload]</os:value>
+                        </os:store>
+                        <set-variable variableName="lockApp" value="#[vars.rec.appName default '']"
+                                      doc:name="PV lockApp" doc:id="pfrc0001-0001-0001-0001-000000000104" />
+                        <flow-ref name="pf-release-lock" doc:name="pf-release-lock" doc:id="pfrc0001-0001-0001-0001-000000000105" />
+                        <set-variable variableName="fixed" value="#[vars.fixed + 1]"
+                                      doc:name="PV fixed++" doc:id="pfrc0001-0001-0001-0001-000000000108" />
+                        <logger level="WARN" doc:name="LOG WARN early-stageâ†’FAILED_INTERRUPTED" doc:id="pfrc0001-0001-0001-0001-000000000109"
+                                message="#[output application/java --- 'LOG WARN | flow=pf-reconcile | reconciled ' ++ (vars.rec.status default '?') ++ 'â†’FAILED_INTERRUPTED (orphaned by restart/crash) | jobId=' ++ vars.k ++ ' | app=' ++ (vars.rec.appName default '?') ++ ' | lock released']" />
                     </when>
 
                     <otherwise doc:name="not stale or non-reconcilable" doc:id="pfrc0001-0001-0001-0001-000000000036">

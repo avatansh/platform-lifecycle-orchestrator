@@ -27,7 +27,8 @@ output application/json
     channel: p('slack.channel'),
     text: (":rocket: *Java 17 upgrade PR ready* — " ++ vars.appName
            ++ "\n" ++ (vars.prUrl default "(no url)")
-           ++ "\nJob " ++ vars.jobId ++ " • status PR_OPEN")
+           ++ "\nJob " ++ vars.jobId ++ " • status PR_OPEN"
+           ++ (if (vars.jiraTicketId != null) ("\nJira: <" ++ (p('jira.baseUrl') default '') ++ "/browse/" ++ (vars.jiraTicketId as String) ++ "|" ++ (vars.jiraTicketId as String) ++ ">") else ""))
 }]]></ee:set-payload>
 				</ee:message>
 			</ee:transform>
@@ -121,7 +122,9 @@ output application/json
     text: (":x: *Java 17 upgrade FAILED* — " ++ vars.appName
            ++ "\nJob " ++ vars.jobId
            ++ " • status " ++ vars.failStatus
-           ++ "\nError: " ++ vars.failError)
+           ++ "\nError: " ++ vars.failError
+           ++ (if ((payload.jiraTicketId default null) != null) ("\nJira: <" ++ (p('jira.baseUrl') default '') ++ "/browse/" ++ (payload.jiraTicketId as String) ++ "|" ++ (payload.jiraTicketId as String) ++ ">") else "")
+           ++ (if ((vars.revertPrUrl default "") != "") ("\n:leftwards_arrow_with_hook: Rollback PR: " ++ (vars.revertPrUrl as String)) else ""))
 }]]></ee:set-payload>
 				</ee:message>
 			</ee:transform>

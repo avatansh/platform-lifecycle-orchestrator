@@ -27,8 +27,18 @@ test-run.log
 .mvn/
 docs/
 munit-verify.log
+BACKLOG.md
 
 
+# ─────────────────────────────────────────────────────────────
+# Local manual-testing artifacts (throwaway; not part of the app)
+# ─────────────────────────────────────────────────────────────
+LOCAL_TESTING_PLAYBOOK.html
+job.json
+job-unregistered.json
+assess.json
+webhook-merge.json
+.tmp-*.json
 
 # ─────────────────────────────────────────────────────────────
 # IDEs / editors
