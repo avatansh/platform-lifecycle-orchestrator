@@ -1,0 +1,944 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Platform Lifecycle Orchestrator — Design Decisions, Backlog &amp; Engineering Record</title>
+<style>
+  :root{
+    --bg:#0f172a; --panel:#111827; --ink:#1f2937; --muted:#6b7280;
+    --line:#e5e7eb; --accent:#2563eb; --accent-soft:#eff6ff;
+    --green:#15803d; --green-bg:#ecfdf5; --red:#b91c1c; --red-bg:#fef2f2;
+    --amber:#b45309; --amber-bg:#fffbeb; --blue:#1d4ed8; --blue-bg:#eff6ff;
+    --grey:#374151; --grey-bg:#f3f4f6; --code-bg:#f6f8fa;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0; color:var(--ink); background:#f8fafc;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.6; font-size:16px;
+  }
+  .wrap{max-width:1080px;margin:0 auto;padding:0 24px 96px}
+  header.hero{
+    background:linear-gradient(135deg,#0f172a,#1e3a8a);color:#fff;
+    padding:48px 24px;margin-bottom:32px;border-bottom:4px solid var(--accent);
+  }
+  header.hero .inner{max-width:1080px;margin:0 auto}
+  header.hero h1{margin:0 0 8px;font-size:28px;line-height:1.25}
+  header.hero p{margin:4px 0;color:#c7d2fe;font-size:14px}
+  .callout{
+    background:var(--accent-soft);border:1px solid #bfdbfe;border-left:4px solid var(--accent);
+    border-radius:8px;padding:16px 20px;margin:24px 0;
+  }
+  .callout strong{color:#1e40af}
+  h2{
+    font-size:22px;margin:44px 0 12px;padding-bottom:8px;border-bottom:2px solid var(--line);
+    color:#0f172a;scroll-margin-top:20px;
+  }
+  h3{font-size:17px;margin:24px 0 8px;color:#111827}
+  h4{font-size:15px;margin:16px 0 6px;color:#374151}
+  p,li{color:#1f2937}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  code{
+    background:var(--code-bg);border:1px solid #e5e7eb;border-radius:4px;
+    padding:1px 5px;font-family:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace;
+    font-size:13px;color:#0f172a;white-space:nowrap;
+  }
+  pre{background:var(--code-bg);border:1px solid #e5e7eb;border-radius:8px;padding:14px 16px;overflow:auto}
+  pre code{background:none;border:none;padding:0;white-space:pre}
+  table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14px;background:#fff;
+    border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  th,td{border:1px solid var(--line);padding:9px 12px;text-align:left;vertical-align:top}
+  th{background:#f1f5f9;font-weight:600;color:#0f172a}
+  tr:nth-child(even) td{background:#fbfcfe}
+  ul,ol{padding-left:22px}
+  li{margin:4px 0}
+  .yes{color:var(--green);font-weight:700}
+  .no{color:var(--red);font-weight:700}
+  .badge{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.03em;
+    padding:2px 8px;border-radius:999px;text-transform:uppercase;vertical-align:middle}
+  .b-accepted{color:var(--green);background:var(--green-bg);border:1px solid #bbf7d0}
+  .b-rejected{color:var(--red);background:var(--red-bg);border:1px solid #fecaca}
+  .b-deferred{color:var(--amber);background:var(--amber-bg);border:1px solid #fde68a}
+  .b-done{color:var(--blue);background:var(--blue-bg);border:1px solid #bfdbfe}
+  .b-open{color:var(--grey);background:var(--grey-bg);border:1px solid #e5e7eb}
+  nav.toc{background:#fff;border:1px solid var(--line);border-radius:10px;padding:18px 22px;margin-bottom:16px}
+  nav.toc h2{border:none;margin:0 0 10px;font-size:16px;padding:0}
+  nav.toc ol{columns:2;column-gap:32px;margin:0;padding-left:20px}
+  nav.toc a{font-size:14px}
+  .section{background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px 24px 24px;margin-bottom:16px}
+  .muted{color:var(--muted);font-size:13px}
+  hr{border:none;border-top:1px solid var(--line);margin:0}
+  .pill-row{margin:6px 0 0}
+  @media (max-width:720px){nav.toc ol{columns:1}}
+</style>
+</head>
+<body>
+<header class="hero">
+  <div class="inner">
+    <h1>Platform Lifecycle Orchestrator — Design Decisions, Backlog &amp; Engineering Record</h1>
+    <p>Agentic Java 17 (Mule 4.9 LTS) upgrade orchestrator</p>
+    <p>Last updated: 2026-07-07 · Single living document</p>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <div class="callout">
+    <p><strong>THE single living document</strong> for this project. Records <strong>every design
+    decision</strong> (accepted, rejected, deferred), <strong>every backlog item</strong>, and
+    <strong>every important engineering point / discussion outcome (with reason)</strong> for the
+    agentic Java 17 upgrade orchestrator. <code>BACKLOG.md</code> and the earlier
+    <code>DESIGN_DECISIONS.md</code> have been folded into this HTML file and deleted — maintain
+    only this one.</p>
+    <p style="margin-bottom:0"><strong>Maintenance protocol (standing instruction):</strong> going
+    forward, every discussion and its outcome (with reasoning), every design decision, and every
+    backlog item is recorded here <strong>automatically, without asking</strong>. New/changed items
+    go into §6 (Backlog) and/or the relevant section, with a line appended to §20 (Change Log).</p>
+  </div>
+
+  <nav class="toc">
+    <h2>Contents</h2>
+    <ol>
+      <li><a href="#s1">Purpose &amp; System Overview</a></li>
+      <li><a href="#s2">Project Structure &amp; Reorganization</a></li>
+      <li><a href="#s3">API Surface</a></li>
+      <li><a href="#s4">Design Decisions — Accepted</a></li>
+      <li><a href="#s5">Design Decisions — Rejected / Deferred</a></li>
+      <li><a href="#s6">Backlog (complete)</a></li>
+      <li><a href="#s7">Errors Diagnosed &amp; Fixed</a></li>
+      <li><a href="#s8">Engineering Learnings &amp; Conventions</a></li>
+      <li><a href="#s9">Configuration Model</a></li>
+      <li><a href="#s10">Jira Integration</a></li>
+      <li><a href="#s11">Notifications &amp; Rollback</a></li>
+      <li><a href="#s12">Concurrency, Durability &amp; Self-Healing</a></li>
+      <li><a href="#s13">Security — Webhook Authentication</a></li>
+      <li><a href="#s14">RAML / Anypoint Exchange</a></li>
+      <li><a href="#s15">CI/CD (GitHub Actions)</a></li>
+      <li><a href="#s16">Logging Framework — Finalized Design</a></li>
+      <li><a href="#s17">Flow Decomposition — Plan + Prompt</a></li>
+      <li><a href="#s18">MVP Assessment</a></li>
+      <li><a href="#s19">Pending Decisions / Next Actions</a></li>
+      <li><a href="#s20">Session Change Log</a></li>
+    </ol>
+  </nav>
+
+  <section class="section" id="s1">
+    <h2>1. Purpose &amp; System Overview</h2>
+    <p><strong>Goal:</strong> an agentic system that automates the <strong>end-to-end Java 17
+    (Mule 4.9 LTS) upgrade</strong> of MuleSoft applications — assess → apply matrix-driven edits →
+    atomic commit on a branch → open PR → verify deployment (via CI callback) → notify (Slack/Jira)
+    → rollback on failure.</p>
+    <p><strong>Core app:</strong> <code>platform-lifecycle-orchestrator</code> (Mule 4.9, Java 17).</p>
+    <p><strong>Two front doors, one engine:</strong> every capability is exposed over
+    <strong>REST</strong> (APIkit) <em>and</em> <strong>MCP</strong> (tool-listeners for agents).
+    Both delegate to the same shared <code>pf-*</code> sub-flows, so behavior is identical
+    regardless of caller.</p>
+    <p><strong>State:</strong> Object Store v2 (OSv2) partitions — <code>jobStore</code> (job
+    records, 30d), <code>locksStore</code> (single-flight locks, 1d), <code>idempotencyStore</code>
+    (webhook de-dup, 2d), <code>indexStore</code> (branch→jobId index, 30d).</p>
+  </section>
+
+  <section class="section" id="s2">
+    <h2>2. Project Structure &amp; Reorganization</h2>
+    <p><span class="badge b-accepted">Accepted</span> reorganized flows into a logical folder
+    layout and renamed folders:</p>
+    <ul>
+      <li><code>process</code> → <strong><code>orchestration</code></strong> (entry/implementation
+      flows: post-jobs, post-jobs-assess, get-job-status, post-webhook).</li>
+      <li><code>system</code> → <strong><code>implementation</code></strong> (shared helpers:
+      github, notify, reference-data, anypoint, reconcile).</li>
+      <li>Plus <code>global</code> (global-config, global-error-handler, main routing) and the MCP file.</li>
+    </ul>
+    <p><strong>Rationale:</strong> separate transport/orchestration from reusable implementation;
+    REST and MCP share the implementation layer.</p>
+    <p><strong>Convention:</strong> <code>mf-impl-*</code> = top-level flows; <code>pf-*</code> =
+    shared sub-flows (documented with <code>Requires:</code>/<code>Returns:</code> header comments).</p>
+  </section>
+
+  <section class="section" id="s3">
+    <h2>3. API Surface</h2>
+    <h3>REST (APIkit, base <code>/api/v1/*</code>)</h3>
+    <table>
+      <thead><tr><th>Method + Path</th><th>Purpose</th><th>Async?</th></tr></thead>
+      <tbody>
+        <tr><td><code>POST /jobs/assess</code></td><td>Assess an app for Java 17 upgrade; returns <code>changePlan</code></td><td>sync</td></tr>
+        <tr><td><code>POST /jobs</code></td><td>Start an upgrade; returns <code>{ jobId }</code> with <strong>202 Accepted</strong></td><td>async pipeline</td></tr>
+        <tr><td><code>GET /jobs/{jobId}</code></td><td>Poll job status</td><td>sync</td></tr>
+        <tr><td><code>POST /webhook</code></td><td>GitHub webhook (PR-merge → DEPLOYING) — HMAC-authenticated</td><td>sync ack</td></tr>
+        <tr><td><code>POST /webhook/cd-result</code></td><td>CD pipeline callback (success/failure → DEPLOYED/FAILED_DEPLOY) — <code>X-CD-Token</code></td><td>sync ack</td></tr>
+      </tbody>
+    </table>
+    <h3>MCP (tool-listeners)</h3>
+    <table>
+      <thead><tr><th>Tool</th><th>Maps to</th></tr></thead>
+      <tbody>
+        <tr><td><code>assess_app</code></td><td>same engine as <code>POST /jobs/assess</code></td></tr>
+        <tr><td><code>start_upgrade</code></td><td>same engine as <code>POST /jobs</code></td></tr>
+        <tr><td><code>get_job_status</code></td><td>same engine as <code>GET /jobs/{jobId}</code></td></tr>
+      </tbody>
+    </table>
+    <h3>Request field rules <span class="badge b-accepted">Accepted</span></h3>
+    <ul>
+      <li><strong>Required:</strong> <code>appName</code>, <code>environment</code>.</li>
+      <li><strong>Optional:</strong> <code>jiraTicketId</code> (Jira integration skipped/auto-created
+      when absent), <code>approvedChangePlan</code> (audit-only; the worker <strong>re-assesses
+      internally</strong> and drives edits from its own freshly-computed <code>fileEdits</code> —
+      the supplied plan is <strong>not trusted</strong>).</li>
+      <li>Consistency enforced across <strong>all three layers</strong>: RAML, MCP
+      <code>parameters-schema.required</code>, and engine null-guards.</li>
+    </ul>
+    <h4><code>environment</code> field — why it exists</h4>
+    <p>Selects the target deployment environment for the app being upgraded; used for the Anypoint
+    deployment-status verification (ARM/AMC lookup) and recorded on the job. Not the same as the
+    orchestrator's own runtime env.</p>
+  </section>
+
+  <section class="section" id="s4">
+    <h2>4. Design Decisions — <span class="badge b-accepted">Accepted</span> (with rationale)</h2>
+    <ol>
+      <li><strong>Transport-agnostic engine.</strong> <code>pf-*</code> sub-flows contain all logic;
+      REST sets HTTP concerns (202, status codes) and MCP returns JSON strings. No duplication.</li>
+      <li><strong>MCP tool responses return a JSON string</strong> via
+      <code>#[write(payload, 'application/json')]</code> (not
+      <code>#[output application/json --- payload]</code>). The latter drove DataWeave's Java writer
+      over the result map and threw <code>No read or write handler for appName</code>. REST
+      unaffected (the HTTP listener serializes directly).</li>
+      <li><strong><code>approvedChangePlan</code> is audit-only, never trusted.</strong> The worker
+      always re-runs assess.</li>
+      <li><strong>Optional Jira.</strong> Absent <code>jiraTicketId</code> → job still runs
+      end-to-end; Jira steps skip or auto-create (see §10).</li>
+      <li><strong>Single-flight lock per app</strong> (<code>lock::{appName}</code> in
+      <code>locksStore</code>) to reject concurrent upgrades of the same app
+      (<code>CONFLICT:UPGRADE_IN_PROGRESS</code>).</li>
+      <li><strong>Self-healing reconcile</strong> (<code>pf-reconcile</code>, scheduled) recovers
+      orphaned jobs.</li>
+      <li><strong>Native HTTP Basic auth</strong> for Jira/Exchange
+      (<code>&lt;http:basic-authentication&gt;</code>), replacing manual <code>toBase64</code>
+      Authorization headers (<code>toBase64</code> was unresolved).</li>
+      <li><strong>UTC-truthful timestamps</strong> everywhere:
+      <code>(now() &gt;&gt; |+00:00|) as String {format: "…'Z'"}</code>.</li>
+      <li><strong><code>mergeWith</code> for object merges</strong> (not <code>++</code>) — see §8.</li>
+      <li><strong><code>output application/java ---</code></strong> prefix on
+      logger/<code>raise-error</code>/set-variable expressions to avoid media-type inference errors — see §8.</li>
+      <li><strong>Config split</strong> by constancy: <code>config.yaml</code> = env-constant;
+      <code>config-&lt;env&gt;.yaml</code> = varying (loaded first, wins) — see §9.</li>
+      <li><strong>Jira ticket links</strong> in PR body (Markdown link) and Slack (all
+      success/failure/DEPLOYED messages), all guarded on <code>jiraTicketId</code> presence.</li>
+      <li><strong>Rollback notifications</strong> surface the revert PR URL in Slack + Jira comment
+      on <code>FAILED_DEPLOY</code>.</li>
+      <li><strong>Auto-create Jira ticket (Feature 2)</strong> when none supplied and enabled — see §10.</li>
+      <li><strong>RAML published to Exchange; APIkit consumes the Exchange asset</strong> via
+      <code>resource::</code> — see §14.</li>
+      <li><strong>Blast-radius warning at assess time</strong> when edits land on a shared parent/BOM pom — see §12.</li>
+      <li><strong>RAML <code>FileEdit</code> aligned to the engine's real shape</strong>
+      (<code>file</code>/<code>kind</code>/<code>from</code>/<code>to</code> + optional coordinates),
+      so assess output round-trips into <code>approvedChangePlan</code> — see §14 / Backlog #2.</li>
+      <li><strong><code>JobStatus</code> contract</strong> includes <code>FAILED_INTERRUPTED</code>
+      in the status enum and an optional <code>prNumber</code> integer.</li>
+    </ol>
+  </section>
+
+  <section class="section" id="s5">
+    <h2>5. Design Decisions — Considered then Rejected / Deferred</h2>
+    <table>
+      <thead><tr><th>Option</th><th>Decision</th><th>Rationale</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>Admin "reset job" endpoint to clear stuck locks</td>
+          <td><span class="badge b-rejected">Rejected</span></td>
+          <td>Masks the real problem; reconcile self-heals instead.</td>
+        </tr>
+        <tr>
+          <td>Run MUnit on the target JDK during assess (pre-flight) — Backlog #4</td>
+          <td><span class="badge b-rejected">Won't do</span></td>
+          <td>MUnit is owned by <strong>GitHub Actions</strong>; a red PR blocks merge anyway.
+          Consumers run their own pipelines; our job is only that generated PRs/artifacts are
+          CI-compatible for <strong>any</strong> consumer (our reusable <code>munit.yml</code> +
+          <code>deploy-ch2.yml</code> handle Java 8/17, mono/single-repo).</td>
+        </tr>
+        <tr>
+          <td>"Smarter" rollback: close the unmerged forward PR + delete <code>migrate/*</code> instead of opening a vacuous revert PR — Backlog #5</td>
+          <td><span class="badge b-rejected">Rejected / keep current</span></td>
+          <td><strong>Always open a second (revert) PR</strong> regardless of merge state, for
+          complete human visibility in one place. Never auto-close the forward PR or delete the
+          branch (would hide the trail). A human reviews both PRs.</td>
+        </tr>
+        <tr>
+          <td>Propagate blast-radius to Jira/Slack — Backlog #8</td>
+          <td><span class="badge b-deferred">Deprioritized</span></td>
+          <td>Blast-radius is a <strong>monorepo-only</strong> signal; monorepos are uncommon in the
+          target estate. The assess-side warning stays (harmless no-op for single-app repos).</td>
+        </tr>
+        <tr>
+          <td>Plaintext token in the request body for webhook auth</td>
+          <td><span class="badge b-rejected">Rejected</span></td>
+          <td>Machine-to-machine auth via headers (<code>X-CD-Token</code>, GitHub
+          <code>x-hub-signature-256</code>), not request body.</td>
+        </tr>
+        <tr>
+          <td>Reusable <code>pf-log-start</code> / <code>pf-log-end</code> sub-flows for logging</td>
+          <td><span class="badge b-rejected">Rejected</span></td>
+          <td><code>#[flow.name]</code> inside a sub-flow resolves to the owning top-level flow, and
+          a shared <code>vars</code> name breaks under nesting. Use a <strong>literal</strong> flow
+          name in each START/END logger instead — see §16.</td>
+        </tr>
+        <tr>
+          <td>Convert <code>mf-impl-*</code> implementation flows to sub-flows to save cost</td>
+          <td><span class="badge b-rejected">Rejected</span></td>
+          <td>They have no event source and aren't APIkit routes, so they are <strong>not
+          billable</strong> flows — see §8 (pricing). Zero credit benefit; keep as flows for their
+          error-handler boundary.</td>
+        </tr>
+        <tr>
+          <td>log4j2 <code>JsonLayout</code> + MDC hardening as phase 1 of logging</td>
+          <td><span class="badge b-deferred">Deferred</span></td>
+          <td>The JSON-message envelope is enough initially; MDC/JsonLayout is optional phase 2.
+          (Later superseded by the MDC-centric model in §16, still design-only.)</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="section" id="s6">
+    <h2>6. Backlog (complete)</h2>
+    <h3>Open</h3>
+    <ol>
+      <li><span class="badge b-done">Done (dual-mode)</span> <strong>HMAC-sign the <code>cd-result</code>
+      callback.</strong> Implemented 2026-07-07 in <code>mf-impl-post-cd-result</code>: computes
+      <code>expectedCdSig = "sha256=" ++ HMAC-SHA256(webhookSecret, vars.rawBody)</code> (identical
+      scheme to <code>/webhook</code>) and accepts the request if header
+      <code>X-CD-Signature-256</code> matches <strong>OR</strong> (transitional) <code>X-CD-Token</code>
+      equals the secret. The token fallback is intentional so existing local tests and any un-migrated
+      CD pipeline keep working. <strong>CD side done (2026-07-07):</strong> the reusable
+      <code>mule-ci-cd/deploy-ch2.yml</code> "Notify orchestrator (cd-result)" step now HMAC-signs the
+      compact body with <code>openssl</code> and sends <code>X-CD-Signature-256</code> (plus the
+      <code>X-CD-Token</code> fallback). <strong>Remaining to fully close:</strong> once all managed
+      repos consume the signing workflow, remove the <code>X-CD-Token</code> branch on both sides.
+      Note: <code>vars.rawBody</code> is <code>write(payload,'application/json')</code> (compact,
+      key-order preserving), and the CD job signs the same compact JSON, so the bytes match (same
+      caveat as <code>/webhook</code>).</li>
+      <li><span class="badge b-done">Done at source</span> <strong>Align RAML <code>FileEdit</code>
+      with the assess shape.</strong> RAML now <code>file</code>/<code>kind</code>/<code>from</code>/
+      <code>to</code>. <strong>Pending to go live:</strong> re-publish Exchange <strong>1.0.1</strong>
+      + bump <code>pom.xml</code> API dependency <code>&lt;version&gt;</code> <strong>and</strong> the
+      APIkit <code>resource::</code> string. (See §14.)</li>
+      <li><span class="badge b-done">Runbook ready</span> <strong>Enforce the deploy gate via branch
+      protection on <code>main</code>.</strong> <code>deploy-ch2.yml</code> has no
+      <code>needs: munit</code> and runs <code>-DskipMunitTests</code>; a red MUnit only blocks
+      deploy if <code>main</code> requires the MUnit status check. This is a <strong>GitHub repo
+      config (per managed repo)</strong>, not app code. Required status-check context =
+      <code>munit</code> (the job id in the managed repo's <code>MUnit Tests</code> workflow).
+      <strong>Command (run per managed repo, e.g. <code>avatansh/mule-apps</code>):</strong>
+      <pre><code>gh api --method PUT -H "Accept: application/vnd.github+json" \
+  /repos/&lt;owner&gt;/&lt;repo&gt;/branches/main/protection \
+  --input - &lt;&lt;'JSON'
+{
+  "required_status_checks": { "strict": true, "contexts": ["munit"] },
+  "enforce_admins": true,
+  "required_pull_request_reviews": { "required_approving_review_count": 1 },
+  "restrictions": null
+}
+JSON</code></pre>
+      This blocks direct pushes to <code>main</code>, requires a PR + 1 approval, and requires the
+      <code>munit</code> check green before merge — so a red MUnit blocks the merge that triggers
+      deploy. <strong>Status:</strong> command documented; apply per repo on demand (remote config
+      change — not auto-executed).</li>
+      <li><span class="badge b-rejected">Won't do</span> <strong>Run MUnit on target JDK during
+      assess.</strong> → by design, see §5.</li>
+      <li><span class="badge b-rejected">Decided</span> <strong>Smarter rollback when forward PR
+      unmerged.</strong> → keep current (always open the second revert PR), see §5.</li>
+      <li><span class="badge b-done">Done</span> <strong>Auto-create the migration Jira ticket
+      (Feature 2).</strong> See §10.</li>
+      <li><span class="badge b-open">Open</span> <strong>Common logging framework.</strong> Design
+      finalized (design-only, not implemented) — see §16.</li>
+      <li><span class="badge b-deferred">Deprioritized</span> <strong>Propagate blast-radius to
+      Jira/Slack.</strong> See §5.</li>
+      <li><span class="badge b-deferred">Roadmap (scalability)</span> <strong>Atomic single-flight lock
+      (concurrency-safe).</strong> Current lock is non-atomic check-then-act
+      (<code>os:retrieve</code> default <code>false</code> → <code>choice</code> →
+      <code>os:store</code>); two concurrent <code>POST /jobs</code> for the same app can both read
+      "no lock". Widens across CH2.0 replicas (OSv2 has no compare-and-set). Options: single
+      replica; idempotency key (<code>app+headSha</code>); or a store with atomic create (DB unique
+      constraint / queue serialization) / Java <code>LockFactory</code> component.
+      <strong>MVP disposition (2026-07-07):</strong> <em>not a correctness gap for the MVP.</em> The
+      race requires two concurrent submissions for the <em>same app</em>; the MVP runs
+      <strong>single-replica, one app at a time</strong>, so submissions are effectively serial and
+      the check-then-set is correct. Guardrail is <strong>operational discipline</strong> (submit →
+      wait → next), not code. Promoted to the <strong>future roadmap</strong> as a horizontal-scale /
+      high-concurrency hardening item (see §18).</li>
+      <li><span class="badge b-deferred">Roadmap (resilience)</span> <strong>Durable / resumable upgrade pipeline.</strong>
+      The multi-stage upgrade runs in <code>&lt;async&gt;</code> (in-memory, non-persistent). A
+      restart/crash/redeploy/autoscale mid-run <strong>orphans</strong> the job;
+      <code>pf-reconcile</code> later marks it <code>FAILED_INTERRUPTED</code> (manual resubmit) and
+      a partial commit/branch may remain. Options: durable queue (persistent VM / Anypoint MQ / DB
+      work item) with an idempotent, checkpointed consumer that resumes each stage. A DLQ on
+      Anypoint MQ would capture poison/failed work items for inspection + replay. <strong>NB:</strong>
+      full durability requires making <code>pf-open-pr</code> idempotent (redelivery must not open a
+      duplicate PR).
+      <strong>MVP disposition (2026-07-07):</strong> <em>not a correctness gap for the MVP.</em> On a
+      single replica a mid-run restart still cannot auto-resume, but <code>pf-reconcile</code> already
+      sweeps the orphan to <code>FAILED_INTERRUPTED</code> and releases the lock — <strong>no stuck
+      state, no data loss</strong>, just manual re-submit. Acceptable for a single-replica /
+      one-app-at-a-time MVP; promoted to the <strong>future roadmap</strong> for multi-replica /
+      autoscale resilience (see §18).</li>
+    </ol>
+    <p class="note"><strong>MVP scope note (2026-07-07):</strong> #9 and #10 are explicitly scoped
+    <em>out</em> of the MVP. Under the MVP operating envelope — <strong>single replica, one
+    application upgraded at a time</strong> — neither manifests: #9's race needs concurrency, and
+    #10's orphan is already recovered by <code>pf-reconcile</code>. Both are retained as
+    <strong>future-roadmap scalability/resilience items</strong> that justify how the solution scales
+    to multi-replica, high-concurrency operation. #1 (HMAC cd-result) and #3 (branch protection) are
+    <strong>approved to implement but on hold</strong> pending the "Vibes" flow-decomposition pass
+    (see §17) — revisit after.</p>
+    <h3>Done (this + prior sessions)</h3>
+    <ul>
+      <li><strong>Auto-create migration Jira ticket (Feature 2)</strong> — <code>pf-jira-create-issue</code> (§10).</li>
+      <li><strong>RAML <code>FileEdit</code> aligned at source</strong> (§14 / #2).</li>
+      <li><strong>API spec published to Exchange; APIkit reads from Exchange</strong> (§14).</li>
+      <li><strong>RAML/MCP: optional <code>jira</code> + <code>approvedChangePlan</code>;
+      <code>JobStatus</code> enum + <code>prNumber</code>.</strong></li>
+      <li><strong>MCP tool responses return a JSON string</strong> (fixes
+      <code>No read or write handler for appName</code>).</li>
+      <li><strong>Managed-repo CI: EE creds for Mule 4.9.x MUnit</strong> in
+      <code>avatansh/mule-apps</code> <code>main.yml</code> (§15).</li>
+      <li><strong>Blast-radius warning in assessment</strong> (§12).</li>
+      <li><strong>Jira ticket links in PR body + Slack</strong> (§10/§11).</li>
+      <li><strong>Rollback notifications surface the revert PR</strong> (§11).</li>
+      <li><strong>Config split</strong> across <code>config.yaml</code> / <code>config-dev</code> /
+      <code>config-prod</code> / <code>config-test</code> (§9).</li>
+      <li><strong>DataWeave media-type + duplicate-key fixes</strong> (cd-result verify vars,
+      default-branch discovery in <code>pf-resolve-coordinates</code>, staged files, blobs) (§8).</li>
+      <li><strong>UTC timestamp fix</strong>, <strong>OS null-default fix</strong>,
+      <strong>idempotent <code>pf-release-lock</code></strong>,
+      <strong><code>pf-reconcile</code> early-stage recovery</strong> (§8/§12).</li>
+      <li><strong>Universal GitHub Actions</strong> <code>munit.yml</code> + <code>deploy-ch2.yml</code>
+      (mono/single-repo, Java 8/17) (§15).</li>
+    </ul>
+  </section>
+
+  <section class="section" id="s7">
+    <h2>7. Errors Diagnosed &amp; Fixed (engineering log)</h2>
+    <table>
+      <thead><tr><th>Symptom</th><th>Root cause</th><th>Fix</th></tr></thead>
+      <tbody>
+        <tr><td><code>401 Unauthorized</code> for <code>…/private/…licm…pom</code> in CI MUnit</td><td>Missing enterprise Maven servers</td><td>Added <code>mulesoft-private</code> + <code>mule-ee-releases</code> to generated <code>settings.xml</code> with <code>ANYPOINT_USERNAME</code>/<code>PASSWORD</code>.</td></tr>
+        <tr><td><code>Unable to infer output media type (application/java, application/json)</code></td><td>Mixed types in expressions</td><td><code>output application/java ---</code> prefix on all such loggers/expressions.</td></tr>
+        <tr><td><code>No tests suites were found!</code></td><td>Wrong MUnit filter</td><td>Filter by suite name / run full suite.</td></tr>
+        <tr><td><code>generate-sources</code> fails on <code>.git/objects/...</code></td><td>Stale <code>target/</code></td><td><code>mvn clean test</code>.</td></tr>
+        <tr><td><code>Unable to resolve reference of: toBase64</code></td><td>Manual auth header</td><td>Native <code>&lt;http:basic-authentication&gt;</code>.</td></tr>
+        <tr><td>GitHub 404 for <code>my-test-app</code></td><td>Data issue (non-existent repo)</td><td>Use a real registered repo (<code>avatansh/Mule-Apps</code>).</td></tr>
+        <tr><td><code>OS:KEY_NOT_FOUND</code> on lock retrieve (first upgrade)</td><td><code>#[null]</code> default</td><td>Default to <code>#[false]</code>; <code>when existingLock != false</code>.</td></tr>
+        <tr><td><code>Cannot coerce String to DateTime</code> in reconcile</td><td>Explicit format on ISO string</td><td>Native ISO-8601 parse.</td></tr>
+        <tr><td>Job stuck <code>PROCESSING</code>/<code>COMMITTING</code> after status write</td><td><code>object ++ object</code> <strong>duplicates</strong> keys instead of overwriting</td><td>Replace all <code>++</code> merges with <code>mergeWith</code> (<code>dw::core::Objects</code>).</td></tr>
+        <tr><td><code>updatedAt</code> labeled <code>Z</code> but actually IST</td><td><code>now()</code> formatted with literal <code>'Z'</code></td><td><code>(now() &gt;&gt; |+00:00|)</code> before formatting.</td></tr>
+        <tr><td><code>OS:KEY_NOT_FOUND</code> on lock remove during reconcile</td><td>Non-idempotent remove</td><td><code>pf-release-lock</code> checks <code>os:contains</code> first; non-fatal.</td></tr>
+        <tr><td>Job never resumed after app restart mid-run</td><td>In-memory <code>&lt;async&gt;</code></td><td><code>pf-reconcile</code> marks <code>FAILED_INTERRUPTED</code> + releases lock (durability = Backlog #10).</td></tr>
+        <tr><td><code>No read or write handler for appName</code> (MCP + <code>pf-resolve-coordinates</code>)</td><td>Java writer over map / duplicate-key <code>++</code> on <code>coords.defaultBranch</code></td><td><code>write(...)</code> for MCP; <code>(vars.coords - 'defaultBranch') ++ {…}</code> for coords.</td></tr>
+        <tr><td>Jira <code>404 …/comment</code></td><td>Placeholder Jira URL</td><td>Set real <code>jira.host</code>/<code>baseUrl</code>; <code>pf-jira-comment</code> is <code>on-error-continue</code>.</td></tr>
+        <tr><td><code>mule-apps</code> CI failing at <code>Install apps-commons</code></td><td>Java 17/4.9.18 BOM bump needs EE repos</td><td>Patched <code>main.yml</code> (EE creds/servers) — blast-radius example.</td></tr>
+        <tr><td><code>anypoint-cli-v4 exchange:asset:upload</code> JSON parse error</td><td>PowerShell quoting</td><td>Single-quote JSON; <code>raml.raml</code> classifier; <code>--properties {mainFile,apiVersion}</code>.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="section" id="s8">
+    <h2>8. Key Engineering Learnings &amp; Conventions</h2>
+    <h3>DataWeave strictness</h3>
+    <ul>
+      <li><strong><code>output application/java ---</code></strong> on inline expressions (loggers,
+      <code>raise-error</code>, some <code>set-variable</code>) to prevent "more than one media type"
+      inference errors.</li>
+      <li><strong><code>mergeWith</code> (not <code>++</code>) for object merges.</strong>
+      <code>object ++ object</code> <strong>appends duplicate keys</strong> rather than overwriting,
+      which silently corrupted job records (old status persisted).</li>
+      <li><strong>Type inference on <code>coords</code></strong>:
+      <code>(vars.coords - 'defaultBranch') ++ { defaultBranch: … }</code> to avoid duplicate keys +
+      serialization handler errors.</li>
+    </ul>
+    <h3>Timestamps</h3>
+    <p>Always <code>(now() &gt;&gt; |+00:00|) as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}</code> —
+    the <code>&gt;&gt; |+00:00|</code> shifts to UTC so the <code>Z</code> label is truthful
+    (previously local IST mislabeled as UTC).</p>
+    <h3>Object Store</h3>
+    <ul>
+      <li><code>os:retrieve</code> with a <code>null</code> default treats it as "no default" and
+      throws <code>OS:KEY_NOT_FOUND</code>; use a real default (<code>#[false]</code>,
+      <code>#[{}]</code>).</li>
+      <li>Lock release must be <strong>idempotent</strong> (<code>os:contains</code> guard) and
+      <strong>non-fatal</strong> to avoid verbose runtime exceptions on reconcile sweeps.</li>
+    </ul>
+    <h3>WARN vs ERROR (logging levels)</h3>
+    <p>The distinction is <strong>"did the primary business outcome fail?"</strong>, not "did
+    something go wrong?".</p>
+    <ul>
+      <li><strong>ERROR</strong> = the operation failed and someone must act — used at fatal
+      boundaries: the global error handler, the async-pipeline fatal handler (marks
+      <code>FAILED_*</code>), coordinate-resolution failure. Page-worthy: the requested upgrade did
+      not happen.</li>
+      <li><strong>WARN</strong> = handled/degraded/self-healed; the primary outcome still succeeds —
+      used in <code>on-error-continue</code> swallow handlers (Slack/Jira down, auto-create Jira
+      failed), and in <code>pf-reconcile</code> recovering an orphan (an operational signal, not a
+      live crash).</li>
+      <li><strong>Heuristic:</strong> inside <code>on-error-continue</code> that swallows → WARN;
+      inside global/propagating handler or a path that sets <code>FAILED_*</code> → ERROR;
+      expected/optional-missing (no <code>jiraTicketId</code>) → DEBUG/INFO (keep WARN meaningful
+      enough to alert on).</li>
+    </ul>
+    <h3>Flow vs sub-flow</h3>
+    <table>
+      <thead><tr><th>&nbsp;</th><th><code>&lt;flow&gt;</code></th><th><code>&lt;sub-flow&gt;</code></th></tr></thead>
+      <tbody>
+        <tr><td>Event source (listener/scheduler/MCP/APIkit target)</td><td class="yes">✅</td><td class="no">❌</td></tr>
+        <tr><td>Own <code>&lt;error-handler&gt;</code></td><td class="yes">✅</td><td class="no">❌</td></tr>
+        <tr><td>Own processing strategy / boundary</td><td class="yes">✅</td><td class="no">❌ — runs synchronously in caller's thread, shares its context/vars</td></tr>
+        <tr><td>Callable via <code>flow-ref</code></td><td class="yes">✅</td><td class="yes">✅</td></tr>
+      </tbody>
+    </table>
+    <ul>
+      <li><strong>Must be a flow</strong> if it needs a trigger, its own error handler, or an
+      async/processing boundary. Otherwise prefer <strong>sub-flow</strong> (lighter, inherits
+      context).</li>
+      <li>The APIkit routing flows (<code>post:\jobs\assess:…</code>) <strong>must</strong> be flows
+      — APIkit routes to them by name. <code>pf-get-job-status</code> is a sub-flow (pure, shared by
+      REST + MCP); <code>mf-impl-get-job-status</code> is a flow (its REST-facing boundary).</li>
+    </ul>
+    <h3>Mule pricing — the "MuleSoft Flows" meter (corrected)</h3>
+    <p class="muted">Refs:
+    <a href="https://docs.mulesoft.com/general/mule-credits-usage-and-rates">Mule Credits</a>,
+    <a href="https://docs.mulesoft.com/general/usage-metrics">Usage Metrics</a>.</p>
+    <ul>
+      <li>Under the <strong>usage-based Mule Credits</strong> model, <strong>MuleSoft Flows is a
+      billable meter</strong> (it is <em>not</em> a cost factor under classic vCore-based
+      subscriptions).</li>
+      <li><strong>Counts:</strong> a <code>&lt;flow&gt;</code> with a <strong>Mule event source</strong>
+      (http/jms/ftp/db/scheduler listener, <strong>MCP tool-listener</strong>, …) <strong>OR</strong>
+      an <strong>APIkit routing flow</strong> that processes requests.</li>
+      <li><strong>Does NOT count:</strong> <code>&lt;sub-flow&gt;</code>; plain <code>&lt;flow&gt;</code>
+      with no source that only modularizes code (called via <code>flow-ref</code>).</li>
+      <li>Aggregated <strong>Max Concurrent</strong> (peak-hour flow count in the month)
+      <strong>× workers/replicas</strong>; charged only while deployed and running.</li>
+      <li><strong>This app's billable flows (× replicas): 10</strong> — 1 HTTP listener
+      (<code>…-main</code>) + 5 APIkit routes + 3 MCP tool-listeners + 1 scheduler
+      (<code>pf-reconcile</code>). All <code>mf-impl-*</code> and <code>pf-*</code> are
+      <strong>free</strong>.</li>
+      <li><strong>Levers:</strong> replica count (multiplier); drop optional surface area (e.g. the
+      3 MCP flows if unused); decompose freely into sub-flows (free). Don't merge distinct API
+      endpoints just to save flows.</li>
+    </ul>
+  </section>
+
+  <section class="section" id="s9">
+    <h2>9. Configuration Model</h2>
+    <ul>
+      <li><strong><code>config.yaml</code></strong> — env-<strong>constant</strong> only (app/api/http
+      host, mcp, github apiBase/defaultBranch, naming, anypoint apiBase/token, matrix identity,
+      registry path, OSv2 TTLs, job concurrency, reconcile prod defaults). Loaded <strong>after</strong>
+      env files (so env wins).</li>
+      <li><strong><code>config-dev.yaml</code></strong> — dev overrides: <code>api.id</code>,
+      <code>http.port</code>, <code>github.defaultOwner=avatansh</code>,
+      <code>anypoint.defaultOrgId</code>, <code>anypoint.verify.enabled=false</code>,
+      <code>slack.channel</code>, <code>jira.baseUrl/host</code>
+      (<code>avatansh-sharma.atlassian.net</code>), <code>matrix.exchange.orgId</code>,
+      <code>registry.enforceAllowList=false</code>, tighter <code>reconcile</code> (30s/120s) for
+      observable local recovery.</li>
+      <li><strong><code>config-prod.yaml</code></strong> — placeholders for all env-varying keys;
+      <code>verify.enabled=true</code>, <code>registry.enforceAllowList=true</code>.</li>
+      <li><strong><code>config-test.yaml</code></strong> — test-safe values for MUnit.</li>
+      <li><strong>Jira config (added for auto-create):</strong>
+        <ul>
+          <li><code>config.yaml</code>: <code>jira.autoCreate="false"</code> (safe default),
+          <code>jira.issueType="Task"</code>.</li>
+          <li><code>config-dev.yaml</code>: <code>jira.autoCreate="true"</code>,
+          <code>jira.projectKey="J1U"</code> (+ baseUrl/host).</li>
+          <li><code>config-prod.yaml</code>: <code>jira.autoCreate="false"</code>,
+          <code>jira.projectKey</code> placeholder.</li>
+        </ul>
+      </li>
+      <li><strong>Secrets</strong> live in <code>config-secure-&lt;env&gt;.yaml</code> (Jira
+      email/apiToken, Slack webhook, GitHub webhook secret), referenced via <code>secure::</code>.</li>
+    </ul>
+  </section>
+
+  <section class="section" id="s10">
+    <h2>10. Jira Integration</h2>
+    <h3>Feature 1 — lifecycle comments (<code>pf-jira-comment</code>)</h3>
+    <ul>
+      <li>Posts an <strong>ADF</strong> comment (summary paragraph + optional link node) to the
+      ticket at lifecycle transitions (PR opened, deployed, failed/rollback).</li>
+      <li><strong>Self-guarding</strong> (<code>when jiraTicketId != null</code>) +
+      <strong>non-fatal</strong> (<code>on-error-continue</code>, WARN).</li>
+      <li><code>pf-notify</code> was refactored to reuse <code>pf-jira-comment</code> (removed
+      duplication).</li>
+    </ul>
+    <h3>Feature 2 — auto-create ticket (<code>pf-jira-create-issue</code>)
+      <span class="badge b-done">Implemented</span></h3>
+    <ul>
+      <li>New non-fatal sub-flow in <code>notify.xml</code>, called as the <strong>first step of the
+      <code>&lt;async&gt;</code> pipeline</strong> in <code>pf-start-upgrade</code> (pre-assess).</li>
+      <li>Fires only when <strong>no <code>jiraTicketId</code> supplied AND
+      <code>jira.autoCreate=true</code></strong>. <code>POST /rest/api/3/issue</code> (ADF body) to
+      <code>jira.projectKey</code> as <code>jira.issueType</code>; adopts the returned
+      <code>key</code> as <code>vars.jiraTicketId</code>; merges it into the job record so
+      <strong>all</strong> downstream steps (assessment comment, PR body, Slack, final decision,
+      <code>GET /jobs/{id}</code>) reference the real ticket.</li>
+      <li><strong>Non-fatal:</strong> creation failure → upgrade proceeds ticket-less (WARN); never
+      blocks.</li>
+      <li>Off-by-default in prod (config default <code>false</code>), on in dev.</li>
+    </ul>
+    <h3>Notification links</h3>
+    <ul>
+      <li>PR body: Jira as Markdown link <code>[TICKET](baseUrl/browse/TICKET)</code>.</li>
+      <li>Slack success/failure/DEPLOYED: Slack-linked <code>Jira: &lt;url|TICKET&gt;</code>.</li>
+      <li>All guarded on <code>jiraTicketId</code> presence.</li>
+    </ul>
+  </section>
+
+  <section class="section" id="s11">
+    <h2>11. Notifications (Slack) &amp; Rollback</h2>
+    <ul>
+      <li><code>pf-notify</code> (success/PR-open), <code>pf-notify-failure</code> (failure — reads
+      authoritative status/error from the job record), DEPLOYED message on cd-result success.</li>
+      <li>All non-fatal (<code>try</code> + <code>on-error-continue</code>, WARN) — a notification
+      outage never fails the pipeline.</li>
+      <li><strong>Rollback visibility:</strong> on <code>FAILED_DEPLOY</code>, <code>pf-rollback</code>
+      <strong>always opens a revert PR</strong>; the Slack failure message and Jira comment include
+      the <strong>revert PR URL</strong> (<code>vars.revertPrUrl</code>, falling back to the original
+      PR). Decision: never auto-close the forward PR (§5).</li>
+    </ul>
+  </section>
+
+  <section class="section" id="s12">
+    <h2>12. Concurrency, Durability &amp; Self-Healing</h2>
+    <ul>
+      <li><strong>Single-flight lock</strong> <code>lock::{appName}</code> — see Backlog #9
+      (non-atomic; hardening deferred).</li>
+      <li><strong><code>pf-reconcile</code></strong> (scheduled sweep): recovers stale jobs in early
+      non-terminal states (<code>PROCESSING</code>, <code>ASSESSING</code>, <code>COMMITTING</code>,
+      <code>COMMITTED</code>) → marks <code>FAILED_INTERRUPTED</code>, releases the lock via
+      idempotent <code>pf-release-lock</code>. Dev cadence 30s / 120s stale; prod 5min / 15min.</li>
+      <li><strong>Durability gap</strong> (Backlog #10): <code>&lt;async&gt;</code> is in-memory; a
+      mid-run restart orphans the job (reconcile only later flags it; partial branch/commit may
+      remain). Not observable in single-user local testing; matters for production and
+      multi-replica.</li>
+      <li><strong>Blast-radius (assess):</strong> when property/dependency/plugin edits resolve to a
+      <strong>shared parent/BOM pom</strong> (any <code>chain</code> entry other than the app's own
+      module pom at <code>chain[0]</code>), <code>pf-assess-app</code> appends a
+      <code>BLAST RADIUS: …</code> warning listing the shared file(s). Rationale: editing a shared
+      BOM upgrades <strong>every</strong> inheriting module (real example: <code>mule-apps</code>
+      <code>bom/pom.xml</code> bump broke <code>apps-commons</code> CI). Propagation to Slack/Jira
+      deprioritized (§5).</li>
+    </ul>
+  </section>
+
+  <section class="section" id="s13">
+    <h2>13. Security — Webhook Authentication</h2>
+    <ul>
+      <li><code>POST /webhook</code> (GitHub): HMAC-SHA256 over the raw body vs
+      <code>x-hub-signature-256</code> (<code>github.webhookSecret</code>). Raw body + headers
+      captured in <code>main</code> <strong>before</strong> APIkit parses.</li>
+      <li><code>POST /webhook/cd-result</code> (CI): shared <code>X-CD-Token</code> header ==
+      <code>github.webhookSecret</code> (plaintext). <strong>Backlog #1:</strong> upgrade to
+      HMAC-SHA256 over the raw body.</li>
+      <li>Machine-to-machine only — no token in request body (rejected, §5).</li>
+    </ul>
+  </section>
+
+  <section class="section" id="s14">
+    <h2>14. RAML / Anypoint Exchange</h2>
+    <ul>
+      <li><strong>Published</strong> the RAML to Exchange:
+      <code>2e14f8c6-…/platform-lifecycle-orchestrator-api/1.0.0</code> (type <code>rest-api</code>).</li>
+      <li><strong>APIkit consumes the Exchange asset</strong> — <code>pom.xml</code> has the
+      <code>raml</code>/<code>zip</code> dependency and <code>global-config.xml</code>
+      <code>apikit:config api="resource::2e14f8c6-…:platform-lifecycle-orchestrator-api:1.0.0:raml:zip:platform-lifecycle-orchestrator.raml"</code>.</li>
+      <li><strong>Gotcha (critical):</strong> the spec version now lives in <strong>two</strong>
+      places — the pom dependency <code>&lt;version&gt;</code> <strong>and</strong> the
+      <code>resource::</code> string. <strong>Bump both on every re-publish</strong>, or the router
+      resolves the wrong/absent spec.</li>
+      <li>The local RAML remains the editable source.</li>
+      <li><strong><code>FileEdit</code> alignment (#2):</strong> local RAML now matches the engine
+      shape: <code>file</code> (owner path), <code>kind</code> (enum: <code>pomProperty,
+      depVersion, pluginVersion, munitRuntimeVersion, muleArtifactJson, ciWorkflow</code>), optional
+      <code>property</code>/<code>groupId</code>/<code>artifactId</code>/<code>pluginGroupId</code>/
+      <code>pluginArtifactId</code>, <code>from</code>/<code>to</code> typed <code>any</code>
+      (string, or object for <code>muleArtifactJson</code>), <code>change</code>.
+      <strong>To go live:</strong> re-publish <strong>1.0.1</strong> + bump pom + <code>resource::</code>.</li>
+      <li><strong><code>JobRequest</code>:</strong> <code>jiraTicketId</code> and
+      <code>approvedChangePlan</code> both <code>required: false</code> (with descriptions).
+      <strong><code>JobStatus</code>:</strong> enum includes <code>FAILED_INTERRUPTED</code>;
+      optional <code>prNumber</code> int.</li>
+      <li><strong>Nuance:</strong> <code>ChangePlan.filesToChange</code> remains required
+      <em>within</em> <code>ChangePlan</code>, so it is only enforced when a caller chooses to send
+      <code>approvedChangePlan</code> (a light audit gate).</li>
+      <li>MCP <code>start_upgrade</code> <code>required</code> reduced to
+      <code>["appName","environment"]</code>.</li>
+      <li><strong>Publish command</strong> (<code>anypoint-cli-v4 exchange:asset:upload</code>):
+      single-quote JSON in PowerShell, <code>--files '{"raml.raml":"…"}'</code>,
+      <code>--properties '{"mainFile":"…","apiVersion":"v1"}'</code>, identifier
+      <code>orgId/assetId/version</code>.</li>
+    </ul>
+  </section>
+
+  <section class="section" id="s15">
+    <h2>15. CI/CD (GitHub Actions)</h2>
+    <ul>
+      <li><strong>Universal reusable workflows</strong> <code>munit.yml</code> +
+      <code>deploy-ch2.yml</code>: work for monorepos and single-app repos, Java 8 and Java 17.</li>
+      <li><strong>Enterprise Maven auth:</strong> dynamically generated <code>settings.xml</code>
+      includes <code>mulesoft-private</code> and <code>mule-ee-releases</code> (creds
+      <code>ANYPOINT_USERNAME</code>/<code>ANYPOINT_PASSWORD</code>) — required for Mule 4.9.x MUnit
+      (pulls embedded MULE_EE runtime <code>com.mulesoft.licm:licm</code>, <code>mule-core-ee</code>).</li>
+      <li><strong>Managed-repo fix:</strong> patched <code>avatansh/mule-apps</code>
+      <code>.github/workflows/main.yml</code> (added EE creds/servers) after the Java 17 / 4.9.18
+      BOM bump broke <code>Install apps-commons</code>. Long-term: migrate managed repos to the
+      hardened reusable <code>munit.yml</code>.</li>
+      <li><strong>Deploy gate (Backlog #3):</strong> <code>deploy-ch2.yml</code> has no
+      <code>needs: munit</code> and runs <code>-DskipMunitTests</code>; enforce via branch-protection
+      required status checks on <code>main</code>.</li>
+      <li><strong>Ownership decision (#4):</strong> MUnit/deploy is owned by GitHub Actions; the
+      orchestrator does not duplicate it. Our responsibility: produce PRs/artifacts that are
+      CI-compatible for <strong>any</strong> consumer's pipeline.</li>
+      <li><strong><code>.mvn/settings.xml</code></strong> must <strong>not</strong> be modified (user
+      directive — reverted).</li>
+    </ul>
+  </section>
+
+  <section class="section" id="s16">
+    <h2>16. Logging Framework — Finalized Design
+      <span class="badge b-deferred">Design-only, not implemented</span></h2>
+    <p><strong>Reference studied:</strong> <code>apps-commons/logger-common.xml</code> — 6 milestone
+    sub-flows (<code>csf-logger-*</code>) each rendering a structured-JSON envelope from an external
+    DWL template (<code>dwl/log/v-log-*.dwl</code>), all at INFO. Fields:
+    <code>externalTrackingId</code>, <code>globalTransactionId</code>, <code>muleTransactionId</code>,
+    <code>applicationName</code>, <code>processName</code>, <code>flowName</code>,
+    <code>environment</code>, <code>source</code>, <code>target</code>, <code>httpMethod</code>,
+    <code>milestoneStatus</code>, <code>customerId</code>.</p>
+    <p><strong>Why a variant, not a copy:</strong> the orchestrator is async/job-based (events happen
+    after the HTTP response), multi-protocol (REST + MCP + webhook + scheduler), and needs WARN/ERROR
+    (their framework is INFO-only).</p>
+    <h3>The model (three parts)</h3>
+    <ol>
+      <li><strong>Ambient context in MDC, set once.</strong> Stable-per-request fields
+      (<code>correlationId</code> [Mule sets it], <code>jobId</code>, <code>appName</code>,
+      <code>env</code>) pushed to MDC via the <strong>Tracing module</strong>
+      (<code>tracing:set-logging-variable</code>) at the ~6 entry points and at jobId mint/load.
+      Emitted on <strong>every</strong> line by log4j2 — loggers never re-type them. Safe from
+      nesting because these fields don't change per sub-flow.</li>
+      <li><strong>START/END bracket each flow/sub-flow.</strong> Exactly two <code>&lt;logger&gt;</code>s;
+      the flow name is a <strong>literal</strong> in the message (NOT a <code>pf-log-start</code>
+      sub-flow — <code>#[flow.name]</code> in a sub-flow returns the owning top-level flow, and a
+      shared <code>vars</code> name breaks under nesting).</li>
+      <li><strong>Selective INFO/WARN/ERROR only where they add signal</strong>; delete redundant
+      "milestone" INFO (a child sub-flow's own START/END already proves the step ran).</li>
+    </ol>
+    <p><strong>log4j2 change:</strong> extend the pattern to emit MDC —
+    <code>%-5p %d [%t] corr=%X{correlationId} job=%X{jobId} app=%X{appName} env=%X{env} - %m%n</code>
+    (or <code>JsonLayout properties="true"</code> for Splunk). Also update <code>log4j2-test.xml</code>.</p>
+    <p><strong>Level rules:</strong> INFO = START/END + real decisions (PR opened, DEPLOYED/FAILED
+    verdict); WARN = swallow handlers + business guards (lock held, duplicate delivery,
+    verify-disabled, Jira/Slack failed); ERROR = global + async-fatal handlers +
+    <code>FAILED_*</code>; DEBUG = payload snapshots.</p>
+    <h3>Decisions</h3>
+    <p><span class="badge b-accepted">Decided</span> <strong>Coverage: <code>top_and_meaty</code></strong>
+    — START/END only on <strong>top-level flows + meaty sub-flows</strong>, skip tiny helpers. Net
+    <strong>~40 loggers</strong> (down from 95).</p>
+    <ul>
+      <li><strong>Gets START/END:</strong> <code>mf-impl-post-jobs</code>,
+      <code>mf-impl-post-jobs-assess</code>, <code>mf-impl-get-job-status</code>,
+      <code>mf-impl-post-webhook</code>, <code>mf-impl-post-cd-result</code>, 3 MCP tool flows,
+      <code>pf-reconcile</code>; meaty sub-flows <code>pf-start-upgrade</code>,
+      <code>pf-assess-app</code>, <code>pf-apply-transforms</code>, <code>pf-atomic-commit</code>,
+      <code>pf-open-pr</code>, <code>pf-rollback</code>, <code>pf-resolve-coordinates</code>,
+      <code>pf-load-matrix</code>, <code>pf-verify-deployment</code>, <code>pf-notify</code>,
+      <code>pf-notify-failure</code>, <code>pf-jira-create-issue</code>.</li>
+      <li><strong>Skipped:</strong> <code>pf-release-lock</code>, <code>pf-set-status</code>,
+      <code>pf-get-job-status</code>, <code>pf-jira-comment</code>, <code>pf-get-anypoint-token</code>
+      (keep only WARN/ERROR where relevant).</li>
+      <li><code>main</code> already brackets via request/response; the 5 APIkit routing flows are
+      skipped.</li>
+    </ul>
+    <p><span class="badge b-deferred">Decided</span> <strong>log4j2/MDC hardening:</strong> the
+    earlier standalone JsonLayout question was answered <strong>No</strong> (envelope-as-message is
+    enough); the finalized model above nonetheless centers on MDC because <code>correlationId</code>
+    is already wired in <code>log4j2.xml</code>.</p>
+    <p><span class="badge b-deferred">Decided</span> <strong>Action: design-only.</strong> No code
+    written. Migration when greenlit: add <code>mule-tracing-module</code>; set MDC at entry points;
+    update <code>log4j2.xml</code>/<code>log4j2-test.xml</code>; per-flow add START/END + delete
+    redundant INFO/DEBUG + re-tag WARN/ERROR; <code>mvn clean test</code> after each file.</p>
+  </section>
+
+  <section class="section" id="s17">
+    <h2>17. Flow Decomposition — Plan + Reusable Prompt
+      <span class="badge b-open">Delivered, not yet executed</span></h2>
+    <p><strong>Finding:</strong> the app is already well-decomposed (<code>post-jobs.xml</code>,
+    <code>notify.xml</code>, <code>anypoint.xml</code> are clean <code>pf-*</code> sets). Genuinely
+    oversized:</p>
+    <table>
+      <thead><tr><th>Flow</th><th>File</th><th>~Lines</th><th>Right refactor</th></tr></thead>
+      <tbody>
+        <tr><td><code>mf-impl-post-cd-result</code></td><td><code>post-webhook.xml</code></td><td>~383</td><td><strong>sub-flows</strong></td></tr>
+        <tr><td><code>pf-assess-app</code></td><td><code>post-jobs-assess.xml</code></td><td>~508</td><td><strong>DataWeave modules</strong> (one giant transform)</td></tr>
+        <tr><td><code>mf-impl-post-webhook</code></td><td><code>post-webhook.xml</code></td><td>~230</td><td><strong>sub-flows</strong></td></tr>
+        <tr><td><code>pf-resolve-coordinates</code></td><td><code>reference-data.xml</code></td><td>~180</td><td>DW module (+ small sub-flows)</td></tr>
+        <tr><td><code>pf-load-matrix</code></td><td><code>reference-data.xml</code></td><td>~178</td><td>DW module</td></tr>
+        <tr><td><code>pf-atomic-commit</code></td><td><code>github.xml</code></td><td>~150</td><td>sub-flows</td></tr>
+      </tbody>
+    </table>
+    <p><strong>Critical distinction:</strong> long-because-of-many-processors → sub-flows;
+    long-because-of-one-big-DataWeave → DataWeave modules (<code>import</code>), because a single
+    <code>&lt;ee:transform&gt;</code> can't be split across sub-flow boundaries.</p>
+    <h3>Suggested breakdowns</h3>
+    <ul>
+      <li><code>mf-impl-post-cd-result</code> → keep the auth/idempotency <code>&lt;choice&gt;</code>
+      skeletons; extract branch bodies into <code>pf-cd-load-and-guard</code>,
+      <code>pf-cd-finalize-success</code>, <code>pf-cd-finalize-failure</code>.</li>
+      <li><code>mf-impl-post-webhook</code> → <code>pf-gh-verify-signature</code>,
+      <code>pf-gh-dedupe-delivery</code>, <code>pf-gh-handle-pr-merge</code>.</li>
+      <li><code>pf-atomic-commit</code> → <code>pf-gh-create-tree-commit</code>.</li>
+      <li><code>pf-assess-app</code> → DW modules
+      <code>dwl/assess/{resolveRules,buildFileEdits,blastRadius}.dwl</code>.</li>
+      <li><code>reference-data.xml</code> → <code>dwl/refdata/*</code> modules; optionally
+      <code>pf-coords-from-registry</code> / <code>pf-coords-from-convention</code>.</li>
+    </ul>
+    <p><strong>Behavior-preservation rules baked into the prompt</strong> (for the delegated agent):
+    sub-flows share the caller's event/vars (safe extraction); sub-flows can't have their own
+    <code>&lt;error-handler&gt;</code> (move the whole <code>&lt;try&gt;</code> or leave it at the
+    call site); <code>flow-ref</code> can't pass args (inputs via vars/payload, documented
+    <code>Requires:</code>/<code>Returns:</code>); extract only complete/balanced blocks; preserve
+    payload continuity + REST plumbing (<code>httpStatus</code>/<code>outboundHeaders</code>); unique
+    <code>doc:id</code>s; correct namespaces; DW-heavy → modules; verify with
+    <code>mvn clean test</code> + E2E per <code>LOCAL_TESTING_PLAYBOOK.html</code> after each flow.
+    (Full prompt text preserved in chat.)</p>
+    <p><strong>Status (updated 2026-07-07):</strong> Delegated to the "Vibes" agent in the
+    source-of-truth repo (<code>Documents\Git\Avatansh-GitHub\platform-lifecycle-orchestrator</code>).
+    <span class="badge b-rejected">Attempt failed</span> — Vibes produced only <em>un-executed</em>
+    Python helper scripts (<code>_refactor_helper.py</code>, <code>_update_assess_transform.py</code>,
+    <code>_update_reference_data.py</code>, <code>_verify_refactor.py</code>) plus an orphan
+    <code>assessmentFunctions.dwl</code>, and applied <strong>no</strong> edit: <code>git status</code>
+    showed no modified XML, none of the intended sub-flows (<code>pf-cd-*</code>,
+    <code>pf-webhook-handle-merge</code>, <code>pf-ac-*</code>) exist, and the DWL module is not
+    imported.</p>
+    <p><strong>Root cause:</strong> the original prompt (a) never forbade helper scripts / never
+    mandated direct hand edits, (b) had no "apply it yourself" rule (agent delivered the mechanism,
+    not the result), (c) hinged verification on <code>mvn clean test</code> which isn't runnable in
+    the Vibes environment, and (d) had no explicit Definition of Done (e.g. "<code>git status</code>
+    must show modified XML; each new sub-flow defined AND referenced; no scratch files left").
+    Only <code>assessmentFunctions.dwl</code> is salvageable (clean, stateless helpers — un-wired).</p>
+    <p><strong>Remediation:</strong> a hardened re-prompt was authored — <em>direct XML edits only,
+    no scripts, explicit Definition-of-Done self-checks keyed on <code>git status</code> + grep,
+    one flow at a time, and the Mule build/MUnit/E2E deferred to the Studio workspace with a handoff
+    checklist</em> (Vibes cannot run Maven).</p>
+    <p><strong>Workflow (confirmed):</strong> the Avatansh-GitHub repo is Vibes' source of truth for
+    edits; the Studio workspace (<code>C:\Workspaces\7.25\acb-apps\platform-lifecycle-orchestrator</code>)
+    is where the Mule build, MUnit, E2E and commit happen.</p>
+  </section>
+
+  <section class="section" id="s18">
+    <h2>18. MVP Assessment</h2>
+    <p><strong>Rating: 8/10.</strong> Strengths: complete lifecycle
+    (assess→commit→PR→verify→notify→rollback), dual REST+MCP surface, self-healing reconcile,
+    governance (allow-list, blast-radius), config hygiene, Exchange-published contract. Gaps holding
+    back a higher score: atomic lock (#9) and durable pipeline (#10) — both invisible in single-user
+    local demo but important for production.</p>
+
+    <h3>MVP operating envelope (2026-07-07)</h3>
+    <p>The MVP is scoped to run <strong>single-replica, upgrading one application at a time</strong>.
+    Within this envelope #9 and #10 are <em>not correctness gaps</em>: #9's race needs concurrent
+    same-app submissions (removed by serial, one-at-a-time operation), and #10's mid-run orphan is
+    already recovered by <code>pf-reconcile</code> (→ <code>FAILED_INTERRUPTED</code> + lock release,
+    no stuck state / no data loss). They are therefore deliberately deferred to the roadmap below.</p>
+
+    <h3>Future roadmap — scalability &amp; resilience</h3>
+    <p>These items justify how the solution scales beyond the MVP envelope:</p>
+    <table>
+      <thead><tr><th>Item</th><th>Unlocks</th><th>Approach</th><th>Effort</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><strong>#9 Atomic single-flight lock</strong></td>
+          <td>Multi-replica &amp; concurrent submissions (many apps / same app) without a double-start race</td>
+          <td>Java <code>LockFactory</code> component (single-cluster) <em>or</em> atomic-create store (DB unique key / Redis SETNX) <em>or</em> idempotency key <code>app+headSha</code></td>
+          <td>Med–High (1–3 d)</td>
+        </tr>
+        <tr>
+          <td><strong>#10 Durable / resumable pipeline</strong></td>
+          <td>Crash/restart/autoscale mid-run auto-resumes instead of manual re-submit</td>
+          <td>Durable queue (Anypoint MQ) + checkpointed, idempotent consumer + DLQ; prerequisite: make <code>pf-open-pr</code> idempotent</td>
+          <td>High (3–5+ d)</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="section" id="s19">
+    <h2>19. Pending User Decisions / Next Actions</h2>
+    <ol>
+      <li><strong>RAML #2 go-live:</strong> re-publish Exchange <strong>1.0.1</strong> + bump
+      <code>pom.xml</code> API dependency version and the <code>resource::</code> string (do the bump
+      <strong>after</strong> publishing to avoid a broken build).</li>
+      <li><strong>Logging framework:</strong> implement when greenlit (<code>top_and_meaty</code>
+      coverage; design in §16).</li>
+      <li><strong>Flow decomposition (Vibes):</strong> in progress — running the hardened re-prompt
+      (§17). Everything else waits on this pass completing.</li>
+      <li><strong>#1 (HMAC cd-result):</strong> <span class="badge b-done">Done both sides</span> —
+      orchestrator verifies + <code>mule-ci-cd/deploy-ch2.yml</code> signs (<code>X-CD-Signature-256</code>);
+      <code>X-CD-Token</code> retained as transitional fallback. <em>Follow-up:</em> drop the token
+      branch on both sides once every managed repo uses the signing workflow.</li>
+      <li><strong>#3 (branch protection):</strong> <span class="badge b-done">Runbook ready</span> —
+      <code>gh api</code> command documented in §6; apply per managed repo when ready (remote config).</li>
+      <li><strong>#9 (atomic lock) + #10 (durable pipeline):</strong> <strong>scoped out of MVP</strong>
+      (single-replica, one-app-at-a-time) → moved to the <strong>future scalability/resilience
+      roadmap</strong> (§18).</li>
+      <li><strong>Logging framework:</strong> implement when greenlit (design in §16).</li>
+    </ol>
+  </section>
+
+  <section class="section" id="s20">
+    <h2>20. Session Change Log (2026-07-06 → 2026-07-07)</h2>
+    <ul>
+      <li>Implemented <strong>auto-create Jira</strong> (<code>pf-jira-create-issue</code> + config
+      keys + async wiring).</li>
+      <li>Aligned <strong>RAML <code>FileEdit</code></strong> to the engine shape (source; Exchange
+      re-publish pending).</li>
+      <li>Confirmed <strong><code>approvedChangePlan</code> optional</strong> (RAML/MCP/engine
+      consistent).</li>
+      <li>Recorded decisions: <strong>#4 WON'T DO</strong>, <strong>#5 keep second rollback PR</strong>,
+      <strong>#8 deprioritized</strong>.</li>
+      <li>Documented <strong>WARN vs ERROR</strong>, <strong>flow vs sub-flow</strong>, and corrected
+      <strong>Mule Flows pricing</strong> (usage-based credits; billable tally = 10 for this app).</li>
+      <li>Delivered <strong>flow-decomposition</strong> plan + reusable refactor prompt.</li>
+      <li>Finalized <strong>logging model</strong> (MDC + literal START/END,
+      <code>top_and_meaty</code>, design-only).</li>
+      <li>Authored the design record; <strong>folded <code>BACKLOG.md</code> in and deleted it</strong>,
+      established the standing maintenance protocol.</li>
+      <li><strong>Converted the record to this HTML file and deleted <code>DESIGN_DECISIONS.md</code></strong>
+      — this HTML is now the single living document.</li>
+      <li><strong>Reviewed the "Vibes" flow-decomposition attempt</strong> — found it produced only
+      un-executed Python scripts + an orphan <code>assessmentFunctions.dwl</code> (no XML changes);
+      diagnosed the root cause and authored a stricter re-prompt (direct edits only + Definition of
+      Done + Studio-side build verification). Confirmed the two-repo workflow (Avatansh-GitHub =
+      edit source of truth; Studio workspace = build/commit). See §17.</li>
+      <li><strong>Effort/complexity assessment of open items #1/#3/#9/#10</strong> and E2E-risk
+      analysis (grounded in <code>post-webhook.xml</code> + <code>post-jobs.xml</code>). Decision:
+      <strong>#9 &amp; #10 scoped out of the MVP</strong> (single-replica, one-app-at-a-time — not
+      correctness gaps) and       <strong>promoted to a scalability/resilience roadmap</strong> (§18);
+      <strong>#1 &amp; #3 approved but on hold</strong> pending the Vibes decomposition (§6/§19).</li>
+      <li><strong>Implemented #1 (HMAC <code>cd-result</code>)</strong> — dual-mode auth in
+      <code>mf-impl-post-cd-result</code> (<code>X-CD-Signature-256</code> HMAC preferred,
+      <code>X-CD-Token</code> transitional fallback; local testing unaffected). Also added
+      <strong>HMAC signing on the CD side</strong> — <code>mule-ci-cd/deploy-ch2.yml</code> now signs the
+      <code>cd-result</code> body with <code>openssl</code> and sends <code>X-CD-Signature-256</code>
+      (README updated). <strong>Documented #3 (branch protection)</strong> as a per-repo
+      <code>gh api</code> runbook requiring the <code>munit</code> status check on <code>main</code>.</li>
+    </ul>
+  </section>
+
+  <hr />
+  <p class="muted" style="margin-top:16px">Platform Lifecycle Orchestrator · Design Decisions,
+  Backlog &amp; Engineering Record · maintained automatically per the protocol at the top.</p>
+
+</div>
+</body>
+</html>

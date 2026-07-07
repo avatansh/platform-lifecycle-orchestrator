@@ -248,7 +248,10 @@ output application/json
         mf-impl-post-cd-result â€” POST /webhook/cd-result
         Called by the GitHub Actions CD pipeline after deployment.
         Body: { jobId: String, result: "success"|"failure", deployUrl?: String }
-        Auth: X-CD-Token header must match secure::github.webhookSecret (shared secret).
+        Auth: HMAC-SHA256 over the raw body in header X-CD-Signature-256 ("sha256=" ++ hex),
+              same scheme as POST /webhook. Transitional fallback: X-CD-Token == secure::github.webhookSecret
+              (kept so existing local tests / un-migrated CD pipelines keep working; remove once the CD
+              job signs — see DESIGN_DECISIONS #1).
         Finalizes the job: DEPLOYED (success) or FAILED_DEPLOY (failure).
     -->
     <flow name="mf-impl-post-cd-result"
@@ -257,15 +260,37 @@ output application/json
           doc:description="Receive CD pipeline result callback; authenticate, finalize job status, release lock.">
 
         <!-- â”€â”€ Step 1: Shared-token authentication â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
-        <choice doc:name="CHOICE X-CD-Token valid?"
+        <!-- Compute expected HMAC over the raw body (identical scheme to POST /webhook).
+             vars.rawBody is captured in the main flow for every route. -->
+        <ee:transform doc:name="DW Compute Expected CD HMAC Signature"
+                      doc:id="b9c0d1e2-0009-0009-0009-0000000000a1"
+                      doc:description="Compute sha256=HEX(HMAC-SHA256(webhookSecret, rawBody)) for comparison with X-CD-Signature-256">
+            <ee:variables>
+                <ee:set-variable variableName="expectedCdSig"><![CDATA[%dw 2.0
+import dw::Crypto
+output text/plain
+---
+"sha256=" ++ Crypto::HMACWith(p('secure::github.webhookSecret') as Binary, vars.rawBody, "HmacSHA256")]]></ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+        <set-variable variableName="cdSignature"
+                      value="#[attributes.headers['x-cd-signature-256'] default '']"
+                      doc:name="PV SET cdSignature"
+                      doc:id="b9c0d1e2-0009-0009-0009-0000000000a2" />
+        <set-variable variableName="cdToken"
+                      value="#[attributes.headers['x-cd-token'] default '']"
+                      doc:name="PV SET cdToken"
+                      doc:id="b9c0d1e2-0009-0009-0009-0000000000a3" />
+
+        <choice doc:name="CHOICE cd-result auth valid?"
                 doc:id="b9c0d1e2-0009-0009-0009-000000000001"
-                doc:description="Reject requests whose X-CD-Token header does not match the shared webhook secret">
-            <when expression="#[(attributes.headers['x-cd-token'] default '') != p('secure::github.webhookSecret')]"
-                  doc:name="token missing or invalid"
+                doc:description="Reject unless a valid HMAC signature (X-CD-Signature-256) OR the transitional shared token (X-CD-Token) is presented">
+            <when expression="#[not ( (vars.cdSignature != '' and vars.cdSignature == vars.expectedCdSig) or (vars.cdToken != '' and vars.cdToken == p('secure::github.webhookSecret')) )]"
+                  doc:name="auth missing or invalid"
                   doc:id="b9c0d1e2-0009-0009-0009-000000000002">
 
                 <logger level="WARN"
-                        doc:name="LOG WARN Invalid CD Token"
+                        doc:name="LOG WARN Invalid CD Auth"
                         doc:id="b9c0d1e2-0009-0009-0009-000000000003"
                         message="#[output application/java --- 'LOG WARN | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | invalid X-CD-Token â€” rejecting']" />
 
