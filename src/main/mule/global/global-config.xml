@@ -147,14 +147,14 @@
          LOCAL-RUN NOTE: apiId must be a NUMERIC API Manager id. Disabled below for
          local testing (no API Manager). Re-enable and set a real numeric api.id
          (+ -Danypoint.platform.client_id/-client_secret) before deploying to CloudHub. -->
-   
+   <!--
     <api-gateway:autodiscovery
         apiId="${api.id}"
         ignoreBasePath="true"
         doc:name="API Autodiscovery"
         doc:id="a1b2c3d4-0001-0001-0001-000000000005"
         flowRef="platform-lifecycle-orchestrator-main" />
-    
+    -->
 
     <!-- ===== Outbound HTTP Request Configs ===== -->
 
