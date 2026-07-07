@@ -39,7 +39,18 @@ http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/
 			<ee:variables >
 				<ee:set-variable variableName="flowName" ><![CDATA[flow.name]]></ee:set-variable>
 				<ee:set-variable variableName="externalTranId" ><![CDATA[attributes.headers['x-correlation-id'] default correlationId]]></ee:set-variable>
-				<ee:set-variable variableName="rawBody" ><![CDATA[write(payload, 'application/json') as Binary]]></ee:set-variable>
+				<!-- rawBody MUST be the EXACT inbound bytes: GitHub (/webhook) and the CD job
+				     (/webhook/cd-result) sign the raw request body, so the HMAC only matches if we
+				     hash those same bytes. Use the raw metadata selector "payload.^raw", which
+				     returns the original underlying binary of the body WITHOUT parsing it (it works
+				     even though the body is typed application/json). Do NOT use "payload as Binary"
+				     or an "output application/octet-stream" identity of payload: for a JSON body
+				     DataWeave parses the stream to an Object first and then fails with "Cannot coerce
+				     Object to Binary". And do NOT use write(payload,'application/json'), which
+				     re-serializes and pretty-prints, yielding different bytes so the signature never
+				     matches. The null guard handles bodyless routes (e.g. GET /jobs/{id}); repeatable
+				     streaming lets APIkit still parse the body afterwards. -->
+				<ee:set-variable variableName="rawBody" ><![CDATA[if (payload == null) ("" as Binary) else (payload.^raw as Binary)]]></ee:set-variable>
 				<ee:set-variable variableName="ghSignature" ><![CDATA[attributes.headers['x-hub-signature-256'] default '']]></ee:set-variable>
 				<ee:set-variable variableName="ghDelivery" ><![CDATA[attributes.headers['x-github-delivery'] default '']]></ee:set-variable>
 				<ee:set-variable variableName="ghEvent" ><![CDATA[attributes.headers['x-github-event'] default '']]></ee:set-variable>

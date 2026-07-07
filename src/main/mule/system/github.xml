@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="UTF-8"?>
+<?xml version="1.0" encoding="UTF-8"?>
 
 <mule xmlns:os="http://www.mulesoft.org/schema/mule/os" xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
 	xmlns:http="http://www.mulesoft.org/schema/mule/http"
@@ -83,10 +83,11 @@ output application/json
 					<ee:set-payload ><![CDATA[%dw 2.0
 output application/json
 import mergeWith from dw::core::Objects
+import nowUtc from dwl::dates
 ---
 payload mergeWith {
     revertPrUrl: vars.revertPrUrl,
-    updatedAt:   (now() >> |+00:00|) as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+    updatedAt:   nowUtc()
 }]]></ee:set-payload>
 				</ee:message>
 			</ee:transform>
@@ -147,11 +148,12 @@ output application/json
 				<ee:set-payload ><![CDATA[%dw 2.0
 output application/json
 import mergeWith from dw::core::Objects
+import nowUtc from dwl::dates
 ---
 payload mergeWith {
     prNumber:  vars.prNumber,
     prUrl:     vars.prUrl,
-    updatedAt: (now() >> |+00:00|) as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+    updatedAt: nowUtc()
 }]]></ee:set-payload>
 			</ee:message>
 		</ee:transform>
@@ -284,11 +286,12 @@ output application/json
 				<ee:set-payload ><![CDATA[%dw 2.0
 output application/json
 import mergeWith from dw::core::Objects
+import nowUtc from dwl::dates
 ---
 payload mergeWith {
     branchName: vars.branchName,
     commitSha:  vars.commitSha,
-    updatedAt:  (now() >> |+00:00|) as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+    updatedAt:  nowUtc()
 }]]></ee:set-payload>
 			</ee:message>
 		</ee:transform>

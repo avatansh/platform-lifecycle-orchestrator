@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+      xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core          http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/munit         http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+        http://www.mulesoft.org/schema/mule/munit-tools   http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd
+        http://www.mulesoft.org/schema/mule/ee/core       http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+    <!--
+        main-rawbody-capture-suite.xml
+        REGRESSION GUARD for the raw-body capture in platform-lifecycle-orchestrator-main.
+
+        Why this suite exists
+        ─────────────────────
+        The webhook auth flows (/webhook, /webhook/cd-result) verify an HMAC-SHA256 the sender
+        computed over the EXACT raw request bytes. The main flow captures those bytes into
+        vars.rawBody BEFORE APIkit parses the body, using the raw metadata selector "payload.^raw"
+        (the original underlying binary of the body). WRONG alternatives this guards against:
+          · "payload as Binary" / "output application/octet-stream" of payload — for an
+            application/json body DataWeave parses the stream to an Object first, then throws
+            "Cannot coerce Object to Binary" (breaks EVERY request).
+          · "write(payload,'application/json') as Binary" — parses then re-serialises and
+            pretty-prints, so the bytes differ from what the sender signed and every real
+            signature fails with 401.
+
+        The existing post-webhook / post-cd-result suites set vars.rawBody by hand, so they never
+        exercise the capture and could not catch either bug. This suite feeds the main flow a body
+        typed as application/json (so DataWeave sees it as JSON, exactly like a live request), drives
+        the REAL capture, and asserts the captured bytes are byte-identical to the source AND that an
+        HMAC over the captured bytes equals an HMAC over the source bytes (i.e. a genuine signed
+        webhook would validate rather than 401). APIkit's router is mocked to isolate the capture.
+
+        Note: the payload is an in-memory Binary (repeatable) rather than a live stream — MUnit's
+        getResourceAsStream yields a one-shot stream that is already closed by the time the capture
+        reads it. ".^raw" behaves identically on both, returning the original pre-parse bytes.
+    -->
+    <munit:config name="main-rawbody-capture-suite" doc:id="cap-suite-0001" />
+
+    <munit:test name="main-flow-captures-raw-body-verbatim-for-hmac"
+                doc:id="cap-test-0001"
+                description="The main flow captures the exact inbound JSON bytes into vars.rawBody via .^raw (no parse / re-serialisation), so HMAC webhook signatures validate">
+
+        <munit:behavior>
+            <!-- Isolate the capture: stop the event at the router so no real route/RAML/OS runs. -->
+            <munit-tools:mock-when doc:name="Mock APIkit router (isolate capture)"
+                                   processor="apikit:router">
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{ routed: true }]" mediaType="application/json" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+
+        <munit:execution>
+            <!-- Body typed as application/json, exactly like a live webhook request pre-APIkit. This
+                 is what breaks "payload as Binary" (DataWeave parses JSON to an Object first), so it
+                 truly exercises the .^raw fix. A compact, non-pretty body is used so any accidental
+                 re-serialisation would visibly diverge. -->
+            <munit:set-event doc:name="Set inbound HTTP-like webhook event (JSON body)">
+                <munit:payload value='#["{\"action\":\"opened\",\"pull_request\":{\"merged\":false}}" as Binary]'
+                               mediaType="application/json" />
+                <munit:attributes value="#[{
+                    method: 'POST',
+                    requestPath: '/api/v1/webhook',
+                    headers: {
+                        'x-github-event': 'pull_request',
+                        'x-github-delivery': 'cap-regression-0001'
+                    }
+                }]" mediaType="application/java" />
+            </munit:set-event>
+
+            <!-- Run the REAL capture path: the processor chain an HTTP request executes after the
+                 listener, including the "payload.^raw" set-variable that captures rawBody. -->
+            <flow-ref name="platform-lifecycle-orchestrator-main" doc:name="invoke main flow (real capture)" />
+
+            <!-- Decode the captured bytes to text for a readable byte-identity assertion, and HMAC
+                 both the captured bytes and the known source bytes: they must match for a genuine
+                 GitHub signature to pass downstream. -->
+            <ee:transform doc:name="DW source vs captured bytes + HMAC" doc:id="cap-test-0001-hmac">
+                <ee:variables>
+                    <ee:set-variable variableName="capturedBodyText"><![CDATA[%dw 2.0
+output text/plain
+---
+vars.rawBody]]></ee:set-variable>
+                    <ee:set-variable variableName="hmacOverSourceBytes"><![CDATA[%dw 2.0
+import dw::Crypto
+output text/plain
+---
+Crypto::HMACWith(
+    "test-webhook-secret-value-12345!" as Binary,
+    "{\"action\":\"opened\",\"pull_request\":{\"merged\":false}}" as Binary,
+    "HmacSHA256"
+)]]></ee:set-variable>
+                    <ee:set-variable variableName="hmacOverCapturedBytes"><![CDATA[%dw 2.0
+import dw::Crypto
+output text/plain
+---
+Crypto::HMACWith(
+    "test-webhook-secret-value-12345!" as Binary,
+    vars.rawBody,
+    "HmacSHA256"
+)]]></ee:set-variable>
+                </ee:variables>
+            </ee:transform>
+        </munit:execution>
+
+        <munit:validation>
+            <!-- 1) Captured bytes are byte-identical to the source (no parse / pretty-print / re-write). -->
+            <munit-tools:assert-that
+                doc:name="rawBody equals the exact source bytes"
+                expression="#[vars.capturedBodyText]"
+                is='#[MunitTools::equalTo("{\"action\":\"opened\",\"pull_request\":{\"merged\":false}}")]' />
+
+            <!-- 2) The security consequence: HMAC(captured) == HMAC(source), i.e. a real signed
+                    GitHub webhook would validate rather than 401. -->
+            <munit-tools:assert-that
+                doc:name="HMAC(captured) == HMAC(source)"
+                expression="#[vars.hmacOverCapturedBytes]"
+                is="#[MunitTools::equalTo(vars.hmacOverSourceBytes)]" />
+        </munit:validation>
+
+    </munit:test>
+
+</mule>

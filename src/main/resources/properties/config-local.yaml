@@ -5,7 +5,7 @@
 # =============================================================================
 
 api:
-  id: "21013255"          # numeric API Manager id (autodiscovery is disabled locally)
+  id: "REPLACE_WITH_API_MANAGER_ID"          # numeric API Manager id (autodiscovery is disabled locally)
 
 http:
   port: "8081"
@@ -18,7 +18,7 @@ anypoint:
   verify:
     # Local has no real CH2.0 deployment, so skip platform post-deploy confirmation and
     # trust the CI (cd-result) signal. Set "true" once deploying to a real environment.
-    enabled: "true"
+    enabled: "false"
 
 slack:
   channel: "#java17-upgrades"

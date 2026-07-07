@@ -18,6 +18,7 @@ http:
 mcp:
   serverName: "platform-lifecycle-orchestrator"
   serverVersion: "1.0.0"
+  endpointPath: "/mcp"                   # MCP path on the shared listener (REST is /api/v1/*); isolate at ingress/Omni Gateway
 
 github:
   apiBase: "https://api.github.com"      # constant (override in an env file only for GitHub Enterprise)

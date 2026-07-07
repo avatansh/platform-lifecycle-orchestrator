@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="UTF-8"?>
+<?xml version="1.0" encoding="UTF-8"?>
 <mule xmlns:http="http://www.mulesoft.org/schema/mule/http"
       xmlns:os="http://www.mulesoft.org/schema/mule/os"
       xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
@@ -181,12 +181,13 @@ output application/json
                                                 <ee:set-payload><![CDATA[%dw 2.0
 output application/json
 import mergeWith from dw::core::Objects
+import nowUtc from dwl::dates
 ---
 payload mergeWith {
     status:     "DEPLOYING",
     prUrl:      vars.prUrl,
     branchName: vars.mergedBranch,
-    updatedAt:  (now() >> |+00:00|) as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+    updatedAt:  nowUtc()
 }]]></ee:set-payload>
                                             </ee:message>
                                         </ee:transform>
@@ -270,7 +271,12 @@ output application/json
 import dw::Crypto
 output text/plain
 ---
-"sha256=" ++ Crypto::HMACWith(p('secure::github.webhookSecret') as Binary, vars.rawBody, "HmacSHA256")]]></ee:set-variable>
+// Null-safe: if rawBody is absent (e.g. an MUnit or caller that did not pass through
+// the main flow), skip HMAC and return "" so the signature branch is a no-match and the
+// X-CD-Token fallback authenticates. Real callbacks always carry rawBody.
+if (vars.rawBody != null)
+    "sha256=" ++ Crypto::HMACWith(p('secure::github.webhookSecret') as Binary, vars.rawBody as Binary, "HmacSHA256")
+else ""]]></ee:set-variable>
             </ee:variables>
         </ee:transform>
         <set-variable variableName="cdSignature"
@@ -440,6 +446,7 @@ output application/java
                                         <ee:set-payload><![CDATA[%dw 2.0
 output application/json
 import mergeWith from dw::core::Objects
+import nowUtc from dwl::dates
 ---
 vars.jobRec mergeWith {
     status:                 vars.deployVerdict,
@@ -447,8 +454,8 @@ vars.jobRec mergeWith {
     platformVerified:       (vars.verify.verified default false),
     platformStatus:         (vars.verify.status default null),
     platformRuntimeVersion: (vars.verify.runtimeVersion default null),
-    completedAt:            (now() >> |+00:00|) as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
-    updatedAt:              (now() >> |+00:00|) as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+    completedAt:            nowUtc(),
+    updatedAt:              nowUtc()
 }
 mergeWith (if (vars.deployVerdict == "FAILED_DEPLOY")
       { error: "CD reported success but platform status=" ++ (vars.verify.status default "UNKNOWN") }
@@ -571,13 +578,14 @@ output application/json
                                         <ee:set-payload><![CDATA[%dw 2.0
 output application/json
 import mergeWith from dw::core::Objects
+import nowUtc from dwl::dates
 ---
 vars.jobRec mergeWith {
     status:      "FAILED_DEPLOY",
     error:       (vars.cdError default "CD pipeline reported failure"),
     rolledBack:  true,
-    completedAt: (now() >> |+00:00|) as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
-    updatedAt:   (now() >> |+00:00|) as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+    completedAt: nowUtc(),
+    updatedAt:   nowUtc()
 }]]></ee:set-payload>
                                     </ee:message>
                                 </ee:transform>

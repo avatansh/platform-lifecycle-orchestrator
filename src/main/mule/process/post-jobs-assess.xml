@@ -76,32 +76,9 @@ http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/htt
 			<ee:variables >
 				<ee:set-variable variableName="treeAnalysis" ><![CDATA[%dw 2.0
 output application/java
-var appPath      = vars.coords.appPath default "."
-var nominalPom   = if (appPath == ".") "pom.xml" else (appPath ++ "/pom.xml")
-var treePaths    = vars.tree.tree map $.path
-// Use nominal path when present; otherwise fall back to first blob pom.xml at any depth
-var appPomPath   =
-    if (treePaths contains nominalPom) nominalPom
-    else ((vars.tree.tree filter ((item) ->
-            item."type" == "blob" and item.path matches /(?:^|\/)pom\.xml$/
-         ))[0].path) default nominalPom
-var maPath       = if (appPath == ".") "mule-artifact.json" else (appPath ++ "/mule-artifact.json")
-var maExists     = treePaths contains maPath
-// CI workflow: first .github/workflows/*.yml or *.yaml found in tree
-var ciPath       = ((vars.tree.tree filter ((item) ->
-                       item.path matches /\.github\/workflows\/[^\/]+\.ya?ml$/
-                   ))[0].path) default null
-// All property names from matrix gating + connectors — needed by step-6 ownerOf()
-var allProps     = ((valuesOf(vars.matrix.gating) map $.property)
-                    ++ (vars.matrix.connectors map $.property))
+import analyzeTree from dwl::treeAnalysis
 ---
-{
-    appPomPath:          appPomPath,
-    muleArtifactExists:  maExists,
-    muleArtifactPath:    if (maExists) maPath else null,
-    ciWorkflowPath:      ciPath,
-    allProps:            allProps
-}]]></ee:set-variable>
+analyzeTree(vars.tree, vars.coords.appPath, vars.matrix.gating, vars.matrix.connectors)]]></ee:set-variable>
 			</ee:variables>
 		</ee:transform>
 		<ee:transform doc:name="DW Spread Tree Analysis to flat vars" doc:id="78cd393b-63be-4872-a299-fdbd7cb5e9c6" >
@@ -120,47 +97,9 @@ var allProps     = ((valuesOf(vars.matrix.gating) map $.property)
 			<ee:variables >
 				<ee:set-variable variableName="appPomParsed" ><![CDATA[%dw 2.0
 output application/java
-import fromBase64 from dw::core::Binaries
-// Path normalisation: resolve relative parent paths against the directory of the current pom
-fun removeLastSeg(arr: Array): Array =
-    if (sizeOf(arr) <= 1) [] else arr[0 to (sizeOf(arr) - 2)]
-fun normalizePath(currentPomPath: String, relPath: String): String = do {
-    var dir      = if (currentPomPath contains "/")
-                       currentPomPath[0 to ((currentPomPath lastIndexOf "/") - 1)]
-                   else ""
-    var combined = if (dir == "") relPath else (dir ++ "/" ++ relPath)
-    var parts    = (combined splitBy "/") filter ($ != "" and $ != ".")
-    --- (parts reduce ((seg, acc = []) ->
-            if (seg == ".." and !isEmpty(acc)) removeLastSeg(acc)
-            else acc ++ [seg]
-        )) joinBy "/"
-}
-var rawBytes   = fromBase64(payload.content replace /[\r\n\t ]/ with "")
-var rawContent = rawBytes as String {encoding: "UTF-8"}
-var parsedPom  = read(rawContent, "application/xml")
-var parentEl      = parsedPom.project.parent
-var rawRel        = parentEl.relativePath default null
-// Maven default: <parent> present but no <relativePath> ⇒ ../pom.xml
-var relForResolve =
-    if (parentEl == null) null
-    else if (rawRel == null or (rawRel as String) == "") "../pom.xml"
-    else (rawRel as String)
-var resolved      = if (relForResolve == null) null
-                    else normalizePath(vars.appPomPath, relForResolve)
-// Directory-form relativePath (no .xml suffix) ⇒ append /pom.xml
-var resolvedFile  = if (resolved == null) null
-                    else if (resolved matches /.*pom\.xml$/) resolved
-                    else (resolved ++ "/pom.xml")
-// Only walk parents that live in THIS repo's tree; external/Exchange parents stop the chain
-var treePaths     = vars.tree.tree map $.path
-var nextPath      = if (resolvedFile != null and (treePaths contains resolvedFile)) resolvedFile
-                    else null
+import initChain from dwl::pomChain
 ---
-{
-    appPomText:      rawContent,
-    chain:           [{ path: vars.appPomPath, pom: parsedPom }],
-    nextParentPath:  nextPath
-}]]></ee:set-variable>
+initChain(payload.content, vars.appPomPath, (vars.tree.tree map $.path))]]></ee:set-variable>
 			</ee:variables>
 		</ee:transform>
 		<ee:transform doc:name="DW Spread App Pom to flat vars" doc:id="870bbd06-9277-4e20-914f-680a36a7b804" >
@@ -179,45 +118,9 @@ var nextPath      = if (resolvedFile != null and (treePaths contains resolvedFil
 					<ee:variables >
 						<ee:set-variable variableName="parent1Data" ><![CDATA[%dw 2.0
 output application/java
-import fromBase64 from dw::core::Binaries
-fun removeLastSeg(arr: Array): Array =
-    if (sizeOf(arr) <= 1) [] else arr[0 to (sizeOf(arr) - 2)]
-fun normalizePath(currentPomPath: String, relPath: String): String = do {
-    var dir      = if (currentPomPath contains "/")
-                       currentPomPath[0 to ((currentPomPath lastIndexOf "/") - 1)]
-                   else ""
-    var combined = if (dir == "") relPath else (dir ++ "/" ++ relPath)
-    var parts    = (combined splitBy "/") filter ($ != "" and $ != ".")
-    --- (parts reduce ((seg, acc = []) ->
-            if (seg == ".." and !isEmpty(acc)) removeLastSeg(acc)
-            else acc ++ [seg]
-        )) joinBy "/"
-}
-var rawBytes   = fromBase64(payload.content replace /[\r\n\t ]/ with "")
-var rawContent = rawBytes as String {encoding: "UTF-8"}
-var parsedPom  = read(rawContent, "application/xml")
-var parentEl      = parsedPom.project.parent
-var rawRel        = parentEl.relativePath default null
-// Maven default: <parent> present but no <relativePath> ⇒ ../pom.xml
-var relForResolve =
-    if (parentEl == null) null
-    else if (rawRel == null or (rawRel as String) == "") "../pom.xml"
-    else (rawRel as String)
-var resolved      = if (relForResolve == null) null
-                    else normalizePath(vars.nextParentPath, relForResolve)
-// Directory-form relativePath (no .xml suffix) ⇒ append /pom.xml
-var resolvedFile  = if (resolved == null) null
-                    else if (resolved matches /.*pom\.xml$/) resolved
-                    else (resolved ++ "/pom.xml")
-// Only walk parents that live in THIS repo's tree; external/Exchange parents stop the chain
-var treePaths     = vars.tree.tree map $.path
-var nextPath      = if (resolvedFile != null and (treePaths contains resolvedFile)) resolvedFile
-                    else null
+import appendParent from dwl::pomChain
 ---
-{
-    chain:          vars.chain ++ [{ path: vars.nextParentPath, pom: parsedPom }],
-    nextParentPath: nextPath
-}]]></ee:set-variable>
+appendParent(payload.content, vars.nextParentPath, vars.chain, (vars.tree.tree map $.path))]]></ee:set-variable>
 					</ee:variables>
 				</ee:transform>
 				<ee:transform doc:name="DW Spread Parent-1 to flat vars" doc:id="7cf2f4dc-94fc-4ae8-8db8-da4cc3f547b5" >
@@ -240,14 +143,9 @@ var nextPath      = if (resolvedFile != null and (treePaths contains resolvedFil
 					<ee:variables >
 						<ee:set-variable variableName="parent2Data" ><![CDATA[%dw 2.0
 output application/java
-import fromBase64 from dw::core::Binaries
-var rawBytes   = fromBase64(payload.content replace /[\r\n\t ]/ with "")
-var rawContent = rawBytes as String {encoding: "UTF-8"}
-var parsedPom  = read(rawContent, "application/xml")
+import appendParent from dwl::pomChain
 ---
-{
-    chain: vars.chain ++ [{ path: vars.nextParentPath, pom: parsedPom }]
-}]]></ee:set-variable>
+appendParent(payload.content, vars.nextParentPath, vars.chain, (vars.tree.tree map $.path))]]></ee:set-variable>
 					</ee:variables>
 				</ee:transform>
 				<ee:transform doc:name="DW Spread Grandparent to flat vars" doc:id="9728df41-7ce5-40de-bd9e-a2dc9a79748e" >
@@ -265,29 +163,9 @@ var parsedPom  = read(rawContent, "application/xml")
 			<ee:variables >
 				<ee:set-variable variableName="flags" ><![CDATA[%dw 2.0
 output application/java
-// Custom Java: any .java file anywhere in the repository tree
-var javaFiles      = vars.tree.tree filter ($.path matches /.*\.java$/)
-var customJava     = !isEmpty(javaFiles)
-// lookup(): scan raw app pom text as a fast heuristic; Mule XML scan would be more accurate
-// but requires fetching every flow file — deferred to a future step
-var lookupInPom    = vars.appPomText contains "lookup("
-// Warnings
-var truncWarning   = if (vars.tree.truncated default false)
-                         ["Repository tree was truncated by GitHub (>100k objects); some file paths may have been missed."]
-                     else []
-var javaWarning    = if (customJava)
-                         ["Custom Java classes detected (" ++ sizeOf(javaFiles) ++ " file(s)). Verify reflection and SecurityManager usage on JDK 17."]
-                     else []
-var lookupWarning  = if (lookupInPom)
-                         ["lookup() reference found in pom text; scan Mule XMLs to confirm DataWeave POJO lookup usage requiring getter/setter validation."]
-                     else []
+import scanFlags from dwl::assessment
 ---
-{
-    customJavaFound: customJava,
-    lookupFound:     lookupInPom,
-    hasApiPolicies:  false,    // TODO: query Anypoint API Manager for applied policies
-    warnings:        truncWarning ++ javaWarning ++ lookupWarning
-}]]></ee:set-variable>
+scanFlags(vars.tree, vars.appPomText)]]></ee:set-variable>
 			</ee:variables>
 		</ee:transform>
 		<ee:transform doc:name="DW Spread Flags to flat vars" doc:id="f0a06c26-0670-4f3a-a0b3-286da1d3f9fd" >
@@ -348,36 +226,9 @@ import fromBase64 from dw::core::Binaries
 			<ee:variables >
 				<ee:set-variable variableName="topoData" ><![CDATA[%dw 2.0
 output application/java
-// vars.chain = ordered list of fetched POMs, nearest-first:
-//   [{ path: "<app>/pom.xml", pom: <parsed> }, { path: "<parent>/pom.xml", pom },
-//    { path: "<bom>/pom.xml", pom }]   // 1..N entries, ANY folder names
-// classify by chain shape + whether the topmost is packaging=pom acting as a BOM
-var n         = sizeOf(vars.chain)
-var topIsBom  = (vars.chain[-1].pom.project.dependencyManagement?) != null
-var topology  = if (n >= 3 and topIsBom) "BOM_PARENT_APP"
-                else if (n == 2)          "PARENT_APP"
-                else if (n == 1)          "APP_STANDALONE"
-                else                      "MULTI_LEVEL"
-// propOf(pom, prop): read a Maven <properties> value by NAME. Matches on the key
-// as a plain String so dotted names (e.g. app.runtime.semver) and XML namespace
-// Key types resolve reliably — a plain properties[prop] dynamic selector does not.
-fun propOf(pom, prop) = do {
-    var pairs = (pom.project.properties default {}) pluck ((pv, pk) -> { name: (pk as String), value: pv })
-    --- (pairs filter ($.name == prop))[0].value default null
-}
-// ownerOf(prop): first POM in the chain (nearest-first) that declares the property.
-// Falls back to the app POM so an edit always has a home (it can be ADDED there).
-fun ownerOf(prop) =
-    ((vars.chain filter ((c) -> propOf(c.pom, prop) != null))[0])
-        .path default vars.chain[0].path
+import classifyTopology from dwl::treeAnalysis
 ---
-{
-  topology: topology,
-  appPomPath: vars.chain[0].path,
-  ownerByProperty: {
-    (vars.allProps map ((p) -> { (p): ownerOf(p) }))
-  }
-}]]></ee:set-variable>
+classifyTopology(vars.chain, vars.allProps)]]></ee:set-variable>
 			</ee:variables>
 		</ee:transform>
 		<ee:transform doc:name="DW Spread Topology to flat vars" doc:id="ee1316fd-efbf-4cba-804a-10218c3a49e5" >
@@ -390,167 +241,12 @@ fun ownerOf(prop) =
 			<ee:message >
 				<ee:set-payload ><![CDATA[%dw 2.0
 output application/json
-import * from dw::core::Strings
-// helpers: simple semver compare a < b
-fun toNums(v) = (v splitBy ".") map (trim($) replace /[^0-9].*/ with "") map (($ default "0") as Number)
-fun lt(a,b) = do { var x=toNums(a)
-    var y=toNums(b)
-    --- (x[0] default 0) < (y[0] default 0) or
-        ((x[0] default 0)==(y[0] default 0) and (x[1] default 0) < (y[1] default 0)) or
-        ((x[0] default 0)==(y[0] default 0) and (x[1] default 0)==(y[1] default 0) and (x[2] default 0)<(y[2] default 0)) }
-var m = vars.matrix
-// propOf(pom, prop): read a Maven <properties> value by NAME (String-key match) so
-// dotted names and XML namespace Key types resolve reliably.
-fun propOf(pom, prop) = do {
-    var pairs = (pom.project.properties default {}) pluck ((pv, pk) -> { name: (pk as String), value: pv })
-    --- (pairs filter ($.name == prop))[0].value default null
-}
-// rawProp(name): first non-null property value across the chain (nearest-first), no indirection.
-fun rawProp(name) = ((vars.chain map ((c) -> propOf(c.pom, name))) filter ($ != null))[0] default null
-// resolveProp(name): rawProp, following ONE level of Maven property-placeholder indirection when present.
-fun resolveProp(name) = do {
-    var v = rawProp(name)
-    --- if (v != null and ((v as String) matches /^\s*\$\{.+\}\s*$/))
-            rawProp((trim(v as String) replace /^\$\{/ with "" replace /\}$/ with ""))
-        else v
-}
-// ownerOfProp(name): path of the nearest chain pom that declares the property, else null.
-fun ownerOfProp(name) =
-    ((vars.chain filter ((c) -> propOf(c.pom, name) != null))[0]).path default null
-// findDep(g,a): nearest chain entry declaring dependency g:a in <dependencies> or
-// <dependencyManagement>, returned as { path, dep }, else null.
-fun findDep(g, a) =
-    (flatten(vars.chain map ((c) -> do {
-        var deps = ((c.pom.project.dependencies default {}).*dependency) default []
-        var mgmt = ((c.pom.project.dependencyManagement.dependencies default {}).*dependency) default []
-        --- (deps ++ mgmt) map ((d) -> { path: c.path, dep: d })
-    })) filter ((x) ->
-        (((x.dep.groupId default "") as String) == g) and
-        (((x.dep.artifactId default "") as String) == a)))[0] default null
-// findPlugin(g,a): nearest chain entry declaring plugin a in <build><plugins> or
-// <build><pluginManagement><plugins>, returned as { path, plugin }, else null.
-// groupId is optional (plugins are commonly identified by artifactId alone).
-fun findPlugin(g, a) =
-    (flatten(vars.chain map ((c) -> do {
-        var ps  = ((c.pom.project.build.plugins default {}).*plugin) default []
-        var pms = ((c.pom.project.build.pluginManagement.plugins default {}).*plugin) default []
-        --- (ps ++ pms) map ((p) -> { path: c.path, plugin: p })
-    })) filter ((x) ->
-        (((x.plugin.artifactId default "") as String) == a) and
-        (g == null or (((x.plugin.groupId default "") as String) == g))))[0] default null
-// resolveInline(r, ver, path, kind, coords): shared handling for an inline <version> found
-// on a dependency or plugin — null → skip; property-placeholder → resolve as pomProperty on
-// the referenced property; literal → emit `kind` carrying the given coordinate fields.
-fun resolveInline(r, ver, path, kind, coords) =
-    if (ver == null) { property: r.property, kind: null, file: null, installed: null }
-    else if ((ver as String) matches /^\s*\$\{.+\}\s*$/) do {
-        var pn = (trim(ver as String) replace /^\$\{/ with "" replace /\}$/ with "")
-        --- { property: pn, kind: "pomProperty", file: (ownerOfProp(pn) default path), installed: rawProp(pn) }
-    }
-    else
-        ({ property: r.property, kind: kind, file: path, installed: (ver as String) } ++ coords)
-// resolveRule(r): find installed value + owner file + edit kind. Resolution order:
-//   1) <properties> value (kind=pomProperty)
-//   2) inline <dependency>/<dependencyManagement> <version> (kind=depVersion)
-//   3) inline <plugin> <version> (kind=pluginVersion)
-// An inline value that is itself a property placeholder collapses back to a pomProperty edit.
-fun resolveRule(r) = do {
-    var pOwner = ownerOfProp(r.property)
-    var depHit = if ((r.groupId?) and (r.artifactId?)) findDep(r.groupId, r.artifactId) else null
-    var plgHit = if (r.pluginArtifactId?) findPlugin((r.pluginGroupId default null), r.pluginArtifactId) else null
-    ---
-    if (pOwner != null)
-        { property: r.property, kind: "pomProperty", file: pOwner, installed: rawProp(r.property) }
-    else if (depHit != null)
-        resolveInline(r, (depHit.dep.version default null), depHit.path, "depVersion",
-                      { groupId: r.groupId, artifactId: r.artifactId })
-    else if (plgHit != null)
-        resolveInline(r, (plgHit.plugin.version default null), plgHit.path, "pluginVersion",
-                      { pluginGroupId: (r.pluginGroupId default null), pluginArtifactId: r.pluginArtifactId })
-    else { property: r.property, kind: null, file: null, installed: null }
-}
-// all gating + connector rules → one list; each edit carries its OWN owner file + kind
-var allRules = (valuesOf(m.gating) ++ m.connectors)
-var propEdits = allRules
-    map ((r) -> do {
-        var res       = resolveRule(r)
-        var installed = res.installed
-        var needs     = if (installed == null or res.kind == null) false   // not present → skip
-                        else if (r.in?)  (r.in contains installed)
-                        else lt(installed, r.set)
-        ---
-        {
-            property:         res.property,
-            kind:             res.kind,
-            file:             res.file,
-            (groupId:          res.groupId)          if (res.groupId?),
-            (artifactId:       res.artifactId)       if (res.artifactId?),
-            (pluginGroupId:    res.pluginGroupId)    if (res.pluginGroupId?),
-            (pluginArtifactId: res.pluginArtifactId) if (res.pluginArtifactId?),
-            from:             installed,
-            to:               r.set,
-            change:           needs
-        } })
-    filter ($.change)
-// app-level edits — DIFF-AWARE: emit ONLY when the current value actually differs from target.
-var appPomText = vars.appPomText default ""
-// (1) MUnit <runtimeVersion> — literal only. A property-placeholder value is driven by a
-//     property, so it is handled by the property path above and must NOT be rewritten here.
-var munitCur         = (appPomText scan /<runtimeVersion>\s*([^<]+?)\s*<\/runtimeVersion>/)[0][1] default null
-var munitPlaceholder = (munitCur != null) and ((munitCur default "") matches /^\s*\$\{.+\}\s*$/)
-var munitNeeds       = (munitCur != null) and (!munitPlaceholder) and lt((munitCur as String), m.target.runtime)
-// (2) mule-artifact.json — bump minMuleVersion only if BELOW target (never downgrade); ensure
-//     java target support only if no current spec is already >= target (handles "1.8"/"8"/"11").
-var maCur      = vars.muleArtifactCurrent
-var maSpecs    = (maCur.javaSpecificationVersions default [])
-var maMinNeeds = (maCur != null) and lt((maCur.minMuleVersion default "0"), m.muleArtifact.minMuleVersion)
-var maJavaOk   = !isEmpty(maSpecs filter ((s) -> !lt((s as String), m.target.javaVersion)))
-var maJavaNeeds= (maCur != null) and (!maJavaOk)
-var maNeeds    = maMinNeeds or maJavaNeeds
-// Never downgrade minMuleVersion: keep current when it is already at/above target.
-var maToMin    = if (maMinNeeds) m.muleArtifact.minMuleVersion else (maCur.minMuleVersion default m.muleArtifact.minMuleVersion)
-// (3) CI workflow — bump only if the current java-version is below target (never downgrade).
-var ciCur      = ((vars.ciWorkflowText default "") scan /java-version:\s*['"]?([^'"\s]+)['"]?/)[0][1] default null
-var ciNeeds    = (ciCur != null) and lt((ciCur as String), m.target.javaVersion)
-var appEdits = []
-  ++ (if (munitNeeds)
-        [{ file: vars.chain[0].path, kind: "munitRuntimeVersion", from: munitCur, to: m.target.runtime }] else [])
-  ++ (if (maNeeds)
-        [{ file: vars.muleArtifactPath, kind: "muleArtifactJson",
-           from: { minMuleVersion: (maCur.minMuleVersion default null), javaSpecificationVersions: maSpecs },
-           to: { minMuleVersion: maToMin,
-                 javaSpecificationVersions: m.muleArtifact.javaSpecificationVersions } }] else [])
-  ++ (if (ciNeeds)
-        [{ file: vars.ciWorkflowPath, kind: "ciWorkflow", from: ciCur, to: m.target.javaVersion }] else [])
-var all = propEdits ++ appEdits
-// BLAST-RADIUS: property/dependency/plugin edits can land on a shared parent or BOM
-// pom (any chain entry other than the app's OWN module pom at chain[0]). Editing those
-// upgrades every module that inherits from them, so surface it as an explicit warning.
-var appPomPath     = vars.chain[0].path default ''
-var sharedPomFiles = ((propEdits map $.file) distinctBy $) filter ((f) -> f != appPomPath)
-var blastWarnings  = if (isEmpty(sharedPomFiles)) []
-    else [ ("BLAST RADIUS: this upgrade edits shared build file(s) [" ++ (sharedPomFiles joinBy ", ")
-            ++ "] that are inherited by other modules in the repository. Approving it upgrades EVERY module that inherits from these files, not just "
-            ++ (vars.appName default "this app")
-            ++ " — every inheriting module's build and MUnit tests must pass in CI. Review the wider impact before approving.") ]
+import buildAssessmentResult from dwl::assessment
 ---
-{
-  appName: vars.appName,
-  currentRuntime: resolveProp("app.runtime") default resolveProp("app.runtime.semver") default "unknown",
-  currentJavaVersion: resolveProp("java.version") default resolveProp("maven.compiler.source") default resolveProp("maven.compiler.target") default "unknown",
-  changePlan: {
-    targetRuntime:     m.target.runtime,
-    targetJavaVersion: m.target.javaVersion,
-    topology:          vars.topology,
-    headSha:           vars.headSha,
-    fileEdits:         all,
-    filesToChange:     (all map $.file) distinctBy $,
-    hasApiPolicies:    vars.hasApiPolicies default false,
-    hasCustomJavaCode: vars.customJavaFound default false,
-    hasLookupFunction: vars.lookupFound default false
-  },
-  warnings: (vars.warnings default []) ++ blastWarnings
-}]]></ee:set-payload>
+buildAssessmentResult(
+    vars.matrix, vars.chain, vars.appPomText, vars.muleArtifactCurrent, vars.muleArtifactPath,
+    vars.ciWorkflowText, vars.ciWorkflowPath, vars.appName, vars.topology, vars.headSha,
+    vars.hasApiPolicies, vars.customJavaFound, vars.lookupFound, vars.warnings)]]></ee:set-payload>
 			</ee:message>
 		</ee:transform>
 		<logger level="DEBUG" doc:name="LOG DEBUG pf-assess-app done" doc:id="4e74d6e1-36c1-4409-a36d-2a6db4b1a704" message="#[output application/java --- 'LOG DEBUG | flow=pf-assess-app | correlationId=' ++ correlationId ++ ' | app=' ++ vars.appName ++ ' | topology=' ++ (vars.topology default 'unknown') ++ ' | fileEdits=' ++ sizeOf(payload.changePlan.fileEdits default []) ++ ' | warnings=' ++ sizeOf(payload.warnings default [])]" />

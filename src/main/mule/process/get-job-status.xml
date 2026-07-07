@@ -49,36 +49,9 @@ http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/
 			<ee:message >
 				<ee:set-payload ><![CDATA[%dw 2.0
 output application/json
-// Human-readable message + recommended poll interval keyed by status.
-// nextPollSeconds = 0 means terminal — the caller should stop polling.
-var statusMeta = {
-    PROCESSING:    { message: "Upgrade accepted and queued.",                               nextPollSeconds: 5  },
-    ASSESSING:     { message: "Analyzing the repository and computing the change plan.",    nextPollSeconds: 5  },
-    COMMITTING:    { message: "Applying transforms and committing changes to a branch.",    nextPollSeconds: 5  },
-    COMMITTED:     { message: "Changes committed; opening a pull request.",                 nextPollSeconds: 5  },
-    PR_OPEN:       { message: "Pull request is open and ready for review/merge.",           nextPollSeconds: 0  },
-    DEPLOYING:     { message: "PR merged; CI/CD is building and deploying.",                nextPollSeconds: 10 },
-    DEPLOYED:      { message: "Upgrade deployed successfully.",                             nextPollSeconds: 0  },
-    FAILED_ASSESS: { message: "Assessment failed. See error for details.",                  nextPollSeconds: 0  },
-    FAILED_COMMIT: { message: "Commit/transform stage failed. See error for details.",      nextPollSeconds: 0  },
-    FAILED_CI:     { message: "CI build/tests failed after merge. See error for details.",  nextPollSeconds: 0  },
-    FAILED_DEPLOY: { message: "Deployment failed. See error for details.",                  nextPollSeconds: 0  },
-    FAILED_INTERRUPTED: { message: "Upgrade was interrupted before completion (runtime restart/crash) and was automatically failed. Re-submit to retry.", nextPollSeconds: 0 }
-}
-var meta = statusMeta[payload.status]
-           default { message: ("Status: " ++ (payload.status default "UNKNOWN")), nextPollSeconds: 10 }
+import buildJobStatus from dwl::jobStatus
 ---
-{
-    jobId:           payload.jobId,
-    status:          payload.status,
-    message:         meta.message,
-    nextPollSeconds: meta.nextPollSeconds
-}
-++ (if (payload.branchName  != null) { branchName:  payload.branchName  } else {})
-++ (if (payload.prUrl       != null) { prUrl:        payload.prUrl       } else {})
-++ (if (payload.prNumber    != null) { prNumber:     payload.prNumber    } else {})
-++ (if (payload.completedAt != null) { completedAt:  payload.completedAt } else {})
-++ (if (payload.error       != null) { error:        payload.error       } else {})]]></ee:set-payload>
+buildJobStatus(payload)]]></ee:set-payload>
 			</ee:message>
 		</ee:transform>
 		<logger level="DEBUG" doc:name="LOG DEBUG Status Found" doc:id="c052784d-bb53-40f6-a228-a7663b245d6a" message="#[output application/java --- 'LOG DEBUG | flow=pf-get-job-status | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | status=' ++ payload.status]" />

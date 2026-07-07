@@ -131,6 +131,21 @@
 					<target>17</target>
 				</configuration>
 			</plugin>
+
+			<!-- Runs the plain-JUnit contract drift guard (src/test/java) in the test phase,
+			     alongside MUnit (which runs via munit-maven-plugin). The mule-application
+			     lifecycle already binds Surefire's default-test execution; declaring the plugin
+			     here just pins the version (3.2.5, needed for JUnit 5 auto-detection on Java 17). -->
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-surefire-plugin</artifactId>
+				<version>3.2.5</version>
+				<configuration>
+					<includes>
+						<include>**/*Test.java</include>
+					</includes>
+				</configuration>
+			</plugin>
 		</plugins>
 		<pluginManagement>
 			<plugins>
@@ -241,6 +256,22 @@
 			<artifactId>munit-tools</artifactId>
 			<version>${munit.version}</version>
 			<classifier>mule-plugin</classifier>
+			<scope>test</scope>
+		</dependency>
+
+		<!-- Plain-JUnit contract drift guard (src/test/java) — asserts the MCP tools'
+		     advertised parameters-schema stays structurally in sync with the canonical
+		     schema/*.json single-source-of-truth files. Test-scope only; never packaged. -->
+		<dependency>
+			<groupId>org.junit.jupiter</groupId>
+			<artifactId>junit-jupiter</artifactId>
+			<version>5.10.2</version>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>com.fasterxml.jackson.core</groupId>
+			<artifactId>jackson-databind</artifactId>
+			<version>2.17.2</version>
 			<scope>test</scope>
 		</dependency>
 		<dependency>

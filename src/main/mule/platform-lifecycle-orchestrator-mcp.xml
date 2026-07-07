@@ -96,15 +96,21 @@
 				<ee:set-variable variableName="appName" ><![CDATA[payload.appName]]></ee:set-variable>
 				<ee:set-variable variableName="environment" ><![CDATA[payload.environment]]></ee:set-variable>
 				<ee:set-variable variableName="jiraTicketId" ><![CDATA[payload.jiraTicketId default null]]></ee:set-variable>
+				<!-- MCP flows do not pass through the REST main flow, so flowName / externalTranId
+				     are unset here; set them explicitly so the loggers below never concat a null. -->
+				<ee:set-variable variableName="flowName" ><![CDATA[flow.name]]></ee:set-variable>
+				<ee:set-variable variableName="externalTranId" ><![CDATA[correlationId]]></ee:set-variable>
 			</ee:variables>
 		</ee:transform>
         <!-- Map MCP tool parameters to variables consumed by the shared sub-flow -->
 
-        <logger level="INFO" doc:name="LOG INFO Request Received" doc:id="a8d9977f-5d56-4505-ae43-6206eccc2153" message="#[output application/java --- 'REQUEST RECEIVED | flow=' ++ vars.flowName ++ ' | correlationId=' ++ correlationId ++ ' | externalTranId=' ++ vars.externalTranId ++ ' | method=' ++ attributes.method ++ ' | path=' ++ attributes.requestPath]" />
+        <logger level="INFO" doc:name="LOG INFO Request Received" doc:id="a8d9977f-5d56-4505-ae43-6206eccc2153" message="#[output application/java --- 'REQUEST RECEIVED | flow=' ++ (vars.flowName default 'assess_app-mcp-tool') ++ ' | correlationId=' ++ correlationId ++ ' | externalTranId=' ++ (vars.externalTranId default correlationId) ++ ' | transport=mcp | tool=assess_app']" />
 		<flow-ref name="pf-assess-app"
                   doc:name="pf-assess-app"
                   doc:id="mc1a0001-0001-0001-0001-000000000006" />
-		<logger level="INFO" doc:name="LOG INFO Response Sent" doc:id="f6e21855-0bd9-4216-88cf-1797d9a3ee97" message="#[output application/java --- 'RESPONSE SENT | flow=' ++ vars.flowName ++ ' | correlationId=' ++ correlationId ++ ' | status=' ++ vars.httpStatus default 200]" />
+        <logger level="INFO" doc:name="LOG INFO Response Sent" doc:id="f6e21855-0bd9-4216-88cf-1797d9a3ee97" message="#[output application/java --- 'RESPONSE SENT | flow=' ++ (vars.flowName default 'assess_app-mcp-tool') ++ ' | correlationId=' ++ correlationId ++ ' | status=' ++ ((vars.httpStatus default 200) as String)]" />
+
+        <error-handler ref="mcp-error-handler" doc:name="MCP Error Handler" doc:id="mc1a0001-0001-0001-0001-000000000009" />
 
     </flow>
 
@@ -138,11 +144,11 @@
     },
     "jiraTicketId": {
       "type": "string",
-      "description": "Jira ticket ID for this migration effort. Progress updates will be posted to this ticket."
+      "description": "Optional. Jira ticket ID to link this migration to. When present, progress and decision comments are posted to it and PR/Slack notifications include a link. When absent, the job still runs end-to-end; a migration ticket is auto-created when Jira auto-create is enabled, otherwise Jira integration is simply skipped."
     },
     "approvedChangePlan": {
       "type": "object",
-      "description": "The changePlan object returned by assess_app, reviewed and approved by the user.",
+      "description": "Optional, audit-only. The human-approved plan from assess_app, recorded on the job record for traceability. The upgrade worker re-runs assessment internally and drives the actual edits from its own freshly-computed fileEdits, so this value is NOT trusted and omitting it does not change the upgrade outcome.",
       "properties": {
         "targetRuntime":     { "type": "string" },
         "targetJavaVersion": { "type": "string" },
@@ -188,13 +194,23 @@
 				<ee:set-variable variableName="environment"><![CDATA[payload.environment]]></ee:set-variable>
 				<ee:set-variable variableName="jiraTicketId"><![CDATA[payload.jiraTicketId default null]]></ee:set-variable>
 				<ee:set-variable variableName="approvedChangePlan" ><![CDATA[payload.approvedChangePlan]]></ee:set-variable>
+				<!-- MCP flows do not pass through the REST main flow, so flowName / externalTranId
+				     are unset here; set them explicitly so the loggers below never concat a null. -->
+				<ee:set-variable variableName="flowName" ><![CDATA[flow.name]]></ee:set-variable>
+				<ee:set-variable variableName="externalTranId" ><![CDATA[correlationId]]></ee:set-variable>
 			</ee:variables>
 		</ee:transform>
         <!-- Map MCP tool parameters to variables consumed by the shared sub-flow -->
 
+        <logger level="INFO" doc:name="LOG INFO Request Received" doc:id="mc2b0002-0002-0002-0002-000000000005" message="#[output application/java --- 'REQUEST RECEIVED | flow=' ++ (vars.flowName default 'start_upgrade-mcp-tool') ++ ' | correlationId=' ++ correlationId ++ ' | externalTranId=' ++ (vars.externalTranId default correlationId) ++ ' | transport=mcp | tool=start_upgrade | app=' ++ (vars.appName default '?')]" />
+
         <flow-ref name="pf-start-upgrade"
                   doc:name="pf-start-upgrade"
                   doc:id="mc2b0002-0002-0002-0002-000000000007" />
+
+        <logger level="INFO" doc:name="LOG INFO Response Sent" doc:id="mc2b0002-0002-0002-0002-000000000008" message="#[output application/java --- 'RESPONSE SENT | flow=' ++ (vars.flowName default 'start_upgrade-mcp-tool') ++ ' | correlationId=' ++ correlationId ++ ' | status=' ++ ((vars.httpStatus default 200) as String)]" />
+
+        <error-handler ref="mcp-error-handler" doc:name="MCP Error Handler" doc:id="mc2b0002-0002-0002-0002-000000000009" />
 
     </flow>
 
@@ -211,9 +227,12 @@
             doc:id="mc3c0003-0003-0003-0003-000000000002">
             <mcp:description>
                 Retrieve the current status of a platform migration job submitted by start_upgrade.
-                Poll this tool until status reaches a terminal state: DEPLOYED (success),
-                FAILED (error — inspect the error field), or COMMITTED (changes on branch, awaiting PR merge).
-                When status is PR_OPEN the prUrl field contains the GitHub pull request link.
+                Poll this tool until status reaches a terminal state: DEPLOYED (success), ROLLED_BACK,
+                or any FAILED_* state — FAILED_ASSESS, FAILED_COMMIT, FAILED_CI, FAILED_DEPLOY,
+                FAILED_INTERRUPTED (error — inspect the error field). Non-terminal (keep polling)
+                states include PROCESSING, ASSESSING, COMMITTING, COMMITTED, PR_OPEN and DEPLOYING.
+                When status is PR_OPEN the prUrl field contains the GitHub pull request link. Honour
+                the nextPollSeconds hint in the response as the suggested wait before polling again.
             </mcp:description>
             <mcp:parameters-schema><![CDATA[{
   "type": "object",
@@ -230,15 +249,37 @@
             </mcp:responses>
         </mcp:tool-listener>
 
-        <!-- Map MCP tool parameters to variables consumed by the shared sub-flow -->
-        <set-variable variableName="jobId"
-                      value="#[payload.jobId]"
-                      doc:name="PV SET jobId"
-                      doc:id="mc3c0003-0003-0003-0003-000000000003" />
+        <!-- Map MCP tool parameters to variables consumed by the shared sub-flow.
+             MCP flows do not pass through the REST main flow, so flowName / externalTranId
+             are unset here; set them explicitly so the loggers below never concat a null. -->
+        <ee:transform doc:name="PV SET vars" doc:id="mc3c0003-0003-0003-0003-000000000003">
+			<ee:message />
+			<ee:variables>
+				<ee:set-variable variableName="jobId"><![CDATA[payload.jobId]]></ee:set-variable>
+				<ee:set-variable variableName="flowName"><![CDATA[flow.name]]></ee:set-variable>
+				<ee:set-variable variableName="externalTranId"><![CDATA[correlationId]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+
+        <logger level="INFO" doc:name="LOG INFO Request Received" doc:id="mc3c0003-0003-0003-0003-000000000005" message="#[output application/java --- 'REQUEST RECEIVED | flow=' ++ (vars.flowName default 'get_job_status-mcp-tool') ++ ' | correlationId=' ++ correlationId ++ ' | externalTranId=' ++ (vars.externalTranId default correlationId) ++ ' | transport=mcp | tool=get_job_status | jobId=' ++ (vars.jobId default '?')]" />
 
         <flow-ref name="pf-get-job-status"
                   doc:name="pf-get-job-status"
                   doc:id="mc3c0003-0003-0003-0003-000000000004" />
 
+        <logger level="INFO" doc:name="LOG INFO Response Sent" doc:id="mc3c0003-0003-0003-0003-000000000006" message="#[output application/java --- 'RESPONSE SENT | flow=' ++ (vars.flowName default 'get_job_status-mcp-tool') ++ ' | correlationId=' ++ correlationId ++ ' | status=' ++ ((vars.httpStatus default 200) as String)]" />
+
+        <error-handler ref="mcp-error-handler" doc:name="MCP Error Handler" doc:id="mc3c0003-0003-0003-0003-000000000007" />
+
     </flow>
+
+    <!--
+        Shared error handler for all MCP tool flows. MCP tools do NOT route through the REST
+        main flow, so they cannot reuse global-error-handler (which sets vars.httpStatus for the
+        HTTP listener). Instead this handler returns a clean, consistent error envelope
+        { status: "ERROR", code, message, correlationId } as the tool response — mirroring the
+        REST envelope — and, critically, sanitizes unexpected errors so internal details
+        (stack traces, DW expression errors, etc.) are never leaked to the calling agent.
+        Uses on-error-continue so the connector always returns a well-formed JSON tool result.
+    -->
 </mule>

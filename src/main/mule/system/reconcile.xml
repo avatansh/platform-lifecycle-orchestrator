@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="UTF-8"?>
+<?xml version="1.0" encoding="UTF-8"?>
 <mule xmlns:http="http://www.mulesoft.org/schema/mule/http"
       xmlns:os="http://www.mulesoft.org/schema/mule/os"
       xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
@@ -71,7 +71,8 @@
                                     <ee:message><ee:set-payload><![CDATA[%dw 2.0
 output application/json
 import mergeWith from dw::core::Objects
---- payload mergeWith { status: "DEPLOYING", updatedAt: (now() >> |+00:00|) as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"} }]]></ee:set-payload></ee:message>
+import nowUtc from dwl::dates
+--- payload mergeWith { status: "DEPLOYING", updatedAt: nowUtc() }]]></ee:set-payload></ee:message>
                                 </ee:transform>
                                 <os:store key="#[vars.k]" objectStore="jobStore"
                                           doc:name="OS Store DEPLOYING" doc:id="pfrc0001-0001-0001-0001-000000000019">
@@ -93,9 +94,10 @@ import mergeWith from dw::core::Objects
                                     <ee:message><ee:set-payload><![CDATA[%dw 2.0
 output application/json
 import mergeWith from dw::core::Objects
+import nowUtc from dwl::dates
 --- payload mergeWith { status: "FAILED_DEPLOY", error: "PR was closed without merging",
-    completedAt: (now() >> |+00:00|) as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
-    updatedAt: (now() >> |+00:00|) as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"} }]]></ee:set-payload></ee:message>
+    completedAt: nowUtc(),
+    updatedAt: nowUtc() }]]></ee:set-payload></ee:message>
                                 </ee:transform>
                                 <os:store key="#[vars.k]" objectStore="jobStore"
                                           doc:name="OS Store FAILED_DEPLOY" doc:id="pfrc0001-0001-0001-0001-000000000025">
@@ -151,10 +153,11 @@ import mergeWith from dw::core::Objects
                                             <ee:message><ee:set-payload><![CDATA[%dw 2.0
 output application/json
 import mergeWith from dw::core::Objects
+import nowUtc from dwl::dates
 --- payload mergeWith { status: "DEPLOYED", platformVerified: true, platformStatus: (vars.verify.status default null),
     platformRuntimeVersion: (vars.verify.runtimeVersion default null),
-    completedAt: (now() >> |+00:00|) as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
-    updatedAt: (now() >> |+00:00|) as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"} }]]></ee:set-payload></ee:message>
+    completedAt: nowUtc(),
+    updatedAt: nowUtc() }]]></ee:set-payload></ee:message>
                                         </ee:transform>
                                         <os:store key="#[vars.k]" objectStore="jobStore"
                                                   doc:name="OS Store DEPLOYED" doc:id="pfrc0001-0001-0001-0001-000000000051">
@@ -178,11 +181,12 @@ import mergeWith from dw::core::Objects
                                             <ee:message><ee:set-payload><![CDATA[%dw 2.0
 output application/json
 import mergeWith from dw::core::Objects
+import nowUtc from dwl::dates
 --- payload mergeWith { status: "FAILED_DEPLOY",
     error: "cd-result timed out; platform status=" ++ (vars.verify.status default "UNKNOWN"),
     platformVerified: true, platformStatus: (vars.verify.status default null),
-    completedAt: (now() >> |+00:00|) as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
-    updatedAt: (now() >> |+00:00|) as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"} }]]></ee:set-payload></ee:message>
+    completedAt: nowUtc(),
+    updatedAt: nowUtc() }]]></ee:set-payload></ee:message>
                                         </ee:transform>
 										<os:store key="#[vars.k]" objectStore="jobStore"
                                                   doc:name="OS Store FAILED_DEPLOY" doc:id="pfrc0001-0001-0001-0001-000000000061">
@@ -233,10 +237,11 @@ import mergeWith from dw::core::Objects
                             <ee:message><ee:set-payload><![CDATA[%dw 2.0
 output application/json
 import mergeWith from dw::core::Objects
+import nowUtc from dwl::dates
 --- payload mergeWith { status: "FAILED_INTERRUPTED",
     error: "Upgrade was interrupted before completion (likely a runtime restart or crash) and did not advance within the stale threshold. Automatically failed by the reconciler; re-submit to retry.",
-    completedAt: (now() >> |+00:00|) as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
-    updatedAt: (now() >> |+00:00|) as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"} }]]></ee:set-payload></ee:message>
+    completedAt: nowUtc(),
+    updatedAt: nowUtc() }]]></ee:set-payload></ee:message>
                         </ee:transform>
                         <os:store key="#[vars.k]" objectStore="jobStore"
                                   doc:name="OS Store FAILED_INTERRUPTED" doc:id="pfrc0001-0001-0001-0001-000000000103">

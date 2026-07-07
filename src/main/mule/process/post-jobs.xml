@@ -46,8 +46,10 @@ http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/htt
                   doc:name="pf-start-upgrade"
                   doc:id="f6a7b8c9-0006-0006-0006-000000000007" />
 
-        <!-- Set HTTP 202 Accepted â€” REST-only concern; MCP callers do not need this -->
-        <ee:transform doc:name="DW Set 202 Status"
+        <!-- HTTP status — REST-only concern; MCP callers ignore vars.httpStatus.
+             200 when the pre-flight short-circuited (ALREADY_UPGRADED, no job started);
+             202 Accepted when an upgrade job was created and the async pipeline kicked off. -->
+        <ee:transform doc:name="DW Set HTTP Status (200/202)"
                       doc:id="f6a7b8c9-0006-0006-0006-000000000008">
             <ee:message>
                 <ee:set-payload><![CDATA[%dw 2.0
@@ -56,7 +58,7 @@ output application/json
 payload]]></ee:set-payload>
             </ee:message>
             <ee:variables>
-                <ee:set-variable variableName="httpStatus"><![CDATA[202]]></ee:set-variable>
+                <ee:set-variable variableName="httpStatus"><![CDATA[if ((payload.status default '') == 'ALREADY_UPGRADED') 200 else 202]]></ee:set-variable>
             </ee:variables>
         </ee:transform>
 
@@ -66,11 +68,57 @@ payload]]></ee:set-payload>
          Requires: vars.appName, vars.environment, vars.jiraTicketId (opt), vars.approvedChangePlan (opt for audit)
          Returns:  payload = { jobId }  (synchronous â€” 202 Accepted)
          Kicks off an <async> upgrade pipeline after returning the jobId. -->
-	<sub-flow name="pf-start-upgrade" doc:id="22a1d67e-173f-468a-9948-1ccfaba2406e" doc:description="Generate jobId, acquire single-flight lock, store job, return 202, then run async pipeline." >
+	<sub-flow name="pf-start-upgrade" doc:id="22a1d67e-173f-468a-9948-1ccfaba2406e" doc:description="Pre-flight assess synchronously; short-circuit when already upgraded or repo missing; else lock, persist job, return 202 and run the async pipeline." >
 		<logger level="INFO" doc:name="LOG INFO pf-start-upgrade enter" doc:id="aa5193cf-9e67-43c5-94d7-a185b6aad20f" message="#[output application/java --- 'LOG INFO | flow=pf-start-upgrade | correlationId=' ++ correlationId ++ ' | app=' ++ (vars.appName default 'unknown') ++ ' | env=' ++ (vars.environment default 'unknown')]" />
 		<set-variable value="#['job-' ++ uuid()]" doc:name="PV SET jobId" doc:id="97690486-3036-4574-b1b5-25a42592facd" variableName="jobId" />
-		<flow-ref doc:name="pf-resolve-coordinates" doc:id="bb7f03c3-a411-4abd-b009-f24ba3f9c50f" name="pf-resolve-coordinates" />
-		<logger level="INFO" doc:name="LOG INFO coords resolved" doc:id="63b812b3-7273-4dce-a99f-438e47d3c42f" message="#[output application/java --- 'LOG INFO | flow=pf-start-upgrade | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | owner=' ++ (vars.coords.owner default '') ++ ' | repo=' ++ (vars.coords.repo default '')]" />
+		<!-- PRE-FLIGHT (synchronous): assess BEFORE creating a job, acquiring the lock, or
+		     entering the async pipeline. This lets us (a) fail fast with 404 when the app cannot
+		     be located on GitHub and (b) short-circuit with a 200 "already in desired state"
+		     response when there is nothing to upgrade — the async scope is never entered in
+		     either case. pf-assess-app resolves coordinates (raising VALIDATION:APP_NOT_REGISTERED
+		     when the app is neither registered nor derivable) and computes the change plan. -->
+		<try doc:name="TRY pre-flight assessment" doc:id="pfsu0001-0001-0001-0001-000000000001">
+			<flow-ref doc:name="pf-assess-app (pre-flight)" doc:id="pfsu0001-0001-0001-0001-000000000002" name="pf-assess-app" />
+			<error-handler>
+				<on-error-continue type="HTTP:NOT_FOUND" enableNotifications="false" logException="false" doc:name="repo not found =&gt; APP_NOT_FOUND" doc:id="pfsu0001-0001-0001-0001-000000000003">
+					<logger level="WARN" doc:name="LOG WARN repo not found" doc:id="pfsu0001-0001-0001-0001-000000000004" message="#[output application/java --- 'LOG WARN | flow=pf-start-upgrade | correlationId=' ++ correlationId ++ ' | app=' ++ (vars.appName default '?') ++ ' | repo not found on GitHub (' ++ (vars.coords.owner default '?') ++ '/' ++ (vars.coords.repo default '?') ++ ')']" />
+					<raise-error type="VALIDATION:APP_NOT_FOUND" doc:name="RAISE VALIDATION:APP_NOT_FOUND" doc:id="pfsu0001-0001-0001-0001-000000000005" description="#[output application/java --- 'App &quot;' ++ (vars.appName default '?') ++ '&quot; could not be found on GitHub (resolved to ' ++ (vars.coords.owner default '?') ++ '/' ++ (vars.coords.repo default '?') ++ '). Verify the app name, its app-registry.yaml entry, or the owner/repo supplied in the request.']" />
+				</on-error-continue>
+			</error-handler>
+		</try>
+		<set-variable value="#[payload]" doc:name="PV SET assessment" doc:id="pfsu0001-0001-0001-0001-000000000006" variableName="assessment" />
+		<set-variable value="#[payload.changePlan]" doc:name="PV SET changePlan" doc:id="pfsu0001-0001-0001-0001-000000000007" variableName="changePlan" />
+		<choice doc:name="CHOICE already in desired state?" doc:id="pfsu0001-0001-0001-0001-000000000008" doc:description="Short-circuit when the assessment found no file edits — nothing to upgrade">
+			<when expression="#[isEmpty((vars.changePlan.fileEdits default []))]" doc:id="pfsu0001-0001-0001-0001-000000000009">
+				<logger level="INFO" doc:name="LOG INFO already upgraded" doc:id="pfsu0001-0001-0001-0001-000000000010" message="#[output application/java --- 'LOG INFO | flow=pf-start-upgrade | correlationId=' ++ correlationId ++ ' | app=' ++ (vars.appName default '?') ++ ' | ALREADY_UPGRADED (no file edits) | runtime=' ++ (vars.assessment.currentRuntime default '?') ++ ' | java=' ++ (vars.assessment.currentJavaVersion default '?')]" />
+				<ee:transform doc:name="DW Build ALREADY_UPGRADED response" doc:id="pfsu0001-0001-0001-0001-000000000011">
+					<ee:message>
+						<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+var owner  = vars.coords.owner  default ""
+var repo   = vars.coords.repo   default ""
+var branch = vars.coords.defaultBranch default ""
+---
+{
+    status:             "ALREADY_UPGRADED",
+    appName:            vars.appName,
+    environment:        vars.environment,
+    currentRuntime:     vars.assessment.currentRuntime default "unknown",
+    currentJavaVersion: vars.assessment.currentJavaVersion default "unknown",
+    targetRuntime:      vars.changePlan.targetRuntime,
+    targetJavaVersion:  vars.changePlan.targetJavaVersion,
+    message:            ("App '" ++ (vars.appName default "?") ++ "' is already in the desired state (runtime "
+                         ++ (vars.assessment.currentRuntime default "unknown") ++ ", Java "
+                         ++ (vars.assessment.currentJavaVersion default "unknown") ++ "). No upgrade required."),
+    repoUrl:            ("https://github.com/" ++ owner ++ "/" ++ repo),
+    branchUrl:          ("https://github.com/" ++ owner ++ "/" ++ repo ++ "/tree/" ++ branch),
+    branch:             branch,
+    warnings:           vars.assessment.warnings default []
+}]]></ee:set-payload>
+					</ee:message>
+				</ee:transform>
+			</when>
+			<otherwise doc:id="pfsu0001-0001-0001-0001-000000000012">
 		<!-- os:retrieve treats a NULL os:default-value as "no default" and throws
 		     OS:KEY_NOT_FOUND on a missing key. The first upgrade for an app has no lock yet,
 		     so default to false (no lock held) instead of null. -->
@@ -93,6 +141,7 @@ payload]]></ee:set-payload>
 			<ee:message >
 				<ee:set-payload ><![CDATA[%dw 2.0
 output application/json
+import nowUtc from dwl::dates
 ---
 {
     jobId:              vars.jobId,
@@ -102,8 +151,9 @@ output application/json
     jiraTicketId:       vars.jiraTicketId,
     approvedChangePlan: vars.approvedChangePlan,
     coords:             vars.coords,
-    createdAt:          (now() >> |+00:00|) as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
-    updatedAt:          (now() >> |+00:00|) as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
+    changePlan:         vars.changePlan,
+    createdAt:          nowUtc(),
+    updatedAt:          nowUtc(),
     prUrl:              null,
     branchName:         null,
     completedAt:        null,
@@ -124,11 +174,8 @@ output application/json
 		<async doc:name="ASYNC upgrade pipeline" doc:id="f0ee3f5d-4386-4b12-aa3a-64de565a5b05" >
 			<try doc:name="TRY upgrade stages" doc:id="f7708698-783d-4357-8bdb-6a8b7ba13548" >
 				<flow-ref doc:name="pf-jira-create-issue" doc:id="pfji0001-0001-0001-0001-000000000020" name="pf-jira-create-issue" />
-				<set-variable value="ASSESSING" doc:name="PV SET targetStatus=ASSESSING" doc:id="995a3d71-1f63-4ee6-abe5-09bfcab6f8ae" variableName="targetStatus" />
-				<flow-ref doc:name="pf-set-status (ASSESSING)" doc:id="bc2a8cfe-90c9-4f8c-b0df-2b206d574087" name="pf-set-status" />
-				<flow-ref doc:name="pf-assess-app" doc:id="37e3babe-25f5-461e-ab1a-143631c56c23" name="pf-assess-app" />
-				<logger level="INFO" doc:name="LOG INFO assessment complete" doc:id="2892ca58-ca57-48a2-8f3f-b728e0f5de87" message="#[output application/java --- 'LOG INFO | flow=pf-start-upgrade | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | assessment complete']" />
-				<set-variable value="#[payload.changePlan]" doc:name="PV SET changePlan (from AssessmentResult)" doc:id="ae72c86a-d5bb-4761-84d3-70c4d12a96dd" variableName="changePlan" />
+				<!-- Assessment already ran synchronously as a pre-flight; vars.changePlan is set.
+				     The async pipeline starts straight at the COMMITTING stage. -->
 				<set-variable value="COMMITTING" doc:name="PV SET targetStatus=COMMITTING" doc:id="9ddbc8a1-494e-4ba6-8306-e52700597d46" variableName="targetStatus" />
 				<flow-ref doc:name="pf-set-status (COMMITTING)" doc:id="137d00bf-3822-48ab-a048-42e1856283f6" name="pf-set-status" />
 				<flow-ref doc:name="pf-apply-transforms" doc:id="6d2b520f-b093-4412-bc37-73fb3b33ce3f" name="pf-apply-transforms" />
@@ -163,11 +210,12 @@ else "FAILED_COMMIT"]]></ee:set-variable>
 								<ee:set-payload ><![CDATA[%dw 2.0
 output application/json
 import mergeWith from dw::core::Objects
+import nowUtc from dwl::dates
 ---
 payload mergeWith {
     status:    vars.failureStatus,
     error:     error.description default "unknown error",
-    updatedAt: (now() >> |+00:00|) as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+    updatedAt: nowUtc()
 }]]></ee:set-payload>
 							</ee:message>
 						</ee:transform>
@@ -180,6 +228,8 @@ payload mergeWith {
 				</error-handler>
 			</try>
 		</async>
+			</otherwise>
+		</choice>
 	</sub-flow>
 
     <!-- ==========================================================================
@@ -238,10 +288,11 @@ payload mergeWith {
 				<ee:set-payload ><![CDATA[%dw 2.0
 output application/json
 import mergeWith from dw::core::Objects
+import nowUtc from dwl::dates
 ---
 payload mergeWith {
     status:    vars.targetStatus,
-    updatedAt: (now() >> |+00:00|) as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+    updatedAt: nowUtc()
 }]]></ee:set-payload>
 			</ee:message>
 		</ee:transform>
@@ -282,32 +333,9 @@ output application/java
 				<ee:message >
 					<ee:set-payload ><![CDATA[%dw 2.0
 output text/plain
-import rewritePomProperties  from dwl::rewritePomProperties
-import rewriteDepVersions    from dwl::rewriteDepVersions
-import rewritePluginVersions from dwl::rewritePluginVersions
-import rewriteMunitRuntime   from dwl::rewriteMunitRuntime
-import rewriteMuleArtifact   from dwl::rewriteMuleArtifact
-import rewriteCiWorkflow     from dwl::rewriteCiWorkflow
-import fromBase64 from dw::core::Binaries
-var rawText   = (fromBase64((payload.content default "") replace /[\r\n\t ]/ with "")) as String {encoding: "UTF-8"}
-var edits     = vars.currentFileEdits default []
-// Inline dependency + plugin <version> rewrites first, then property rewrites (independent regions).
-var depEdits  = edits filter ((e) -> e.kind == "depVersion")
-var stepA     = if (!isEmpty(depEdits)) rewriteDepVersions(rawText, depEdits) else rawText
-var plgEdits  = edits filter ((e) -> e.kind == "pluginVersion")
-var step0     = if (!isEmpty(plgEdits)) rewritePluginVersions(stepA, plgEdits) else stepA
-var propEdits = edits filter ((e) -> e.kind == "pomProperty")
-var step1     = if (!isEmpty(propEdits)) rewritePomProperties(step0, propEdits) else step0
-var munitEdit = (edits filter ((e) -> e.kind == "munitRuntimeVersion"))[0]
-var step2     = if (munitEdit != null) rewriteMunitRuntime(step1, munitEdit.to as String) else step1
-var maEdit    = (edits filter ((e) -> e.kind == "muleArtifactJson"))[0]
-var step3     = if (maEdit != null)
-                    rewriteMuleArtifact(step2, maEdit.to.minMuleVersion as String, maEdit.to.javaSpecificationVersions)
-                else step2
-var ciEdit    = (edits filter ((e) -> e.kind == "ciWorkflow"))[0]
-var step4     = if (ciEdit != null) rewriteCiWorkflow(step3, ciEdit.to as String) else step3
+import applyEdits from dwl::applyEdits
 ---
-step4]]></ee:set-payload>
+applyEdits(payload.content, vars.currentFileEdits default [])]]></ee:set-payload>
 				</ee:message>
 			</ee:transform>
 			<set-variable value="#[output application/java --- (vars.stagedFiles default []) ++ [{ path: vars.currentPath, content: (payload as String) }]]" doc:name="PV APPEND stagedFiles" doc:id="d6f8c02e-9cf9-485c-877a-92c2f6c4767b" variableName="stagedFiles" />

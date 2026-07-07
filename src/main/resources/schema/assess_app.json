@@ -1,0 +1,39 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["appName", "environment"],
+  "properties": {
+    "appName": {
+      "type": "string",
+      "description": "Name of the MuleSoft application as it appears in Anypoint Runtime Manager."
+    },
+    "environment": {
+      "type": "string",
+      "description": "Anypoint Platform environment where the app is running (e.g. Production, Staging, Development)."
+    },
+    "jiraTicketId": {
+      "type": "string",
+      "description": "Optional Jira ticket ID to link assessment results back to a migration tracking ticket."
+    },
+    "branch": {
+      "type": "string",
+      "description": "Optional. Explicit branch to assess for this request. Highest precedence — overrides the registry default and the repository's discovered default branch."
+    },
+    "owner": {
+      "type": "string",
+      "description": "Optional GitHub owner/org override (used only when the app is not in the registry)."
+    },
+    "repo": {
+      "type": "string",
+      "description": "Optional GitHub repository name override (used only when the app is not in the registry)."
+    },
+    "appPath": {
+      "type": "string",
+      "description": "Optional path to the Mule module within the repo (e.g. \".\" for repo root)."
+    },
+    "orgId": {
+      "type": "string",
+      "description": "Optional Anypoint organization ID override (used only when the app is not in the registry)."
+    }
+  }
+}

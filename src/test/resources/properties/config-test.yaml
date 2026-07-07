@@ -7,6 +7,14 @@
 api:
   id: "00000001"   # dummy API Manager instance ID satisfies API Autodiscovery at test startup
 
+# http.port is per-env (not in config.yaml). Tests that flow-ref the main flow force lazy-init
+# of apiHttpListenerConfig, which resolves ${http.port} — so it must be defined here or the
+# main-flow capture regression suite fails with PropertyNotFoundException. A dedicated test port
+# (not 8081) avoids clashing with a locally-running dev instance; MUnit does not start the
+# listener source, so nothing actually binds it.
+http:
+  port: "8091"
+
 github:
   defaultOwner: "test-owner"
 

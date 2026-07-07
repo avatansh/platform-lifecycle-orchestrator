@@ -115,8 +115,19 @@
     <!-- ===== MCP Server Config ===== -->
     <!--
         Exposes this Mule app as an MCP server reachable by AI agents (Claude, Copilot, etc.).
-        Transport: Streamable HTTP — shares the same HTTP listener as the REST API.
-        MCP endpoint: http://<host>:<port>/mcp  (set mcp.basePath in config.yaml)
+        Transport: Streamable HTTP.
+
+        LISTENER / PORT (CloudHub 2.0 reality): the MCP server MUST share apiHttpListenerConfig.
+        CH2.0 exposes only the single reserved ${http.port} (8081) through its ingress — a second
+        HTTP listener on another port is NOT reachable externally, and two listener-configs cannot
+        bind the same port. So REST and MCP necessarily share one listener and are separated by PATH:
+          REST : /api/${api.majorVersion}/*
+          MCP  : ${mcp.endpointPath}   (default /mcp — kept explicit so ops can target it)
+
+        TRUST-BOUNDARY ISOLATION is therefore a DEPLOY-TIME concern, not app code:
+          • API Manager policies bind to the REST flow (autodiscovery) — they do NOT cover /mcp.
+          • Govern /mcp via Omni Gateway MCP policies, and/or mark the /mcp Ingress endpoint
+            "Internal" (private-space only) in Runtime Manager so only the gateway can reach it.
         serverName and serverVersion are reported to MCP clients during capability negotiation.
     -->
     <mcp:server-config
@@ -127,7 +138,8 @@
         serverVersion="${mcp.serverVersion}">
         <mcp:streamable-http-server-connection
             doc:name="MCP Streamable HTTP Connection"
-            listenerConfig="apiHttpListenerConfig" />
+            listenerConfig="apiHttpListenerConfig"
+            mcpEndpointPath="${mcp.endpointPath}" />
     </mcp:server-config>
 
     <!-- ===== API Autodiscovery ===== -->
@@ -135,14 +147,14 @@
          LOCAL-RUN NOTE: apiId must be a NUMERIC API Manager id. Disabled below for
          local testing (no API Manager). Re-enable and set a real numeric api.id
          (+ -Danypoint.platform.client_id/-client_secret) before deploying to CloudHub. -->
-    <!--
+   
     <api-gateway:autodiscovery
         apiId="${api.id}"
         ignoreBasePath="true"
         doc:name="API Autodiscovery"
         doc:id="a1b2c3d4-0001-0001-0001-000000000005"
         flowRef="platform-lifecycle-orchestrator-main" />
-    -->
+    
 
     <!-- ===== Outbound HTTP Request Configs ===== -->
 
