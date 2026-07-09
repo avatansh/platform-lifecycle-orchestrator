@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="UTF-8"?>
+﻿<?xml version="1.0" encoding="UTF-8"?>
 
 <mule xmlns:os="http://www.mulesoft.org/schema/mule/os" xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
 	xmlns:http="http://www.mulesoft.org/schema/mule/http"
@@ -19,7 +19,7 @@ http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/cu
 	
 	<sub-flow name="pf-rollback" doc:id="a710ee59-cf77-4810-b05f-57140bceeafe" doc:description="Open a revert PR restoring the repo to pre-upgrade state. Non-fatal." >
 		<try doc:name="TRY revert PR (non-fatal)" doc:id="ea67b917-417c-452d-b8ba-2cadb9e49835" >
-			<logger level="INFO" doc:name="LOG INFO pf-rollback enter" doc:id="5cd38732-1d10-45d2-81f4-18267943fc1f" message="#[output application/java --- 'LOG INFO | flow=pf-rollback | correlationId=' ++ correlationId ++ ' | jobId=' ++ (vars.jobId default '?') ++ ' | branchName=' ++ (vars.branchName default '?')]" />
+			<logger level="INFO" doc:name="LOG INFO START pf-rollback enter" doc:id="5cd38732-1d10-45d2-81f4-18267943fc1f" message="#[output application/java --- 'START - pf-rollback enter | branchName=' ++ (vars.branchName default '?')]" />
 			<http:request doc:name="GET upgrade commit (find pre-upgrade base)" doc:id="9a03ff1f-97d7-49dc-80f2-01209fe4a3af" doc:description="Fetch the upgrade commit to extract its first parent SHA (=changePlan.headSha)" config-ref="GitHub_Request" path="#['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/commits/' ++ vars.commitSha]" target="upgradeCommit" />
 			<set-variable value="#[vars.upgradeCommit.parents[0].sha]" doc:name="PV SET baseSha (pre-upgrade HEAD)" doc:id="820d004b-5d13-43dd-88cb-145b7a03bb30" variableName="baseSha" />
 			<http:request doc:name="GET base commit (extract pre-upgrade tree SHA)" doc:id="e0f4d0f8-1ff0-4721-8a5e-12748230fa70" doc:description="Fetch the pre-upgrade commit object to get its tree SHA" config-ref="GitHub_Request" path="#['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/git/commits/' ++ vars.baseSha]" target="baseCommit" />
@@ -92,16 +92,17 @@ payload mergeWith {
 				</ee:message>
 			</ee:transform>
 			<os:store doc:name="OS Store job record with revertPrUrl" doc:id="e4e69524-d901-4d66-8b03-dbd8a8d96e5f" key="#[vars.jobId]" objectStore="jobStore" />
-			<logger level="INFO" doc:name="LOG INFO rollback PR opened" doc:id="4a33f368-3474-494a-b98e-0b88664d5bb4" message="#[output application/java --- 'LOG INFO | flow=pf-rollback | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | revertPrUrl=' ++ (vars.revertPrUrl default '?')]" />
+			<logger level="INFO" doc:name="LOG INFO rollback PR opened" doc:id="4a33f368-3474-494a-b98e-0b88664d5bb4" message="#[output application/java --- 'rollback PR opened | revertPrUrl=' ++ (vars.revertPrUrl default '?')]" />
 			<error-handler >
 				<on-error-continue enableNotifications="true" logException="true" doc:name="On Error Continue" doc:id="9a01c72a-4423-4d64-a2ac-8f4207aca0ed" type="ANY" >
-					<logger level="WARN" doc:name="LOG WARN pf-rollback failed" doc:id="9c757f4b-fdd7-445f-addf-29d72a67757b" message="#[output application/java --- 'LOG WARN | flow=pf-rollback | correlationId=' ++ correlationId ++ ' | jobId=' ++ (vars.jobId default '?') ++ ' | rollback error swallowed: ' ++ (error.description default 'unknown')]" />
+					<logger level="WARN" doc:name="LOG WARN pf-rollback failed" doc:id="9c757f4b-fdd7-445f-addf-29d72a67757b" message="#[output application/java --- 'rollback error swallowed: ' ++ (error.description default 'unknown')]" />
 				</on-error-continue>
 			</error-handler>
 		</try>
 		<os:retrieve doc:name="OS Retrieve job record (restore to payload for caller)" doc:id="7149eaa8-239a-4d2b-9024-1b7a15965a16" key="#[vars.jobId]" objectStore="jobStore" >
 			<os:default-value ><![CDATA[#[{}]]]></os:default-value>
 		</os:retrieve>
+		<logger level="INFO" doc:name="LOG INFO END pf-rollback" doc:id="f8ae22b0-714c-4d34-b89e-92f19f6aa6ce" message="#[output application/java --- 'END pf-rollback']" />
 	</sub-flow>
 	
     <!-- ==========================================================================
@@ -116,7 +117,7 @@ payload mergeWith {
          ========================================================================== -->
 	
 	<sub-flow name="pf-open-pr" doc:id="56e634c3-1676-4a91-885b-eed8156ac3d1" doc:description="Open a GitHub Pull Request for the upgrade branch and persist prUrl to the job record." >
-		<logger level="INFO" doc:name="LOG INFO pf-open-pr enter" doc:id="beac8c5b-aab7-48a8-bee9-66a3422c733b" message="#[output application/java --- 'LOG INFO | flow=pf-open-pr | correlationId=' ++ correlationId ++ ' | jobId=' ++ (vars.jobId default '?') ++ ' | branchName=' ++ (vars.branchName default '?')]" />
+		<logger level="INFO" doc:name="LOG INFO START pf-open-pr enter" doc:id="beac8c5b-aab7-48a8-bee9-66a3422c733b" message="#[output application/java --- 'START - pf-open-pr enter | branchName=' ++ (vars.branchName default '?')]" />
 		<ee:transform doc:name="DW Build create-PR body" doc:id="125fcc00-7b58-4ac5-bee7-04cba4fa3873" doc:description="Compose the GitHub PR payload: title, head branch, base branch, body, flags" >
 			<ee:message >
 				<ee:set-payload ><![CDATA[%dw 2.0
@@ -158,7 +159,7 @@ payload mergeWith {
 			</ee:message>
 		</ee:transform>
 		<os:store doc:name="OS Store job record with PR details" doc:id="4532df19-b953-4ac4-b167-ac0f1d17a3f4" key="#[vars.jobId]" objectStore="jobStore" />
-		<logger level="INFO" doc:name="LOG INFO PR created" doc:id="b973fd63-7158-4cc3-8906-a1057d36b177" message="#[output application/java --- 'LOG INFO | flow=pf-open-pr | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | prNumber=' ++ vars.prNumber ++ ' | prUrl=' ++ (vars.prUrl default '?')]" />
+		<logger level="INFO" doc:name="LOG INFO END pf-open-pr" doc:id="b973fd63-7158-4cc3-8906-a1057d36b177" message="#[output application/java --- 'END pf-open-pr | PR created | prNumber=' ++ vars.prNumber ++ ' | prUrl=' ++ (vars.prUrl default '?')]" />
 	</sub-flow>
 	
     <!-- ==========================================================================
@@ -174,15 +175,15 @@ payload mergeWith {
          ========================================================================== -->
 	
 	<sub-flow name="pf-atomic-commit" doc:id="d38f3f65-a652-403f-aaa8-32aa8bafb57d" doc:description="Commit all staged files as one Git commit on a new branch via GitHub Git Data API." >
-		<logger level="INFO" doc:name="LOG INFO pf-atomic-commit enter" doc:id="21192d62-38f0-4dd1-81a5-d7c75385de93" message="#[output application/java --- 'LOG INFO | flow=pf-atomic-commit | correlationId=' ++ correlationId ++ ' | jobId=' ++ (vars.jobId default '?') ++ ' | stagedFiles=' ++ sizeOf(vars.stagedFiles default []) ++ ' | headSha=' ++ (vars.changePlan.headSha default '?')]" />
+		<logger level="INFO" doc:name="LOG INFO START pf-atomic-commit enter" doc:id="21192d62-38f0-4dd1-81a5-d7c75385de93" message="#[output application/java --- 'START - pf-atomic-commit enter | stagedFiles=' ++ sizeOf(vars.stagedFiles default []) ++ ' | headSha=' ++ (vars.changePlan.headSha default '?')]" />
 		<http:request doc:name="GET HEAD commit (stale-plan check)" doc:id="8bbfd1ff-8998-4b02-92d7-97b094ef93f3" doc:description="Fetch current HEAD SHA to verify the repo has not moved since the change plan was computed" config-ref="GitHub_Request" path="#['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/commits/' ++ vars.coords.defaultBranch]" target="headCheck" />
 		<choice doc:name="CHOICE stale plan?" doc:id="7a8dfc7f-baea-4949-8890-40f0c5a73888" doc:description="Reject if the branch HEAD has moved since pf-assess-app captured it" >
 			<when expression="#[vars.headCheck.sha != vars.changePlan.headSha]" doc:id="pfac0001-0001-0001-0001-000000000005" >
-				<logger level="WARN" doc:name="LOG WARN stale plan" doc:id="6a48f6d0-7d7e-4143-9200-2a7eba967720" message="#[output application/java --- 'LOG WARN | flow=pf-atomic-commit | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | stale plan: repo HEAD=' ++ (vars.headCheck.sha default '?') ++ ' != plan headSha=' ++ (vars.changePlan.headSha default '?')]" />
+				<logger level="ERROR" doc:name="LOG ERROR stale plan" doc:id="6a48f6d0-7d7e-4143-9200-2a7eba967720" message="#[output application/java --- 'stale plan: repo HEAD=' ++ (vars.headCheck.sha default '?') ++ ' != plan headSha=' ++ (vars.changePlan.headSha default '?')]" />
 				<raise-error doc:name="RAISE CONFLICT:STALE_PLAN" doc:id="8c875ffe-6bef-455b-95a4-39ab0a49bbea" type="CONFLICT:STALE_PLAN" description="#[output application/java --- 'The repo HEAD moved since assessment (current=' ++ (vars.headCheck.sha default '?') ++ ', plan=' ++ (vars.changePlan.headSha default '?') ++ '). Re-run assess_app to get a fresh changePlan.']" />
 			</when>
 			<otherwise doc:id="pfac0001-0001-0001-0001-000000000008" >
-				<logger level="DEBUG" doc:name="LOG DEBUG stale-plan check passed" doc:id="6fd587a7-9eff-4d5c-beee-ab70e8dd6bd8" message="#[output application/java --- 'LOG DEBUG | flow=pf-atomic-commit | stale-plan check passed | headSha matches plan']" />
+				<logger level="INFO" doc:name="LOG INFO stale-plan check passed" doc:id="6fd587a7-9eff-4d5c-beee-ab70e8dd6bd8" message="#[output application/java --- 'stale-plan check passed | headSha matches plan']" />
 			</otherwise>
 		</choice>
 		<set-variable value="#['migrate/' ++ vars.appName ++ '-' ++ vars.changePlan.targetRuntime ++ '-java' ++ vars.changePlan.targetJavaVersion]" doc:name="PV SET branchBase" doc:id="f9eb31a3-2f9b-47a5-a03e-81c29eebff6e" doc:description="Deterministic base branch name before collision handling" variableName="branchBase" />
@@ -200,7 +201,7 @@ var candidates = [base] ++ ((1 to 50) map ((n) -> base ++ "-" ++ (n as String)))
 (candidates filter ((c) -> !(taken contains c)))[0] default (base ++ "-" ++ vars.jobId)]]></ee:set-variable>
 			</ee:variables>
 		</ee:transform>
-		<logger level="INFO" doc:name="LOG INFO branch name computed" doc:id="7ce47f45-8d39-40a3-be30-9d32c406f954" message="#[output application/java --- 'LOG INFO | flow=pf-atomic-commit | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | branchBase=' ++ vars.branchBase ++ ' | branchName=' ++ vars.branchName ++ ' | existing=' ++ sizeOf(vars.existingRefs default [])]" />
+		<logger level="INFO" doc:name="LOG INFO branch name computed" doc:id="7ce47f45-8d39-40a3-be30-9d32c406f954" message="#[output application/java --- 'branch name computed | branchBase=' ++ vars.branchBase ++ ' | branchName=' ++ vars.branchName ++ ' | existing=' ++ sizeOf(vars.existingRefs default [])]" />
 		<ee:transform doc:name="DW Build create-ref body" doc:id="d9834f2a-2d76-485b-85c8-2e2c17988651" >
 			<ee:message >
 				<ee:set-payload ><![CDATA[%dw 2.0
@@ -262,7 +263,7 @@ output application/json
 		</ee:transform>
 		<http:request doc:name="POST create commit" doc:id="5da044e1-f7cc-4952-be7e-6ce8ecec6be3" doc:description="Create the upgrade commit object; response contains the commit SHA" config-ref="GitHub_Request" method="POST" path="#['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/git/commits']" target="commitResp" />
 		<set-variable value="#[vars.commitResp.sha]" doc:name="PV SET commitSha" doc:id="b818d045-e600-490b-b8fb-96ddcc4211a4" variableName="commitSha" />
-		<logger level="INFO" doc:name="LOG INFO commit created" doc:id="7a187e5e-52ad-4b76-bb50-1cf70f03434b" message="#[output application/java --- 'LOG INFO | flow=pf-atomic-commit | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | branchName=' ++ vars.branchName ++ ' | commitSha=' ++ (vars.commitSha default '?')]" />
+		<logger level="INFO" doc:name="LOG INFO commit created" doc:id="7a187e5e-52ad-4b76-bb50-1cf70f03434b" message="#[output application/java --- 'commit created | branchName=' ++ vars.branchName ++ ' | commitSha=' ++ (vars.commitSha default '?')]" />
 		<ee:transform doc:name="DW Build update-ref body" doc:id="9d94659f-0bf9-4d06-baac-7a8e7168cd3f" >
 			<ee:message >
 				<ee:set-payload ><![CDATA[%dw 2.0
@@ -296,6 +297,6 @@ payload mergeWith {
 			</ee:message>
 		</ee:transform>
 		<os:store doc:name="OS Store job record with branch + commit" doc:id="f0209c9f-3c52-42ce-ad06-076ca6b1e79b" key="#[vars.jobId]" objectStore="jobStore" />
-		<logger level="INFO" doc:name="LOG INFO pf-atomic-commit done" doc:id="6bbdbfc9-f208-4f5c-b8d2-1502ab35d633" message="#[output application/java --- 'LOG INFO | flow=pf-atomic-commit | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | branchName=' ++ vars.branchName ++ ' | commitSha=' ++ (vars.commitSha default '?') ++ ' | stagedFiles=' ++ sizeOf(vars.stagedFiles default [])]" />
+		<logger level="INFO" doc:name="LOG INFO END pf-atomic-commit done" doc:id="6bbdbfc9-f208-4f5c-b8d2-1502ab35d633" message="#[output application/java --- 'END - pf-atomic-commit done | branchName=' ++ vars.branchName ++ ' | commitSha=' ++ (vars.commitSha default '?') ++ ' | stagedFiles=' ++ sizeOf(vars.stagedFiles default [])]" />
 	</sub-flow>
 </mule>

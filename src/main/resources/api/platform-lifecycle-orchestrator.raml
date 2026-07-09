@@ -51,8 +51,11 @@ types:
       file:
         type: string
         description: |
-          Repository-relative path of the file being edited (the OWNER file — in a
-          monorepo this may be a shared parent/BOM pom inherited by other modules).
+          Repository-relative path of the file being edited. Under the default
+          app-override strategy (upgrade.pomEditStrategy=appOverride) this is the app's
+          OWN module pom — version overrides are written there so sibling modules that
+          share a parent/BOM are not affected. Under the legacy inPlace strategy this may
+          be a shared parent/BOM pom inherited by other modules (see the warnings array).
       kind:
         type: string
         enum: [pomProperty, depVersion, pluginVersion, munitRuntimeVersion, muleArtifactJson, ciWorkflow]
@@ -119,7 +122,13 @@ types:
         type: string
       status:
         type: string
-        enum: [PROCESSING, ASSESSING, COMMITTING, COMMITTED, PR_OPEN, DEPLOYING, DEPLOYED, ROLLED_BACK, FAILED_ASSESS, FAILED_COMMIT, FAILED_CI, FAILED_DEPLOY, FAILED_INTERRUPTED]
+        enum: [PROCESSING, ASSESSING, COMMITTING, COMMITTED, PR_OPEN, MUNIT_FAILED, DEPLOYING, DEPLOYED, ROLLED_BACK, FAILED_ASSESS, FAILED_COMMIT, FAILED_CI, FAILED_DEPLOY, FAILED_INTERRUPTED]
+        description: |
+          Job lifecycle state. Most values are terminal or auto-advancing. MUNIT_FAILED is
+          a NON-terminal, human-needed PAUSE: the app's MUnit suite failed in CI. The job
+          waits (retained for 30 days) until a human fixes the tests and CI reports a test
+          success (via POST /webhook/cd-result with stage=test, result=success), which
+          resumes it. While MUNIT_FAILED, nextPollSeconds is large or omitted.
       message:
         type: string
         required: false
@@ -176,6 +185,40 @@ types:
         type: string
         required: false
         description: Anypoint organization ID override (used only when the app is not in the registry).
+
+  CdResultRequest:
+    type: object
+    description: |
+      CD/CI callback that updates a job. ONE endpoint serves two pipeline stages,
+      distinguished by `stage`:
+        - stage=deploy (default): deployment result from the CD pipeline
+          (success -> DEPLOYED, failure -> FAILED_DEPLOY + rollback).
+        - stage=test: MUnit (CI test) result. A failure parks the job in MUNIT_FAILED
+          (Slack + Jira notified); a later success resumes the parked job.
+      Authenticated via the X-CD-Signature-256 HMAC header (X-CD-Token accepted as a
+      transitional fallback).
+    properties:
+      jobId:
+        type: string
+      result:
+        type: string
+        enum: [success, failure]
+      stage:
+        type: string
+        required: false
+        enum: [test, deploy]
+        description: |
+          Which pipeline stage this callback reports. Defaults to `deploy` when omitted,
+          keeping existing CD callers backward-compatible. Use `test` to report the
+          MUnit/CI outcome.
+      deployUrl:
+        type: string
+        required: false
+        description: Deployment URL (typically present on stage=deploy success).
+      error:
+        type: string
+        required: false
+        description: Human-readable failure detail (present on result=failure).
 
   AssessRequest:
     type: CoordinateOverrides
@@ -264,10 +307,12 @@ types:
 
   /cd-result:
     post:
-      description: Receive CD pipeline result callbacks and update job status.
+      description: |
+        Receive CD/CI result callbacks and update job status. Handles both deployment
+        results (stage=deploy, the default) and MUnit/CI test results (stage=test).
       body:
         application/json:
-          type: object
+          type: CdResultRequest
       responses:
         200:
-          description: CD result received and acknowledged.
+          description: CD/CI result received and acknowledged.

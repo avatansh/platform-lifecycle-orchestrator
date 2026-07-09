@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="UTF-8"?>
+﻿<?xml version="1.0" encoding="UTF-8"?>
 <mule xmlns:http="http://www.mulesoft.org/schema/mule/http"
       xmlns:os="http://www.mulesoft.org/schema/mule/os"
       xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
@@ -23,7 +23,7 @@
         </scheduler>
 
         <logger level="INFO" doc:name="LOG INFO sweep start" doc:id="pfrc0001-0001-0001-0001-000000000003"
-                message="#[output application/java --- 'LOG INFO | flow=pf-reconcile | correlationId=' ++ correlationId ++ ' | reconcile sweep starting']" />
+                message="#[output application/java --- 'reconcile sweep starting']" />
 
         <os:retrieve-all-keys objectStore="jobStore"
                               doc:name="OS Retrieve All Keys" doc:id="pfrc0001-0001-0001-0001-000000000004" />
@@ -47,6 +47,11 @@
                              target="rec" doc:name="OS Retrieve job record" doc:id="pfrc0001-0001-0001-0001-000000000010">
                     <os:default-value>#[{}]</os:default-value>
                 </os:retrieve>
+
+                <!-- Stamp the MDC for THIS job so every per-job reconcile log line carries jobId/appName. -->
+                <set-variable variableName="jobId" value="#[vars.k]" doc:name="PV SET jobId" doc:id="pfrc0001-0001-0001-0001-00000000000a" />
+                <set-variable variableName="appName" value="#[vars.rec.appName default '-']" doc:name="PV SET appName" doc:id="pfrc0001-0001-0001-0001-00000000000b" />
+                <flow-ref name="pf-mdc-stamp" doc:name="pf-mdc-stamp" doc:id="pfrc0001-0001-0001-0001-00000000000c" />
 
                 <set-variable variableName="isStale" doc:name="PV SET isStale" doc:id="pfrc0001-0001-0001-0001-000000000011"
                               value="#[output application/java --- (vars.rec.updatedAt != null) and (((now() as Number) - (vars.rec.updatedAt as DateTime as Number)) > (p('reconcile.staleSeconds') as Number))]" />
@@ -81,7 +86,7 @@ import nowUtc from dwl::dates
                                 <set-variable variableName="fixed" value="#[vars.fixed + 1]"
                                               doc:name="PV fixed++" doc:id="pfrc0001-0001-0001-0001-000000000020" />
                                 <logger level="INFO" doc:name="LOG INFO PR_OPENâ†’DEPLOYING" doc:id="pfrc0001-0001-0001-0001-000000000021"
-                                        message="#[output application/java --- 'LOG INFO | flow=pf-reconcile | reconciled PR_OPENâ†’DEPLOYING (missed merge webhook) | jobId=' ++ vars.k]" />
+                                        message="#[output application/java --- 'reconciled PR_OPEN→DEPLOYING (missed merge webhook)']" />
                             </when>
 
                             <when expression="#[vars.pr.state == 'closed' and vars.pr.merged == false]"
@@ -109,12 +114,12 @@ import nowUtc from dwl::dates
                                 <set-variable variableName="fixed" value="#[vars.fixed + 1]"
                                               doc:name="PV fixed++" doc:id="pfrc0001-0001-0001-0001-000000000030" />
                                 <logger level="INFO" doc:name="LOG INFO PR_OPENâ†’FAILED_DEPLOY" doc:id="pfrc0001-0001-0001-0001-000000000031"
-                                        message="#[output application/java --- 'LOG INFO | flow=pf-reconcile | reconciled PR_OPENâ†’FAILED_DEPLOY (closed unmerged) | jobId=' ++ vars.k]" />
+                                        message="#[output application/java --- 'reconciled PR_OPEN→FAILED_DEPLOY (closed unmerged)']" />
                             </when>
 
                             <otherwise doc:name="PR still open" doc:id="pfrc0001-0001-0001-0001-000000000032">
                                 <logger level="DEBUG" doc:name="LOG DEBUG PR still open" doc:id="pfrc0001-0001-0001-0001-000000000033"
-                                        message="#[output application/java --- 'LOG DEBUG | flow=pf-reconcile | PR still open, leaving as-is | jobId=' ++ vars.k]" />
+                                        message="#[output application/java --- 'PR still open, leaving as-is']" />
                             </otherwise>
 
                         </choice>
@@ -169,7 +174,7 @@ import nowUtc from dwl::dates
                                         <set-variable variableName="fixed" value="#[vars.fixed + 1]"
                                                       doc:name="PV fixed++" doc:id="pfrc0001-0001-0001-0001-000000000056" />
                                         <logger level="INFO" doc:name="LOG INFO DEPLOYINGâ†’DEPLOYED" doc:id="pfrc0001-0001-0001-0001-000000000057"
-                                                message="#[output application/java --- 'LOG INFO | flow=pf-reconcile | reconciled DEPLOYINGâ†’DEPLOYED (missed cd-result, platform confirmed) | jobId=' ++ vars.k ++ ' | platformStatus=' ++ (vars.verify.status default '?')]" />
+                                                message="#[output application/java --- 'reconciled DEPLOYING→DEPLOYED (missed cd-result, platform confirmed) | platformStatus=' ++ (vars.verify.status default '?')]" />
                                     </when>
 
                                     <when expression="#[(vars.verify.verified default false) and not (vars.verify.healthy default false)]"
@@ -198,12 +203,12 @@ import nowUtc from dwl::dates
                                         <set-variable variableName="fixed" value="#[vars.fixed + 1]"
                                                       doc:name="PV fixed++" doc:id="pfrc0001-0001-0001-0001-000000000066" />
                                         <logger level="WARN" doc:name="LOG WARN DEPLOYINGâ†’FAILED_DEPLOY" doc:id="pfrc0001-0001-0001-0001-000000000067"
-                                                message="#[output application/java --- 'LOG WARN | flow=pf-reconcile | reconciled DEPLOYINGâ†’FAILED_DEPLOY (missed cd-result, platform unhealthy) | jobId=' ++ vars.k ++ ' | platformStatus=' ++ (vars.verify.status default '?')]" />
+                                                message="#[output application/java --- 'reconciled DEPLOYING→FAILED_DEPLOY (missed cd-result, platform unhealthy) | platformStatus=' ++ (vars.verify.status default '?')]" />
                                     </when>
 
                                     <otherwise doc:name="platform unverified â†’ leave" doc:id="pfrc0001-0001-0001-0001-000000000068">
                                         <logger level="DEBUG" doc:name="LOG DEBUG platform unreachable" doc:id="pfrc0001-0001-0001-0001-000000000069"
-                                                message="#[output application/java --- 'LOG DEBUG | flow=pf-reconcile | DEPLOYING stale but platform unverified, retry next sweep | jobId=' ++ vars.k]" />
+                                                message="#[output application/java --- 'DEPLOYING stale but platform unverified, retry next sweep']" />
                                     </otherwise>
 
                                 </choice>
@@ -211,7 +216,7 @@ import nowUtc from dwl::dates
                             </when>
                             <otherwise doc:name="verify disabled â†’ leave" doc:id="pfrc0001-0001-0001-0001-000000000070">
                                 <logger level="DEBUG" doc:name="LOG DEBUG DEPLOYING awaiting cd-result" doc:id="pfrc0001-0001-0001-0001-000000000035"
-                                        message="#[output application/java --- 'LOG DEBUG | flow=pf-reconcile | still DEPLOYING beyond threshold, verify disabled, awaiting cd-result | jobId=' ++ vars.k]" />
+                                        message="#[output application/java --- 'still DEPLOYING beyond threshold, verify disabled, awaiting cd-result']" />
                             </otherwise>
                         </choice>
 
@@ -253,12 +258,12 @@ import nowUtc from dwl::dates
                         <set-variable variableName="fixed" value="#[vars.fixed + 1]"
                                       doc:name="PV fixed++" doc:id="pfrc0001-0001-0001-0001-000000000108" />
                         <logger level="WARN" doc:name="LOG WARN early-stageâ†’FAILED_INTERRUPTED" doc:id="pfrc0001-0001-0001-0001-000000000109"
-                                message="#[output application/java --- 'LOG WARN | flow=pf-reconcile | reconciled ' ++ (vars.rec.status default '?') ++ 'â†’FAILED_INTERRUPTED (orphaned by restart/crash) | jobId=' ++ vars.k ++ ' | app=' ++ (vars.rec.appName default '?') ++ ' | lock released']" />
+                                message="#[output application/java --- 'reconciled ' ++ (vars.rec.status default '?') ++ '→FAILED_INTERRUPTED (orphaned by restart/crash) | lock released']" />
                     </when>
 
                     <otherwise doc:name="not stale or non-reconcilable" doc:id="pfrc0001-0001-0001-0001-000000000036">
                         <logger level="DEBUG" doc:name="LOG DEBUG job not reconcilable" doc:id="pfrc0001-0001-0001-0001-000000000037"
-                                message="#[output application/java --- 'LOG DEBUG | flow=pf-reconcile | not stale or non-reconcilable | jobId=' ++ vars.k ++ ' | status=' ++ (vars.rec.status default '?') ++ ' | stale=' ++ vars.isStale]" />
+                                message="#[output application/java --- 'not stale or non-reconcilable | status=' ++ (vars.rec.status default '?') ++ ' | stale=' ++ vars.isStale]" />
                     </otherwise>
 
                 </choice>
@@ -266,7 +271,7 @@ import nowUtc from dwl::dates
                 <error-handler>
                     <on-error-continue type="ANY" doc:id="pfrc0001-0001-0001-0001-000000000038">
                         <logger level="WARN" doc:name="LOG WARN per-job reconcile error" doc:id="pfrc0001-0001-0001-0001-000000000039"
-                                message="#[output application/java --- 'LOG WARN | flow=pf-reconcile | error reconciling job ' ++ (vars.k default '?') ++ ': ' ++ (error.description default 'unknown')]" />
+                                message="#[output application/java --- 'error reconciling job ' ++ (vars.k default '?') ++ ': ' ++ (error.description default 'unknown')]" />
                     </on-error-continue>
                 </error-handler>
             </try>
@@ -274,7 +279,7 @@ import nowUtc from dwl::dates
         </foreach>
 
         <logger level="INFO" doc:name="LOG INFO sweep done" doc:id="pfrc0001-0001-0001-0001-000000000040"
-                message="#[output application/java --- 'LOG INFO | flow=pf-reconcile | correlationId=' ++ correlationId ++ ' | reconcile sweep done | fixed=' ++ vars.fixed ++ ' | scanned=' ++ sizeOf(vars.jobKeys default [])]" />
+                message="#[output application/java --- 'reconcile sweep done | fixed=' ++ vars.fixed ++ ' | scanned=' ++ sizeOf(vars.jobKeys default [])]" />
 
     </flow>
 

@@ -55,7 +55,8 @@
     <sub-flow name="pf-get-anypoint-token"
               doc:id="pfpt0003-0003-0003-0003-000000000001">
 
-        <ee:cache cachingStrategy-ref="anypointTokenCachingStrategy"
+        <logger level="INFO" doc:name="LOG INFO START pf-get-anypoint-token" doc:id="ac642d9e-f5f9-44a9-92c0-a60a610e233c" message="#[output application/java --- 'START - pf-get-anypoint-token']"/>
+		<ee:cache cachingStrategy-ref="anypointTokenCachingStrategy"
                   doc:name="CACHE Anypoint bearer token"
                   doc:id="pfpt0003-0003-0003-0003-000000000002"
                   doc:description="Fetch + cache the Connected App client_credentials token; time-bucketed key">
@@ -74,7 +75,8 @@ output application/json
                 </ee:message>
             </ee:transform>
 
-            <http:request method="POST"
+            <logger level="DEBUG" doc:name="LOG DEBUG Request" doc:id="27721420-e119-407d-83c2-ab92076c9773" message="#[output application/java --- 'Sending Request to URL:' ++ Mule::p('anypoint.tokenPath') ++ ' Payload: ' ++ write(payload, &quot;application/json&quot;, {&quot;indent&quot;: false})]"/>
+			<http:request method="POST"
                           config-ref="Anypoint_Request"
                           path="#[p('anypoint.tokenPath')]"
                           doc:name="POST Anypoint token"
@@ -82,7 +84,8 @@ output application/json
                 <http:headers><![CDATA[#[{ "Content-Type": "application/json" }]]]></http:headers>
             </http:request>
 
-            <ee:transform doc:name="DW Extract access_token"
+            <logger level="DEBUG" doc:name="LOG DEBUG Response" doc:id="130aef9d-ea05-4b59-b6c0-f8582e40b21a" message="#[output application/java --- 'Response Received Payload: ' ++ write(payload, 'application/json', {'indent': false})]"/>
+			<ee:transform doc:name="DW Extract access_token"
                           doc:id="pfpt0003-0003-0003-0003-000000000005">
                 <ee:message>
                     <ee:set-payload><![CDATA[%dw 2.0
@@ -98,6 +101,7 @@ output text/plain
                       value="#[payload as String]"
                       doc:name="PV SET vars.anypointToken"
                       doc:id="pfpt0003-0003-0003-0003-000000000006" />
+		<logger level="INFO" doc:name="LOG INFO END pf-get-anypoint-token" doc:id="38f5b9c3-b144-4f6d-8023-4595ccfac3d4" message="#[output application/java --- 'END - pf-get-anypoint-token']"/>
 
     </sub-flow>
 
@@ -124,7 +128,8 @@ output text/plain
     <sub-flow name="pf-verify-deployment"
               doc:id="pfpt0004-0004-0004-0004-000000000001">
 
-        <try doc:name="TRY platform verify (non-fatal)"
+        <logger level="INFO" doc:name="LOG INFO START pf-verify-deployment" doc:id="1d25e60c-eec2-473b-a5ac-573d5fb72926" message="#[output application/java --- 'START - pf-verify-deployment']" />
+		<try doc:name="TRY platform verify (non-fatal)"
              doc:id="pfpt0004-0004-0004-0004-000000000002">
 
             <flow-ref name="pf-get-anypoint-token"
@@ -132,10 +137,11 @@ output text/plain
                       doc:id="pfpt0004-0004-0004-0004-000000000003" />
 
             <!-- Resolve environment name → envId (cached per org) -->
-            <ee:cache cachingStrategy-ref="anypointEnvCachingStrategy"
+			<logger level="DEBUG" doc:name="LOG DEBUG Request" doc:id="6ac19e5b-24e1-44cc-a9e9-e3ab3734ad0b" message="#[output application/java --- 'Sending Request to URL: /accounts/api/organizations/' ++ (vars.vfyOrgId default '') ++ '/environments' ++ ' Payload: ' ++ write(payload, &quot;application/json&quot;, {&quot;indent&quot;: false})]" />
+			<ee:cache cachingStrategy-ref="anypointEnvCachingStrategy"
                       doc:name="CACHE org environments"
                       doc:id="pfpt0004-0004-0004-0004-000000000004">
-                <http:request method="GET"
+				<http:request method="GET"
                               config-ref="Anypoint_Request"
                               path="#['/accounts/api/organizations/' ++ (vars.vfyOrgId default '') ++ '/environments']"
                               doc:name="GET org environments"
@@ -143,8 +149,8 @@ output text/plain
                     <http:headers><![CDATA[#[{ "Authorization": "Bearer " ++ (vars.anypointToken default "") }]]]></http:headers>
                 </http:request>
             </ee:cache>
-
-            <set-variable variableName="envId"
+			<logger level="DEBUG" doc:name="LOG DEBUG Response" doc:id="2e6544bf-13df-46ad-86c3-0997c8cd4039" message="#[output application/java --- 'Response Received Payload: ' ++ write(payload, 'application/json', {'indent': false})]" />
+			<set-variable variableName="envId"
                           value="#[((payload.data default []) filter ((e) -> upper(e.name default '') == upper(vars.vfyEnv default '')))[0].id default '']"
                           doc:name="PV SET vars.envId"
                           doc:id="pfpt0004-0004-0004-0004-000000000006" />
@@ -186,15 +192,14 @@ var okList = ((p('anypoint.verify.healthyStatuses') default "") splitBy ",") map
                           value="#[payload]"
                           doc:name="PV SET vars.verify"
                           doc:id="pfpt0004-0004-0004-0004-000000000009" />
-
-            <error-handler>
+			<error-handler>
                 <on-error-continue type="ANY"
                                    doc:name="platform unreachable → unverified"
                                    doc:id="pfpt0004-0004-0004-0004-000000000010">
                     <logger level="WARN"
                             doc:name="LOG WARN verify failed (non-fatal)"
                             doc:id="pfpt0004-0004-0004-0004-000000000011"
-                            message="#[output application/java --- 'LOG WARN | flow=pf-verify-deployment | platform verify failed (non-fatal), falling back to CI signal | app=' ++ (vars.vfyApp default '?') ++ ' | error=' ++ (error.description default 'unknown')]" />
+                            message="#[output application/java --- 'platform verify failed (non-fatal), falling back to CI signal | app=' ++ (vars.vfyApp default '?') ++ ' | error=' ++ (error.description default 'unknown')]" />
                     <set-variable variableName="verify"
                                   value="#[{ verified: false, found: false, status: 'UNKNOWN', healthy: false, runtimeVersion: null }]"
                                   doc:name="PV SET vars.verify (unverified)"
@@ -203,6 +208,7 @@ var okList = ((p('anypoint.verify.healthyStatuses') default "") splitBy ",") map
             </error-handler>
 
         </try>
+		<logger level="INFO" doc:name="LOG INFO END pf-verify-deployment" doc:id="b7f9854a-fac4-4f4e-97eb-476fcfbccb7a" message="#[output application/java --- 'END - pf-verify-deployment']" />
 
     </sub-flow>
 

@@ -26,7 +26,7 @@
             <logger level="ERROR"
                     doc:name="LOG ERROR Bad Request"
                     doc:id="c3d4e5f6-0003-0003-0003-000000000003"
-                    message="#[output application/java --- 'LOG WARN | flow=' ++ (vars.flowName default 'unknown') ++ ' | correlationId=' ++ correlationId ++ ' | status=400 | ' ++ error.description]" />
+                    message="#[output application/java --- 'status=400 | ' ++ error.description]" />
             <ee:transform doc:name="DW Set 400 Response" doc:id="c3d4e5f6-0003-0003-0003-000000000004">
                 <ee:message>
                     <ee:set-payload><![CDATA[%dw 2.0
@@ -49,7 +49,7 @@ output application/json
             <logger level="ERROR"
                     doc:name="LOG ERROR Not Found"
                     doc:id="c3d4e5f6-0003-0003-0003-000000000006"
-                    message="#[output application/java --- 'LOG WARN | flow=' ++ (vars.flowName default 'unknown') ++ ' | correlationId=' ++ correlationId ++ ' | status=404 | ' ++ error.description]" />
+                    message="#[output application/java --- 'status=404 | ' ++ error.description]" />
             <ee:transform doc:name="DW Set 404 Response" doc:id="c3d4e5f6-0003-0003-0003-000000000007">
                 <ee:message>
                     <ee:set-payload><![CDATA[%dw 2.0
@@ -72,7 +72,7 @@ output application/json
             <logger level="ERROR"
                     doc:name="LOG ERROR Method Not Allowed"
                     doc:id="c3d4e5f6-0003-0003-0003-000000000009"
-                    message="#[output application/java --- 'LOG WARN | flow=' ++ (vars.flowName default 'unknown') ++ ' | correlationId=' ++ correlationId ++ ' | status=405 | ' ++ error.description]" />
+                    message="#[output application/java --- 'status=405 | ' ++ error.description]" />
             <ee:transform doc:name="DW Set 405 Response" doc:id="c3d4e5f6-0003-0003-0003-000000000010">
                 <ee:message>
                     <ee:set-payload><![CDATA[%dw 2.0
@@ -95,7 +95,7 @@ output application/json
             <logger level="ERROR"
                     doc:name="LOG ERROR Not Acceptable"
                     doc:id="c3d4e5f6-0003-0003-0003-000000000012"
-                    message="#[output application/java --- 'LOG WARN | flow=' ++ (vars.flowName default 'unknown') ++ ' | correlationId=' ++ correlationId ++ ' | status=406 | ' ++ error.description]" />
+                    message="#[output application/java --- 'status=406 | ' ++ error.description]" />
             <ee:transform doc:name="DW Set 406 Response" doc:id="c3d4e5f6-0003-0003-0003-000000000013">
                 <ee:message>
                     <ee:set-payload><![CDATA[%dw 2.0
@@ -118,7 +118,7 @@ output application/json
             <logger level="ERROR"
                     doc:name="LOG ERROR Unsupported Media Type"
                     doc:id="c3d4e5f6-0003-0003-0003-000000000015"
-                    message="#[output application/java --- 'LOG WARN | flow=' ++ (vars.flowName default 'unknown') ++ ' | correlationId=' ++ correlationId ++ ' | status=415 | ' ++ error.description]" />
+                    message="#[output application/java --- 'status=415 | ' ++ error.description]" />
             <ee:transform doc:name="DW Set 415 Response" doc:id="c3d4e5f6-0003-0003-0003-000000000016">
                 <ee:message>
                     <ee:set-payload><![CDATA[%dw 2.0
@@ -141,7 +141,7 @@ output application/json
             <logger level="ERROR"
                     doc:name="LOG ERROR Job Not Found"
                     doc:id="c3d4e5f6-0003-0003-0003-000000000018"
-                    message="#[output application/java --- 'LOG WARN | flow=' ++ (vars.flowName default 'unknown') ++ ' | correlationId=' ++ correlationId ++ ' | status=404 | jobId not found: ' ++ (vars.jobId default 'unknown')]" />
+                    message="#[output application/java --- 'status=404 | jobId not found: ' ++ (vars.jobId default 'unknown')]" />
             <ee:transform doc:name="DW Set 404 Job Not Found" doc:id="c3d4e5f6-0003-0003-0003-000000000019">
                 <ee:message>
                     <ee:set-payload><![CDATA[%dw 2.0
@@ -169,7 +169,7 @@ output application/json
             <logger level="ERROR"
                     doc:name="LOG ERROR Validation"
                     doc:id="c3d4e5f6-0003-0003-0003-000000000024"
-                    message="#[output application/java --- 'LOG WARN | flow=' ++ (vars.flowName default 'unknown') ++ ' | correlationId=' ++ correlationId ++ ' | status=400 | errorType=' ++ error.errorType.identifier ++ ' | ' ++ error.description]" />
+                    message="#[output application/java --- 'status=400 | errorType=' ++ error.errorType.identifier ++ ' | ' ++ error.description]" />
             <ee:transform doc:name="DW Set 400 Validation Response" doc:id="c3d4e5f6-0003-0003-0003-000000000025">
                 <ee:message>
                     <ee:set-payload><![CDATA[%dw 2.0
@@ -193,7 +193,7 @@ output application/json
             <logger level="ERROR"
                     doc:name="LOG ERROR App Not Found"
                     doc:id="c3d4e5f6-0003-0003-0003-00000000002a"
-                    message="#[output application/java --- 'LOG WARN | flow=' ++ (vars.flowName default 'unknown') ++ ' | correlationId=' ++ correlationId ++ ' | status=404 | errorType=' ++ error.errorType.identifier ++ ' | ' ++ error.description]" />
+                    message="#[output application/java --- 'status=404 | errorType=' ++ error.errorType.identifier ++ ' | ' ++ error.description]" />
             <ee:transform doc:name="DW Set 404 App Not Found" doc:id="c3d4e5f6-0003-0003-0003-00000000002b">
                 <ee:message>
                     <ee:set-payload><![CDATA[%dw 2.0
@@ -218,7 +218,7 @@ output application/json
             <logger level="ERROR"
                     doc:name="LOG ERROR Conflict"
                     doc:id="c3d4e5f6-0003-0003-0003-000000000027"
-                    message="#[output application/java --- 'LOG WARN | flow=' ++ (vars.flowName default 'unknown') ++ ' | correlationId=' ++ correlationId ++ ' | status=409 | errorType=' ++ error.errorType.identifier ++ ' | ' ++ error.description]" />
+                    message="#[output application/java --- 'status=409 | errorType=' ++ error.errorType.identifier ++ ' | ' ++ error.description]" />
             <ee:transform doc:name="DW Set 409 Conflict Response" doc:id="c3d4e5f6-0003-0003-0003-000000000028">
                 <ee:message>
                     <ee:set-payload><![CDATA[%dw 2.0
@@ -241,7 +241,7 @@ output application/json
             <logger level="ERROR"
                     doc:name="LOG ERROR Internal Server Error"
                     doc:id="c3d4e5f6-0003-0003-0003-000000000021"
-                    message="#[output application/java --- 'LOG ERROR | flow=' ++ (vars.flowName default 'unknown') ++ ' | correlationId=' ++ correlationId ++ ' | status=500 | errorType=' ++ error.errorType.identifier ++ ' | ' ++ error.description]" />
+                    message="#[output application/java --- 'status=500 | errorType=' ++ error.errorType.identifier ++ ' | ' ++ error.description]" />
             <ee:transform doc:name="DW Set 500 Response" doc:id="c3d4e5f6-0003-0003-0003-000000000022">
                 <ee:message>
                     <ee:set-payload><![CDATA[%dw 2.0
@@ -262,7 +262,7 @@ output application/json
     </error-handler>
 	<error-handler name="mcp-error-handler" doc:id="96af74ec-66ad-4da5-a822-30fde3b363fc" >
 		<on-error-continue enableNotifications="true" logException="false" doc:name="Validation Bad Request" doc:id="46907169-1e89-4777-bb04-854e708bfff6" type="VALIDATION:ENV_REQUIRED, VALIDATION:APP_NOT_REGISTERED" >
-			<logger level="WARN" doc:name="LOG WARN mcp validation" doc:id="b5953cea-4fc8-4bb3-9733-0ff9d53c47ae" message="#[output application/java --- 'LOG WARN | flow=' ++ (vars.flowName default 'mcp') ++ ' | correlationId=' ++ correlationId ++ ' | code=400 | errorType=' ++ error.errorType.identifier ++ ' | ' ++ (error.description default '')]" />
+			<logger level="WARN" doc:name="LOG WARN mcp validation" doc:id="b5953cea-4fc8-4bb3-9733-0ff9d53c47ae" message="#[output application/java --- 'code=400 | errorType=' ++ error.errorType.identifier ++ ' | ' ++ (error.description default '')]" />
 			<ee:transform doc:name="DW 400 envelope" doc:id="1aea6c53-dff3-407d-90a2-fe1f771e2226" >
 				<ee:message >
 					<ee:set-payload ><![CDATA[%dw 2.0
@@ -273,7 +273,7 @@ output application/json
 			</ee:transform>
 		</on-error-continue>
 		<on-error-continue enableNotifications="true" logException="false" doc:name="App Not Found" doc:id="ca5728a4-4184-4e00-8ae3-322d8594f0f8" type="VALIDATION:APP_NOT_FOUND" >
-			<logger level="WARN" doc:name="LOG WARN mcp app not found" doc:id="559e655f-d789-46f6-911f-f0f60ae4b3c7" message="#[output application/java --- 'LOG WARN | flow=' ++ (vars.flowName default 'mcp') ++ ' | correlationId=' ++ correlationId ++ ' | code=404 | ' ++ (error.description default '')]" />
+			<logger level="WARN" doc:name="LOG WARN mcp app not found" doc:id="559e655f-d789-46f6-911f-f0f60ae4b3c7" message="#[output application/java --- 'code=404 | ' ++ (error.description default '')]" />
 			<ee:transform doc:name="DW 404 envelope" doc:id="05e20e37-2e49-4db3-98b2-7b34c3f7d798" >
 				<ee:message >
 					<ee:set-payload ><![CDATA[%dw 2.0
@@ -284,7 +284,7 @@ output application/json
 			</ee:transform>
 		</on-error-continue>
 		<on-error-continue enableNotifications="true" logException="false" doc:name="Job Not Found" doc:id="d03afa08-2247-429b-807f-21b7895cce04" type="OS:KEY_NOT_FOUND" >
-			<logger level="WARN" doc:name="LOG WARN mcp job not found" doc:id="0ba821b3-337e-4a06-ad40-5cf7a7eb1999" message="#[output application/java --- 'LOG WARN | flow=' ++ (vars.flowName default 'mcp') ++ ' | correlationId=' ++ correlationId ++ ' | code=404 | jobId not found: ' ++ (vars.jobId default 'unknown')]" />
+			<logger level="WARN" doc:name="LOG WARN mcp job not found" doc:id="0ba821b3-337e-4a06-ad40-5cf7a7eb1999" message="#[output application/java --- 'code=404 | jobId not found: ' ++ (vars.jobId default 'unknown')]" />
 			<ee:transform doc:name="DW 404 job envelope" doc:id="4d29ac92-db51-4293-9bbf-4756cc298418" >
 				<ee:message >
 					<ee:set-payload ><![CDATA[%dw 2.0
@@ -295,7 +295,7 @@ output application/json
 			</ee:transform>
 		</on-error-continue>
 		<on-error-continue enableNotifications="true" logException="false" doc:name="Conflict" doc:id="3c269d39-1c14-491a-981a-d01d84071e58" type="CONFLICT:UPGRADE_IN_PROGRESS, CONFLICT:STALE_PLAN" >
-			<logger level="WARN" doc:name="LOG WARN mcp conflict" doc:id="1fba8ea1-0be6-4582-a963-70dc9a932a42" message="#[output application/java --- 'LOG WARN | flow=' ++ (vars.flowName default 'mcp') ++ ' | correlationId=' ++ correlationId ++ ' | code=409 | errorType=' ++ error.errorType.identifier ++ ' | ' ++ (error.description default '')]" />
+			<logger level="WARN" doc:name="LOG WARN mcp conflict" doc:id="1fba8ea1-0be6-4582-a963-70dc9a932a42" message="#[output application/java --- 'code=409 | errorType=' ++ error.errorType.identifier ++ ' | ' ++ (error.description default '')]" />
 			<ee:transform doc:name="DW 409 envelope" doc:id="6f9e2944-b6fb-48f2-9b73-490745109222" >
 				<ee:message >
 					<ee:set-payload ><![CDATA[%dw 2.0
@@ -306,7 +306,7 @@ output application/json
 			</ee:transform>
 		</on-error-continue>
 		<on-error-continue enableNotifications="true" logException="true" doc:name="Internal Error" doc:id="cb2bad38-b8ab-4da8-870a-8a0c309dea39" type="ANY" >
-			<logger level="ERROR" doc:name="LOG ERROR mcp internal" doc:id="6b1607bb-bd72-4563-ac33-c405519e7104" message="#[output application/java --- 'LOG ERROR | flow=' ++ (vars.flowName default 'mcp') ++ ' | correlationId=' ++ correlationId ++ ' | code=500 | errorType=' ++ (error.errorType.namespace default '') ++ ':' ++ (error.errorType.identifier default '') ++ ' | ' ++ (error.description default '')]" />
+			<logger level="ERROR" doc:name="LOG ERROR mcp internal" doc:id="6b1607bb-bd72-4563-ac33-c405519e7104" message="#[output application/java --- 'code=500 | errorType=' ++ (error.errorType.namespace default '') ++ ':' ++ (error.errorType.identifier default '') ++ ' | ' ++ (error.description default '')]" />
 			<ee:transform doc:name="DW 500 envelope" doc:id="0551f2a1-046e-4181-8cf5-ed63ebd0a259" >
 				<ee:message >
 					<ee:set-payload ><![CDATA[%dw 2.0

@@ -26,10 +26,7 @@ http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/
                       doc:name="PV SET jobId"
                       doc:id="a7b8c9d0-0007-0007-0007-000000000002" />
 
-        <logger level="DEBUG"
-                doc:name="LOG DEBUG Request"
-                doc:id="a7b8c9d0-0007-0007-0007-000000000003"
-                message="#[output application/java --- 'LOG DEBUG | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId]" />
+        <flow-ref name="pf-mdc-stamp" doc:name="pf-mdc-stamp" doc:id="a7b8c9d0-0007-0007-0007-00000000000a" />
 
         <!-- Delegate to the shared sub-flow (also used by MCP get_job_status tool) -->
         <flow-ref name="pf-get-job-status"
@@ -43,7 +40,7 @@ http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/
     <!-- Returns:  payload = JobStatus JSON (public fields only)             -->
     <!-- Throws:   OS:KEY_NOT_FOUND → mapped to 404 by error handler         -->
 	<sub-flow name="pf-get-job-status" doc:id="b7ab308e-6ec3-4a73-930e-2e92806f6081" doc:description="Shared: retrieve job from Object Store by jobId. Called by REST and MCP." >
-		<logger level="DEBUG" doc:name="LOG DEBUG Status Lookup" doc:id="62f9de93-8c7f-476b-af3c-e77d5175f3bf" message="#[output application/java --- 'LOG DEBUG | flow=pf-get-job-status | correlationId=' ++ correlationId ++ ' | jobId=' ++ (vars.jobId default 'unknown')]" />
+		<logger level="INFO" doc:name="LOG INFO START pf-get-job-status" doc:id="62f9de93-8c7f-476b-af3c-e77d5175f3bf" message="#[output application/java --- 'START - pf-get-job-status | status lookup']" />
 		<os:retrieve doc:name="OS Retrieve Job Record" doc:id="63895e47-2b8f-4546-9d1c-f3a8aa1e0456" key="#[vars.jobId]" objectStore="jobStore" />
 		<ee:transform doc:name="DW Build JobStatus Response" doc:id="52a75152-0301-4176-98bb-9cef66599adc" >
 			<ee:message >
@@ -54,7 +51,7 @@ import buildJobStatus from dwl::jobStatus
 buildJobStatus(payload)]]></ee:set-payload>
 			</ee:message>
 		</ee:transform>
-		<logger level="DEBUG" doc:name="LOG DEBUG Status Found" doc:id="c052784d-bb53-40f6-a228-a7663b245d6a" message="#[output application/java --- 'LOG DEBUG | flow=pf-get-job-status | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | status=' ++ payload.status]" />
+		<logger level="INFO" doc:name="LOG INFO END pf-get-job-status" doc:id="c052784d-bb53-40f6-a228-a7663b245d6a" message="#[output application/java --- 'END - pf-get-job-status | status found | status=' ++ payload.status]" />
 	</sub-flow>
 
 </mule>

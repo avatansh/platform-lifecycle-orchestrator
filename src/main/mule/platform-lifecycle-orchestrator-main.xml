@@ -13,8 +13,11 @@ http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/
     <!--
         Main entry-point flow for the Platform Lifecycle Orchestrator API.
         Listens on /api/v1/* and routes all requests through the APIkit router.
-        Structured log lines use the pattern:
-          LOG {scope} | flow={flowName} | correlationId={correlationId} | {detail}
+
+        Correlation ids (correlationId + processorPath, plus jobId/appName/externalTranId
+        stamped via pf-mdc-stamp) are emitted by Log4j2 on EVERY line through the MDC
+        (%X{...} in log4j2.xml), so logger messages carry only the semantic detail —
+        they no longer repeat flow/correlationId/jobId/app by hand.
     -->
     <flow name="platform-lifecycle-orchestrator-main" doc:id="d4e5f6a7-0004-0004-0004-000000000001">
 
@@ -57,13 +60,15 @@ http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/
 			</ee:variables>
 		</ee:transform>
 
-        <!-- Capture inbound X-Correlation-Id header for distributed tracing -->
+        <!-- Stamp the logging MDC (externalTranId here; jobId/appName refined downstream)
+             so every log line for this request carries the correlation ids automatically. -->
+        <flow-ref name="pf-mdc-stamp" doc:name="pf-mdc-stamp" doc:id="d4e5f6a7-0004-0004-0004-00000000000a" />
 
         <logger
             level="INFO"
             doc:name="LOG INFO Request Received"
             doc:id="d4e5f6a7-0004-0004-0004-000000000005"
-            message="#[output application/java --- 'REQUEST RECEIVED | flow=' ++ vars.flowName ++ ' | correlationId=' ++ correlationId ++ ' | externalTranId=' ++ vars.externalTranId ++ ' | method=' ++ attributes.method ++ ' | path=' ++ attributes.requestPath]" />
+            message="#[output application/java --- 'REQUEST RECEIVED | method=' ++ attributes.method ++ ' | path=' ++ attributes.requestPath]" />
 
         <!--
             Capture raw body bytes and GitHub webhook headers BEFORE the APIkit router
@@ -71,18 +76,19 @@ http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/
             non-webhook routes; repeatable streams ensure APIkit can still read the body.
         -->
 
-        <apikit:router
+        <logger level="DEBUG" doc:name="LOG DEBUG Request" doc:id="1572d9be-9d0e-400b-a0bd-1d57990f2264" message="#[output application/java --- 'REQUEST | Payload: ' ++ write(payload, &quot;application/json&quot;, {&quot;indent&quot;: false})]"/>
+		<apikit:router
             config-ref="platform-lifecycle-orchestrator-config"
             doc:name="APIkit Router"
             doc:id="d4e5f6a7-0004-0004-0004-000000000006" />
 
-        <logger
+        <logger level="DEBUG" doc:name="LOG DEBUG Response" doc:id="6cc02ebe-739b-4947-aa6c-00b6a480cce6" message="#[output application/java --- 'RESPONSE | Payload: ' ++ write(payload, &quot;application/json&quot;, {&quot;indent&quot;: false})]"/>
+		<logger
             level="INFO"
             doc:name="LOG INFO Response Sent"
             doc:id="d4e5f6a7-0004-0004-0004-000000000007"
-            message="#[output application/java --- 'RESPONSE SENT | flow=' ++ vars.flowName ++ ' | correlationId=' ++ correlationId ++ ' | status=' ++ vars.httpStatus default 200]" />
-
-        <error-handler ref="global-error-handler" doc:name="Global Error Handler" doc:id="d4e5f6a7-0004-0004-0004-000000000008" />
+            message="#[output application/java --- 'RESPONSE SENT | status=' ++ (vars.httpStatus default 200)]" />
+		<error-handler ref="global-error-handler" doc:name="Global Error Handler" doc:id="d4e5f6a7-0004-0004-0004-000000000008" />
 
     </flow>
 

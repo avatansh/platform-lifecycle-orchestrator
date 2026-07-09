@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="UTF-8"?>
+﻿<?xml version="1.0" encoding="UTF-8"?>
 <mule xmlns:http="http://www.mulesoft.org/schema/mule/http"
       xmlns:os="http://www.mulesoft.org/schema/mule/os"
       xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
@@ -28,7 +28,8 @@
              vars.rawBody and vars.ghSignature were captured in the main flow BEFORE APIkit
              parsed the payload, so rawBody is the exact bytes GitHub signed.
              â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
-        <ee:transform doc:name="DW Compute Expected HMAC Signature"
+        <logger level="INFO" doc:name="LOG INFO START mf-impl-post-webhook" doc:id="fe86b326-6568-42f3-8884-59eef55cc130" message="#[output application/java --- 'START - mf-impl-post-webhook']" />
+		<ee:transform doc:name="DW Compute Expected HMAC Signature"
                       doc:id="b8c9d0e1-0008-0008-0008-000000000020"
                       doc:description="Compute sha256=HEX(HMAC-SHA256(webhookSecret, rawBody)) for comparison with x-hub-signature-256">
             <ee:variables>
@@ -39,8 +40,7 @@ output text/plain
 "sha256=" ++ Crypto::HMACWith(p('secure::github.webhookSecret') as Binary, vars.rawBody, "HmacSHA256")]]></ee:set-variable>
             </ee:variables>
         </ee:transform>
-
-        <choice doc:name="CHOICE signature valid?"
+		<choice doc:name="CHOICE signature valid?"
                 doc:id="b8c9d0e1-0008-0008-0008-000000000022"
                 doc:description="Reject any delivery whose x-hub-signature-256 header does not match the computed HMAC">
             <when expression="#[vars.ghSignature == '' or vars.ghSignature != vars.expectedSig]"
@@ -50,7 +50,7 @@ output text/plain
                 <logger level="WARN"
                         doc:name="LOG WARN Invalid Webhook Signature"
                         doc:id="b8c9d0e1-0008-0008-0008-000000000024"
-                        message="#[output application/java --- 'LOG WARN | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | INVALID webhook signature | delivery=' ++ vars.ghDelivery ++ ' | event=' ++ vars.ghEvent]" />
+                        message="#[output application/java --- 'INVALID webhook signature | delivery=' ++ vars.ghDelivery ++ ' | event=' ++ vars.ghEvent]" />
 
                 <set-variable variableName="httpStatus"
                               value="401"
@@ -68,7 +68,7 @@ output application/json
                 </ee:transform>
 
             </when>
-            <otherwise doc:name="signature valid â€” proceed"
+			<otherwise doc:name="signature valid â€” proceed"
                        doc:id="b8c9d0e1-0008-0008-0008-000000000027">
 
                 <!-- â”€â”€ Idempotency: de-duplicate by GitHub delivery UUID â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -94,7 +94,7 @@ output application/json
                         <logger level="INFO"
                                 doc:name="LOG INFO Duplicate Delivery Skipped"
                                 doc:id="b8c9d0e1-0008-0008-0008-000000000031"
-                                message="#[output application/java --- 'LOG INFO | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | duplicate delivery, skipping | delivery=' ++ vars.ghDelivery]" />
+                                message="#[output application/java --- 'duplicate delivery, skipping | delivery=' ++ vars.ghDelivery]" />
 
                         <ee:transform doc:name="DW Set 200 Duplicate Acknowledgement"
                                       doc:id="b8c9d0e1-0008-0008-0008-000000000032">
@@ -121,7 +121,7 @@ output application/json
                         <logger level="DEBUG"
                                 doc:name="LOG DEBUG Webhook Received"
                                 doc:id="b8c9d0e1-0008-0008-0008-000000000002"
-                                message="#[output application/java --- 'LOG DEBUG | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | webhook event=' ++ vars.ghEvent ++ ' | action=' ++ (payload.action default 'unknown') ++ ' | delivery=' ++ vars.ghDelivery]" />
+                                message="#[output application/java --- 'webhook received | event=' ++ vars.ghEvent ++ ' | action=' ++ (payload.action default 'unknown') ++ ' | delivery=' ++ vars.ghDelivery]" />
 
                         <!--
                             Only process pull_request events where the PR was merged.
@@ -146,7 +146,7 @@ output application/json
                                 <logger level="INFO"
                                         doc:name="LOG INFO PR Merged"
                                         doc:id="b8c9d0e1-0008-0008-0008-000000000006"
-                                        message="#[output application/java --- 'LOG INFO | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | PR merged | branch=' ++ vars.mergedBranch ++ ' | prUrl=' ++ vars.prUrl]" />
+                                        message="#[output application/java --- 'PR merged | branch=' ++ vars.mergedBranch ++ ' | prUrl=' ++ vars.prUrl]" />
 
                                 <!-- get-or-empty: an untracked merged branch has no key. A null
                                      os:default-value would throw OS:KEY_NOT_FOUND, so default to ""
@@ -169,6 +169,12 @@ output application/json
                                                      objectStore="jobStore"
                                                      doc:name="OS Retrieve Job Record"
                                                      doc:id="b8c9d0e1-0008-0008-0008-000000000009" />
+
+                                        <set-variable variableName="jobId" value="#[vars.jobIdFromBranch]"
+                                                      doc:name="PV SET jobId" doc:id="b8c9d0e1-0008-0008-0008-0000000000a0" />
+                                        <set-variable variableName="appName" value="#[payload.appName default '-']"
+                                                      doc:name="PV SET appName" doc:id="b8c9d0e1-0008-0008-0008-0000000000a1" />
+                                        <flow-ref name="pf-mdc-stamp" doc:name="pf-mdc-stamp" doc:id="b8c9d0e1-0008-0008-0008-0000000000a2" />
 
                                         <!--
                                             Transition to DEPLOYING â€” the final DEPLOYED/FAILED_DEPLOY
@@ -202,7 +208,7 @@ payload mergeWith {
                                         <logger level="INFO"
                                                 doc:name="LOG INFO Job DEPLOYING"
                                                 doc:id="b8c9d0e1-0008-0008-0008-000000000012"
-                                                message="#[output application/java --- 'LOG INFO | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobIdFromBranch ++ ' | status=DEPLOYING | awaiting CD pipeline callback']" />
+                                                message="#[output application/java --- 'job DEPLOYING | awaiting CD pipeline callback']" />
 
                                     </when>
 
@@ -210,7 +216,7 @@ payload mergeWith {
                                         <logger level="DEBUG"
                                                 doc:name="LOG DEBUG Branch Not Tracked"
                                                 doc:id="b8c9d0e1-0008-0008-0008-000000000013"
-                                                message="#[output application/java --- 'LOG DEBUG | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | branch not tracked, ignoring | branch=' ++ vars.mergedBranch]" />
+                                                message="#[output application/java --- 'branch not tracked, ignoring | branch=' ++ vars.mergedBranch]" />
                                     </otherwise>
 
                                 </choice>
@@ -221,7 +227,7 @@ payload mergeWith {
                                 <logger level="DEBUG"
                                         doc:name="LOG DEBUG Non-Merge Event Ignored"
                                         doc:id="b8c9d0e1-0008-0008-0008-000000000014"
-                                        message="#[output application/java --- 'LOG DEBUG | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | webhook event ignored | event=' ++ vars.ghEvent ++ ' | action=' ++ (payload.action default 'unknown')]" />
+                                        message="#[output application/java --- 'webhook event ignored | event=' ++ vars.ghEvent ++ ' | action=' ++ (payload.action default 'unknown')]" />
                             </otherwise>
 
                         </choice>
@@ -242,6 +248,7 @@ output application/json
 
             </otherwise>
         </choice>
+		<logger level="INFO" doc:name="LOG INFO END mf-impl-post-webhook" doc:id="0f156594-23b9-47af-a9f6-dee19f900c13" message="#[output application/java --- 'END - mf-impl-post-webhook']" />
 
     </flow>
 
@@ -263,7 +270,8 @@ output application/json
         <!-- â”€â”€ Step 1: Shared-token authentication â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
         <!-- Compute expected HMAC over the raw body (identical scheme to POST /webhook).
              vars.rawBody is captured in the main flow for every route. -->
-        <ee:transform doc:name="DW Compute Expected CD HMAC Signature"
+        <logger level="INFO" doc:name="LOG INFO START mf-impl-post-cd-result" doc:id="d60c9e42-e3d3-4b9a-b001-406cd8b7c364" message="#[output application/java --- 'START - mf-impl-post-cd-result']" />
+		<ee:transform doc:name="DW Compute Expected CD HMAC Signature"
                       doc:id="b9c0d1e2-0009-0009-0009-0000000000a1"
                       doc:description="Compute sha256=HEX(HMAC-SHA256(webhookSecret, rawBody)) for comparison with X-CD-Signature-256">
             <ee:variables>
@@ -298,7 +306,7 @@ else ""]]></ee:set-variable>
                 <logger level="WARN"
                         doc:name="LOG WARN Invalid CD Auth"
                         doc:id="b9c0d1e2-0009-0009-0009-000000000003"
-                        message="#[output application/java --- 'LOG WARN | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | invalid X-CD-Token â€” rejecting']" />
+                        message="#[output application/java --- 'invalid CD auth (X-CD-Signature-256/X-CD-Token) â€” rejecting']" />
 
                 <set-variable variableName="httpStatus"
                               value="401"
@@ -328,6 +336,7 @@ output application/json
 					<ee:variables >
 						<ee:set-variable variableName="jobId" ><![CDATA[payload.jobId]]></ee:set-variable>
 						<ee:set-variable variableName="cdResult" ><![CDATA[payload.result default '']]></ee:set-variable>
+						<ee:set-variable variableName="stage" ><![CDATA[payload.stage default 'deploy']]></ee:set-variable>
 						<ee:set-variable variableName="deployUrl" ><![CDATA[payload.deployUrl default null]]></ee:set-variable>
 						<ee:set-variable variableName="cdError" ><![CDATA[payload.error default null]]></ee:set-variable>
 					</ee:variables>
@@ -357,9 +366,235 @@ output application/json
 					</ee:variables>
 										</ee:transform>
 
+				<flow-ref name="pf-mdc-stamp" doc:name="pf-mdc-stamp" doc:id="b9c0d1e2-0009-0009-0009-0000000000aa" />
+
                 <!-- â”€â”€ Step 5: Idempotency / terminal guard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                      If the job is already in a terminal state, return 200 and skip re-processing.
                      â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
+				<!-- ── Step 5: Stage discriminator (test | deploy) ───────────────────────────────
+				     ONE endpoint serves two CI/CD stages, keyed off payload.stage (default "deploy"):
+				       · stage=test   → MUnit CI result. failure parks the job in MUNIT_FAILED
+				                        (Slack + Jira notified, retained 30d); success resumes a parked job.
+				       · stage=deploy → deployment result — the existing finalize logic below.
+				     ──────────────────────────────────────────────────────────────────────────── -->
+				<choice doc:name="CHOICE cd stage?"
+				        doc:id="c1d2e3f4-000a-000a-000a-000000000001"
+				        doc:description="Route MUnit (test) callbacks to the park/resume handler; deploy callbacks to finalize">
+
+				    <when expression="#[vars.stage == 'test']"
+				          doc:name="stage=test (MUnit CI result)"
+				          doc:id="c1d2e3f4-000a-000a-000a-000000000002">
+
+				        <choice doc:name="CHOICE munit result?"
+				                doc:id="c1d2e3f4-000a-000a-000a-000000000003"
+				                doc:description="MUnit failure → park MUNIT_FAILED; success → resume if parked">
+
+				            <!-- ── test FAILURE → park in MUNIT_FAILED (idempotent) ─────────────── -->
+				            <when expression="#[vars.cdResult == 'failure']"
+				                  doc:name="munit failure"
+				                  doc:id="c1d2e3f4-000a-000a-000a-000000000004">
+				                <choice doc:name="CHOICE parkable?"
+				                        doc:id="c1d2e3f4-000a-000a-000a-000000000005"
+				                        doc:description="Ignore when already parked or already in a terminal state">
+				                    <when expression="#[['MUNIT_FAILED','DEPLOYED','FAILED_DEPLOY','FAILED_CI','FAILED_ASSESS','FAILED_COMMIT','FAILED_INTERRUPTED'] contains (vars.curStatus default '')]"
+				                          doc:name="already parked/terminal — idempotent"
+				                          doc:id="c1d2e3f4-000a-000a-000a-000000000006">
+				                        <logger level="INFO" doc:name="LOG INFO MUnit failure idempotent"
+				                                doc:id="c1d2e3f4-000a-000a-000a-000000000007"
+				                                message="#[output application/java --- 'munit failure ignored (already ' ++ (vars.curStatus default '?') ++ ')']" />
+				                        <ee:transform doc:name="DW 200 MUnit idempotent" doc:id="c1d2e3f4-000a-000a-000a-000000000008">
+				                            <ee:message><ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{ acknowledged: true, idempotent: true, jobId: vars.jobId, status: vars.curStatus }]]></ee:set-payload></ee:message>
+				                        </ee:transform>
+				                    </when>
+				                    <otherwise doc:name="park in MUNIT_FAILED"
+				                               doc:id="c1d2e3f4-000a-000a-000a-000000000009">
+				                        <!-- Persist MUNIT_FAILED. jobStore TTL (osv2.jobTtlSeconds=30d) is refreshed
+				                             on store, so the parked job is retained ~30 days. The single-flight lock
+				                             is intentionally NOT released (the app is still mid-upgrade). -->
+				                        <ee:transform doc:name="DW Update Job to MUNIT_FAILED" doc:id="c1d2e3f4-000a-000a-000a-00000000000a">
+				                            <ee:message><ee:set-payload><![CDATA[%dw 2.0
+output application/json
+import mergeWith from dw::core::Objects
+import nowUtc from dwl::dates
+---
+vars.jobRec mergeWith {
+    status:    "MUNIT_FAILED",
+    error:     (vars.cdError default "MUnit tests failed in CI"),
+    updatedAt: nowUtc()
+}]]></ee:set-payload></ee:message>
+				                        </ee:transform>
+				                        <os:store key="#[vars.jobId]" objectStore="jobStore"
+				                                  doc:name="OS Store MUNIT_FAILED" doc:id="c1d2e3f4-000a-000a-000a-00000000000b">
+				                            <os:value>#[payload]</os:value>
+				                        </os:store>
+
+				                        <!-- Slack notification — non-fatal -->
+				                        <try doc:name="TRY Slack MUNIT_FAILED (non-fatal)" doc:id="c1d2e3f4-000a-000a-000a-00000000000c">
+				                            <ee:transform doc:name="DW Build Slack MUnit-failed message" doc:id="c1d2e3f4-000a-000a-000a-00000000000d">
+				                                <ee:message><ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    channel: p('slack.channel'),
+    text: (":x: *MUnit tests FAILED* — " ++ vars.appName
+           ++ "\nJob " ++ vars.jobId ++ " is paused (MUNIT_FAILED)."
+           ++ "\nFix the tests; the upgrade resumes automatically when CI reports a test success."
+           ++ (if (vars.jiraTicketId != null) ("\nJira: <" ++ (p('jira.baseUrl') default '') ++ "/browse/" ++ (vars.jiraTicketId as String) ++ "|" ++ (vars.jiraTicketId as String) ++ ">") else "")
+           ++ (if (vars.prUrl != null) ("\n" ++ (vars.prUrl as String)) else ""))
+}]]></ee:set-payload></ee:message>
+				                            </ee:transform>
+				                            <set-variable variableName="slackPath"
+				                                          value="#[p('secure::slack.webhookUrl') replace 'https://hooks.slack.com' with '']"
+				                                          doc:name="PV SET slackPath" doc:id="c1d2e3f4-000a-000a-000a-00000000000e" />
+				                            <http:request method="POST" config-ref="Slack_Request" path="#[vars.slackPath]"
+				                                          doc:name="POST Slack MUNIT_FAILED" doc:id="c1d2e3f4-000a-000a-000a-00000000000f" />
+				                            <error-handler>
+				                                <on-error-continue type="ANY" doc:id="c1d2e3f4-000a-000a-000a-000000000010">
+				                                    <logger level="WARN" doc:name="LOG WARN Slack MUnit-failed failed"
+				                                            doc:id="c1d2e3f4-000a-000a-000a-000000000011"
+				                                            message="#[output application/java --- 'Slack MUNIT_FAILED notification error swallowed: ' ++ (error.description default 'unknown')]" />
+				                                </on-error-continue>
+				                            </error-handler>
+				                        </try>
+
+				                        <!-- Jira comment — non-fatal (pf-jira-comment skips when no ticket) -->
+				                        <set-variable variableName="jiraCommentText"
+				                                      value="#[output text/plain --- ('MUnit tests FAILED in CI for ' ++ (vars.appName as String) ++ ' (job ' ++ (vars.jobId as String) ++ '). The upgrade is paused (MUNIT_FAILED); fix the tests and CI will resume it on the next successful test run. ' ++ ((vars.cdError default '') as String))]"
+				                                      doc:name="PV SET jiraCommentText (munit failed)" doc:id="c1d2e3f4-000a-000a-000a-000000000012" />
+				                        <set-variable variableName="jiraCommentUrl" value="#[vars.prUrl default null]"
+				                                      doc:name="PV SET jiraCommentUrl (munit failed)" doc:id="c1d2e3f4-000a-000a-000a-000000000013" />
+				                        <flow-ref name="pf-jira-comment" doc:name="pf-jira-comment (munit failed)"
+				                                  doc:id="c1d2e3f4-000a-000a-000a-000000000014" />
+
+				                        <logger level="WARN" doc:name="LOG WARN Job MUNIT_FAILED"
+				                                doc:id="c1d2e3f4-000a-000a-000a-000000000015"
+				                                message="#[output application/java --- 'job MUNIT_FAILED | awaiting MUnit fix']" />
+
+				                        <ee:transform doc:name="DW 200 MUNIT_FAILED Ack" doc:id="c1d2e3f4-000a-000a-000a-000000000016">
+				                            <ee:message><ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{ acknowledged: true, jobId: vars.jobId, status: "MUNIT_FAILED" }]]></ee:set-payload></ee:message>
+				                        </ee:transform>
+				                    </otherwise>
+				                </choice>
+				            </when>
+
+				            <!-- ── test SUCCESS → resume a parked job (else no-op) ──────────────── -->
+				            <when expression="#[vars.cdResult == 'success']"
+				                  doc:name="munit success"
+				                  doc:id="c1d2e3f4-000a-000a-000a-000000000017">
+				                <choice doc:name="CHOICE was parked?"
+				                        doc:id="c1d2e3f4-000a-000a-000a-000000000018"
+				                        doc:description="Resume only when the job is currently parked in MUNIT_FAILED">
+				                    <when expression="#[vars.curStatus == 'MUNIT_FAILED']"
+				                          doc:name="parked — resume to PR_OPEN"
+				                          doc:id="c1d2e3f4-000a-000a-000a-000000000019">
+				                        <ee:transform doc:name="DW Resume Job to PR_OPEN" doc:id="c1d2e3f4-000a-000a-000a-00000000001a">
+				                            <ee:message><ee:set-payload><![CDATA[%dw 2.0
+output application/json
+import mergeWith from dw::core::Objects
+import nowUtc from dwl::dates
+---
+vars.jobRec mergeWith {
+    status:    "PR_OPEN",
+    error:     null,
+    updatedAt: nowUtc()
+}]]></ee:set-payload></ee:message>
+				                        </ee:transform>
+				                        <os:store key="#[vars.jobId]" objectStore="jobStore"
+				                                  doc:name="OS Store resumed PR_OPEN" doc:id="c1d2e3f4-000a-000a-000a-00000000001b">
+				                            <os:value>#[payload]</os:value>
+				                        </os:store>
+
+				                        <try doc:name="TRY Slack MUnit-resumed (non-fatal)" doc:id="c1d2e3f4-000a-000a-000a-00000000001c">
+				                            <ee:transform doc:name="DW Build Slack MUnit-resumed message" doc:id="c1d2e3f4-000a-000a-000a-00000000001d">
+				                                <ee:message><ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    channel: p('slack.channel'),
+    text: (":white_check_mark: *MUnit tests passing again* — " ++ vars.appName
+           ++ "\nJob " ++ vars.jobId ++ " resumed (PR_OPEN); ready to merge/deploy."
+           ++ (if (vars.prUrl != null) ("\n" ++ (vars.prUrl as String)) else ""))
+}]]></ee:set-payload></ee:message>
+				                            </ee:transform>
+				                            <set-variable variableName="slackPath"
+				                                          value="#[p('secure::slack.webhookUrl') replace 'https://hooks.slack.com' with '']"
+				                                          doc:name="PV SET slackPath (resume)" doc:id="c1d2e3f4-000a-000a-000a-00000000001e" />
+				                            <http:request method="POST" config-ref="Slack_Request" path="#[vars.slackPath]"
+				                                          doc:name="POST Slack MUnit-resumed" doc:id="c1d2e3f4-000a-000a-000a-00000000001f" />
+				                            <error-handler>
+				                                <on-error-continue type="ANY" doc:id="c1d2e3f4-000a-000a-000a-000000000020">
+				                                    <logger level="WARN" doc:name="LOG WARN Slack MUnit-resumed failed"
+				                                            doc:id="c1d2e3f4-000a-000a-000a-000000000021"
+				                                            message="#[output application/java --- 'Slack MUnit-resumed notification error swallowed: ' ++ (error.description default 'unknown')]" />
+				                                </on-error-continue>
+				                            </error-handler>
+				                        </try>
+
+				                        <set-variable variableName="jiraCommentText"
+				                                      value="#[output text/plain --- ('MUnit tests are passing again for ' ++ (vars.appName as String) ++ ' (job ' ++ (vars.jobId as String) ++ '). The upgrade has resumed (PR_OPEN) and is ready to merge/deploy.')]"
+				                                      doc:name="PV SET jiraCommentText (resumed)" doc:id="c1d2e3f4-000a-000a-000a-000000000022" />
+										<set-variable variableName="jiraCommentUrl" value="#[vars.prUrl default null]"
+				                                      doc:name="PV SET jiraCommentUrl (resumed)" doc:id="c1d2e3f4-000a-000a-000a-000000000023" />
+				                        <flow-ref name="pf-jira-comment" doc:name="pf-jira-comment (resumed)"
+				                                  doc:id="c1d2e3f4-000a-000a-000a-000000000024" />
+
+				                        <logger level="INFO" doc:name="LOG INFO Job resumed"
+				                                doc:id="c1d2e3f4-000a-000a-000a-000000000025"
+				                                message="#[output application/java --- 'job resumed | MUNIT_FAILED→PR_OPEN (MUnit green)']" />
+
+				                        <ee:transform doc:name="DW 200 resumed Ack" doc:id="c1d2e3f4-000a-000a-000a-000000000026">
+				                            <ee:message><ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{ acknowledged: true, resumed: true, jobId: vars.jobId, status: "PR_OPEN" }]]></ee:set-payload></ee:message>
+				                        </ee:transform>
+				                    </when>
+				                    <otherwise doc:name="not parked — note only"
+				                               doc:id="c1d2e3f4-000a-000a-000a-000000000027">
+				                        <logger level="INFO" doc:name="LOG INFO MUnit success noted"
+				                                doc:id="c1d2e3f4-000a-000a-000a-000000000028"
+				                        message="#[output application/java --- 'munit success noted (job not parked, status=' ++ (vars.curStatus default '?') ++ ')']" />
+				                        <ee:transform doc:name="DW 200 MUnit success noted" doc:id="c1d2e3f4-000a-000a-000a-000000000029">
+				                            <ee:message><ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{ acknowledged: true, jobId: vars.jobId, status: vars.curStatus, note: "munit success noted" }]]></ee:set-payload></ee:message>
+				                        </ee:transform>
+				                    </otherwise>
+				                </choice>
+				            </when>
+
+				            <!-- ── unknown test result → 400 ───────────────────────────────────── -->
+				            <otherwise doc:name="unknown munit result — reject"
+				                       doc:id="c1d2e3f4-000a-000a-000a-00000000002a">
+				                <logger level="WARN" doc:name="LOG WARN Unknown MUnit result"
+				                        doc:id="c1d2e3f4-000a-000a-000a-00000000002b"
+				                        message="#[output application/java --- 'unknown stage=test result=' ++ vars.cdResult]" />
+				                <set-variable variableName="httpStatus" value="400"
+				                              doc:name="PV SET httpStatus 400" doc:id="c1d2e3f4-000a-000a-000a-00000000002c" />
+				                <ee:transform doc:name="DW 400 Unknown MUnit Result" doc:id="c1d2e3f4-000a-000a-000a-00000000002d">
+				                    <ee:message><ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{ error: "invalid result (expected success|failure)", correlationId: correlationId }]]></ee:set-payload></ee:message>
+				                </ee:transform>
+				            </otherwise>
+
+				        </choice>
+
+				    </when>
+
+				    <otherwise doc:name="stage=deploy (finalize)"
+				               doc:id="c1d2e3f4-000a-000a-000a-00000000002e">
+
+				<!-- ── Step 5: Idempotency / terminal guard ──────────────────────────────────
+				     If the job is already in a terminal state, return 200 and skip re-processing. -->
 				<choice doc:name="CHOICE already terminal?"
                         doc:id="b9c0d1e2-0009-0009-0009-000000000018"
                         doc:description="Skip if the job was already finalized by a previous cd-result callback">
@@ -370,7 +605,7 @@ output application/json
                         <logger level="INFO"
                                 doc:name="LOG INFO CD Result Already Final"
                                 doc:id="b9c0d1e2-0009-0009-0009-000000000020"
-                                message="#[output application/java --- 'LOG INFO | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | cd-result already final, skipping | jobId=' ++ vars.jobId ++ ' | status=' ++ vars.curStatus]" />
+                                message="#[output application/java --- 'cd-result already final, skipping | status=' ++ vars.curStatus]" />
 
                         <ee:transform doc:name="DW Set 200 Idempotent Acknowledgement"
                                       doc:id="b9c0d1e2-0009-0009-0009-000000000021">
@@ -515,7 +750,7 @@ output application/json
                                                     <logger level="WARN"
                                                             doc:name="LOG WARN Slack DEPLOYED notification failed"
                                                             doc:id="b9c0d1e2-0009-0009-0009-000000000036"
-                                                            message="#[output application/java --- 'LOG WARN | flow=' ++ flow.name ++ ' | Slack DEPLOYED notification error swallowed: ' ++ (error.description default 'unknown')]" />
+                                                            message="#[output application/java --- 'Slack DEPLOYED notification error swallowed: ' ++ (error.description default 'unknown')]" />
                                                 </on-error-continue>
                                             </error-handler>
                                         </try>
@@ -549,7 +784,7 @@ else
                                 <logger level="INFO"
                                         doc:name="LOG INFO Job finalized"
                                         doc:id="b9c0d1e2-0009-0009-0009-000000000037"
-                                        message="#[output application/java --- 'LOG INFO | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | status=' ++ vars.deployVerdict ++ ' | platformVerified=' ++ (vars.verify.verified default false) ++ ' | platformStatus=' ++ (vars.verify.status default 'n/a') ++ ' | deployUrl=' ++ (vars.deployUrl default 'n/a')]" />
+                                        message="#[output application/java --- 'job finalized | status=' ++ vars.deployVerdict ++ ' | platformVerified=' ++ (vars.verify.verified default false) ++ ' | platformStatus=' ++ (vars.verify.status default 'n/a') ++ ' | deployUrl=' ++ (vars.deployUrl default 'n/a')]" />
 
                                 <ee:transform doc:name="DW Set 200 finalized Acknowledgement"
                                               doc:id="b9c0d1e2-0009-0009-0009-000000000038">
@@ -623,7 +858,7 @@ vars.jobRec mergeWith {
                                 <logger level="WARN"
                                         doc:name="LOG WARN Job FAILED_DEPLOY"
                                         doc:id="b9c0d1e2-0009-0009-0009-000000000048"
-                                        message="#[output application/java --- 'LOG WARN | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | status=FAILED_DEPLOY']" />
+                                        message="#[output application/java --- 'job FAILED_DEPLOY']" />
 
                                 <ee:transform doc:name="DW Set 200 FAILED_DEPLOY Acknowledgement"
                                               doc:id="b9c0d1e2-0009-0009-0009-000000000049">
@@ -644,7 +879,7 @@ output application/json
                                 <logger level="WARN"
                                         doc:name="LOG WARN Unknown CD Result"
                                         doc:id="b9c0d1e2-0009-0009-0009-000000000051"
-                                        message="#[output application/java --- 'LOG WARN | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | unknown cdResult=' ++ vars.cdResult]" />
+                                        message="#[output application/java --- 'unknown cdResult=' ++ vars.cdResult]" />
 
                                 <set-variable variableName="httpStatus"
                                               value="400"
@@ -668,8 +903,12 @@ output application/json
                     </otherwise>
                 </choice>
 
+				    </otherwise>
+				</choice>
+
             </otherwise>
         </choice>
+		<logger level="INFO" doc:name="LOG INFO END mf-impl-post-cd-result" doc:id="70fcd4ed-91a1-42dc-a1f5-4fe90e0af87f" message="#[output application/java --- 'END - mf-impl-post-cd-result']" />
 
     </flow>
 

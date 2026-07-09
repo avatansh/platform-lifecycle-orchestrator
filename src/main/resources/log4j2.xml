@@ -4,7 +4,7 @@
         <RollingFile name="file"
                      fileName="${sys:mule.home}${sys:file.separator}logs${sys:file.separator}platform-lifecycle-orchestrator.log"
                      filePattern="${sys:mule.home}${sys:file.separator}logs${sys:file.separator}platform-lifecycle-orchestrator-%i.log">
-            <PatternLayout pattern="%-5p %d [%t] [processor: %X{processorPath}; event: %X{correlationId}] %c: %m%n"/>
+            <PatternLayout pattern="%-5p %d [%t] [processor: %X{processorPath}; event: %X{correlationId}; job: %X{jobId}; app: %X{appName}; txn: %X{externalTranId}] %c: %m%n"/>
             <SizeBasedTriggeringPolicy size="10 MB"/>
             <DefaultRolloverStrategy max="10"/>
         </RollingFile>

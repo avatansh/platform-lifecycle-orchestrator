@@ -38,6 +38,9 @@ job-unregistered.json
 assess.json
 webhook-merge.json
 .tmp-*.json
+test-ch2-e2e.bat
+CH2.0_VERIFICATION_GUIDE.html
+DESIGN_DECISIONS.html
 
 # ─────────────────────────────────────────────────────────────
 # IDEs / editors

@@ -102,13 +102,13 @@
 				<ee:set-variable variableName="externalTranId" ><![CDATA[correlationId]]></ee:set-variable>
 			</ee:variables>
 		</ee:transform>
-        <!-- Map MCP tool parameters to variables consumed by the shared sub-flow -->
+        <flow-ref name="pf-mdc-stamp" doc:name="pf-mdc-stamp" doc:id="mc1a0001-0001-0001-0001-00000000000a" />
 
-        <logger level="INFO" doc:name="LOG INFO Request Received" doc:id="a8d9977f-5d56-4505-ae43-6206eccc2153" message="#[output application/java --- 'REQUEST RECEIVED | flow=' ++ (vars.flowName default 'assess_app-mcp-tool') ++ ' | correlationId=' ++ correlationId ++ ' | externalTranId=' ++ (vars.externalTranId default correlationId) ++ ' | transport=mcp | tool=assess_app']" />
+        <logger level="INFO" doc:name="LOG INFO Request Received" doc:id="a8d9977f-5d56-4505-ae43-6206eccc2153" message="#[output application/java --- 'REQUEST RECEIVED | transport=mcp | tool=assess_app']" />
 		<flow-ref name="pf-assess-app"
                   doc:name="pf-assess-app"
                   doc:id="mc1a0001-0001-0001-0001-000000000006" />
-        <logger level="INFO" doc:name="LOG INFO Response Sent" doc:id="f6e21855-0bd9-4216-88cf-1797d9a3ee97" message="#[output application/java --- 'RESPONSE SENT | flow=' ++ (vars.flowName default 'assess_app-mcp-tool') ++ ' | correlationId=' ++ correlationId ++ ' | status=' ++ ((vars.httpStatus default 200) as String)]" />
+        <logger level="INFO" doc:name="LOG INFO Response Sent" doc:id="f6e21855-0bd9-4216-88cf-1797d9a3ee97" message="#[output application/java --- 'RESPONSE SENT | status=' ++ ((vars.httpStatus default 200) as String)]" />
 
         <error-handler ref="mcp-error-handler" doc:name="MCP Error Handler" doc:id="mc1a0001-0001-0001-0001-000000000009" />
 
@@ -200,15 +200,15 @@
 				<ee:set-variable variableName="externalTranId" ><![CDATA[correlationId]]></ee:set-variable>
 			</ee:variables>
 		</ee:transform>
-        <!-- Map MCP tool parameters to variables consumed by the shared sub-flow -->
+        <flow-ref name="pf-mdc-stamp" doc:name="pf-mdc-stamp" doc:id="mc2b0002-0002-0002-0002-00000000000a" />
 
-        <logger level="INFO" doc:name="LOG INFO Request Received" doc:id="mc2b0002-0002-0002-0002-000000000005" message="#[output application/java --- 'REQUEST RECEIVED | flow=' ++ (vars.flowName default 'start_upgrade-mcp-tool') ++ ' | correlationId=' ++ correlationId ++ ' | externalTranId=' ++ (vars.externalTranId default correlationId) ++ ' | transport=mcp | tool=start_upgrade | app=' ++ (vars.appName default '?')]" />
+        <logger level="INFO" doc:name="LOG INFO Request Received" doc:id="mc2b0002-0002-0002-0002-000000000005" message="#[output application/java --- 'REQUEST RECEIVED | transport=mcp | tool=start_upgrade']" />
 
         <flow-ref name="pf-start-upgrade"
                   doc:name="pf-start-upgrade"
                   doc:id="mc2b0002-0002-0002-0002-000000000007" />
 
-        <logger level="INFO" doc:name="LOG INFO Response Sent" doc:id="mc2b0002-0002-0002-0002-000000000008" message="#[output application/java --- 'RESPONSE SENT | flow=' ++ (vars.flowName default 'start_upgrade-mcp-tool') ++ ' | correlationId=' ++ correlationId ++ ' | status=' ++ ((vars.httpStatus default 200) as String)]" />
+        <logger level="INFO" doc:name="LOG INFO Response Sent" doc:id="mc2b0002-0002-0002-0002-000000000008" message="#[output application/java --- 'RESPONSE SENT | status=' ++ ((vars.httpStatus default 200) as String)]" />
 
         <error-handler ref="mcp-error-handler" doc:name="MCP Error Handler" doc:id="mc2b0002-0002-0002-0002-000000000009" />
 
@@ -231,6 +231,9 @@
                 or any FAILED_* state — FAILED_ASSESS, FAILED_COMMIT, FAILED_CI, FAILED_DEPLOY,
                 FAILED_INTERRUPTED (error — inspect the error field). Non-terminal (keep polling)
                 states include PROCESSING, ASSESSING, COMMITTING, COMMITTED, PR_OPEN and DEPLOYING.
+                MUNIT_FAILED is a non-terminal PAUSE that needs human action: the app's MUnit suite
+                failed in CI (see the error field) and the job waits (retained ~30 days) until a human
+                fixes the tests and CI reports a test success, which resumes it automatically.
                 When status is PR_OPEN the prUrl field contains the GitHub pull request link. Honour
                 the nextPollSeconds hint in the response as the suggested wait before polling again.
             </mcp:description>
@@ -260,14 +263,15 @@
 				<ee:set-variable variableName="externalTranId"><![CDATA[correlationId]]></ee:set-variable>
 			</ee:variables>
 		</ee:transform>
+        <flow-ref name="pf-mdc-stamp" doc:name="pf-mdc-stamp" doc:id="mc3c0003-0003-0003-0003-00000000000a" />
 
-        <logger level="INFO" doc:name="LOG INFO Request Received" doc:id="mc3c0003-0003-0003-0003-000000000005" message="#[output application/java --- 'REQUEST RECEIVED | flow=' ++ (vars.flowName default 'get_job_status-mcp-tool') ++ ' | correlationId=' ++ correlationId ++ ' | externalTranId=' ++ (vars.externalTranId default correlationId) ++ ' | transport=mcp | tool=get_job_status | jobId=' ++ (vars.jobId default '?')]" />
+        <logger level="INFO" doc:name="LOG INFO Request Received" doc:id="mc3c0003-0003-0003-0003-000000000005" message="#[output application/java --- 'REQUEST RECEIVED | transport=mcp | tool=get_job_status']" />
 
         <flow-ref name="pf-get-job-status"
                   doc:name="pf-get-job-status"
                   doc:id="mc3c0003-0003-0003-0003-000000000004" />
 
-        <logger level="INFO" doc:name="LOG INFO Response Sent" doc:id="mc3c0003-0003-0003-0003-000000000006" message="#[output application/java --- 'RESPONSE SENT | flow=' ++ (vars.flowName default 'get_job_status-mcp-tool') ++ ' | correlationId=' ++ correlationId ++ ' | status=' ++ ((vars.httpStatus default 200) as String)]" />
+        <logger level="INFO" doc:name="LOG INFO Response Sent" doc:id="mc3c0003-0003-0003-0003-000000000006" message="#[output application/java --- 'RESPONSE SENT | status=' ++ ((vars.httpStatus default 200) as String)]" />
 
         <error-handler ref="mcp-error-handler" doc:name="MCP Error Handler" doc:id="mc3c0003-0003-0003-0003-000000000007" />
 

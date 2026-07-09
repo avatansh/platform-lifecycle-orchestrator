@@ -88,7 +88,7 @@ computePropEdits(chain, matrix)]]></ee:set-variable>
          assessment :: buildAssessmentResult — end-to-end golden (property edits only)
          ══════════════════════════════════════════════════════════════════════════ -->
     <munit:test name="assessment-buildAssessmentResult-golden" doc:id="dwa-test-0003"
-                description="buildAssessmentResult produces the expected changePlan for an app-owned upgrade with no shared-file blast radius">
+                description="buildAssessmentResult produces the expected changePlan for an app-owned upgrade with no shared-file Warning">
         <munit:execution>
             <ee:transform doc:name="DW buildAssessmentResult" doc:id="dwa-test-0003-exec">
                 <ee:variables>
@@ -127,12 +127,45 @@ buildAssessmentResult(matrix, chain, childText, null, null, null, null, "myapp",
     </munit:test>
 
     <!-- ══════════════════════════════════════════════════════════════════════════
-         assessment :: blast-radius warning when an edit lands on a shared parent pom
+         assessment :: shared-file Warning when an inPlace edit lands on a shared parent pom
          ══════════════════════════════════════════════════════════════════════════ -->
-    <munit:test name="assessment-blast-radius-warning" doc:id="dwa-test-0004"
-                description="buildAssessmentResult adds a BLAST RADIUS warning when a property edit targets a shared (non-app) pom">
+    <munit:test name="assessment-shared-file-warning" doc:id="dwa-test-0004"
+                description="under inPlace, buildAssessmentResult adds a WARNING when a property edit targets a shared (non-app) pom">
         <munit:execution>
             <ee:transform doc:name="DW buildAssessmentResult (parent-owned prop)" doc:id="dwa-test-0004-exec">
+                <ee:variables>
+                    <ee:set-variable variableName="result"><![CDATA[%dw 2.0
+import buildAssessmentResult from dwl::assessment
+output application/java
+var childText = "<project><parent><relativePath>../../pom.xml</relativePath></parent></project>"
+var childPom = read(childText, "application/xml")
+var parentPom = read("<project><properties><app.runtime>4.6.0</app.runtime></properties></project>", "application/xml")
+var chain = [{ path: "modules/app/pom.xml", pom: childPom }, { path: "pom.xml", pom: parentPom }]
+var matrix = {
+    target: { runtime: "4.9.18", javaVersion: "17" },
+    muleArtifact: { minMuleVersion: "4.9.0", javaSpecificationVersions: ["17"] },
+    gating: { r: { property: "app.runtime", set: "4.9.18" } },
+    connectors: []
+}
+---
+buildAssessmentResult(matrix, chain, childText, null, null, null, null, "myapp", "PARENT_APP", "sha123", false, false, false, [], "inPlace")]]></ee:set-variable>
+                </ee:variables>
+            </ee:transform>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="edit owned by parent pom" expression="#[vars.result.changePlan.fileEdits[0].file]" is="#[MunitTools::equalTo('pom.xml')]" />
+            <munit-tools:assert-that doc:name="1 warning" expression="#[sizeOf(vars.result.warnings)]" is="#[MunitTools::equalTo(1)]" />
+            <munit-tools:assert-that doc:name="warning is a shared-file Warning" expression="#[vars.result.warnings[0]]" is="#[MunitTools::containsString('WARNING')]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- ══════════════════════════════════════════════════════════════════════════
+         assessment :: appOverride retargets an inherited property edit onto the app pom
+         ══════════════════════════════════════════════════════════════════════════ -->
+    <munit:test name="assessment-appOverride-retargets-to-app-pom" doc:id="dwa-test-0008"
+                description="under appOverride (default), an inherited property gate is written to the app pom with NO shared-file Warning">
+        <munit:execution>
+            <ee:transform doc:name="DW buildAssessmentResult (appOverride)" doc:id="dwa-test-0008-exec">
                 <ee:variables>
                     <ee:set-variable variableName="result"><![CDATA[%dw 2.0
 import buildAssessmentResult from dwl::assessment
@@ -153,9 +186,54 @@ buildAssessmentResult(matrix, chain, childText, null, null, null, null, "myapp",
             </ee:transform>
         </munit:execution>
         <munit:validation>
-            <munit-tools:assert-that doc:name="edit owned by parent pom" expression="#[vars.result.changePlan.fileEdits[0].file]" is="#[MunitTools::equalTo('pom.xml')]" />
-            <munit-tools:assert-that doc:name="1 warning" expression="#[sizeOf(vars.result.warnings)]" is="#[MunitTools::equalTo(1)]" />
-            <munit-tools:assert-that doc:name="warning is blast radius" expression="#[vars.result.warnings[0]]" is="#[MunitTools::containsString('BLAST RADIUS')]" />
+            <munit-tools:assert-that doc:name="edit retargeted to app pom" expression="#[vars.result.changePlan.fileEdits[0].file]" is="#[MunitTools::equalTo('modules/app/pom.xml')]" />
+            <munit-tools:assert-that doc:name="edit flagged addIfAbsent" expression="#[vars.result.changePlan.fileEdits[0].addIfAbsent]" is="#[MunitTools::equalTo(true)]" />
+            <munit-tools:assert-that doc:name="no shared-file warning" expression="#[sizeOf(vars.result.warnings)]" is="#[MunitTools::equalTo(0)]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- ══════════════════════════════════════════════════════════════════════════
+         assessment :: computePropEditsOverride pins declared connectors into the app pom
+         ══════════════════════════════════════════════════════════════════════════ -->
+    <munit:test name="assessment-computePropEditsOverride-connectors" doc:id="dwa-test-0009"
+                description="appOverride pins a declared connector (ref→property, literal→replace, absent→add) and skips undeclared connectors">
+        <munit:execution>
+            <ee:transform doc:name="DW computePropEditsOverride" doc:id="dwa-test-0009-exec">
+                <ee:variables>
+                    <ee:set-variable variableName="result"><![CDATA[%dw 2.0
+import computePropEditsOverride from dwl::assessment
+output application/java
+var appText = "<project>" ++
+  "<properties/>" ++
+  "<dependencies>" ++
+    "<dependency><groupId>org.mule.connectors</groupId><artifactId>mule-http-connector</artifactId><version>\u0024{http.connector.version}</version></dependency>" ++
+    "<dependency><groupId>org.mule.modules</groupId><artifactId>mule-apikit-module</artifactId><version>1.6.0</version></dependency>" ++
+    "<dependency><groupId>org.mule.connectors</groupId><artifactId>mule-sockets-connector</artifactId></dependency>" ++
+  "</dependencies>" ++
+"</project>"
+var appPom = read(appText, "application/xml")
+var chain = [{ path: "app/pom.xml", pom: appPom }]
+var matrix = {
+    gating: {},
+    connectors: [
+        { property: "http.connector.version", set: "1.11.3", groupId: "org.mule.connectors", artifactId: "mule-http-connector" },
+        { property: "apikit.version",         set: "1.11.8", groupId: "org.mule.modules",    artifactId: "mule-apikit-module" },
+        { property: "sockets.version",        set: "1.2.4",  groupId: "org.mule.connectors", artifactId: "mule-sockets-connector" },
+        { property: "db.version",             set: "1.14.0", groupId: "org.mule.connectors", artifactId: "mule-db-connector" }
+    ]
+}
+---
+computePropEditsOverride(chain, matrix)]]></ee:set-variable>
+                </ee:variables>
+            </ee:transform>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="3 edits (undeclared db skipped)" expression="#[sizeOf(vars.result)]" is="#[MunitTools::equalTo(3)]" />
+            <munit-tools:assert-that doc:name="http ref becomes a property override" expression="#[sizeOf(vars.result filter ((e) -> e.kind == 'pomProperty' and e.property == 'http.connector.version' and e.to == '1.11.3' and e.addIfAbsent == true))]" is="#[MunitTools::equalTo(1)]" />
+            <munit-tools:assert-that doc:name="apikit literal becomes a depVersion replace" expression="#[sizeOf(vars.result filter ((e) -> e.kind == 'depVersion' and e.artifactId == 'mule-apikit-module' and e.to == '1.11.8'))]" is="#[MunitTools::equalTo(1)]" />
+            <munit-tools:assert-that doc:name="sockets (no version) becomes a depVersion add" expression="#[sizeOf(vars.result filter ((e) -> e.kind == 'depVersion' and e.artifactId == 'mule-sockets-connector' and e.from == null and e.to == '1.2.4'))]" is="#[MunitTools::equalTo(1)]" />
+            <munit-tools:assert-that doc:name="all target the app pom" expression="#[sizeOf(vars.result filter ((e) -> e.file == 'app/pom.xml'))]" is="#[MunitTools::equalTo(3)]" />
+            <munit-tools:assert-that doc:name="undeclared db connector not added" expression="#[sizeOf(vars.result filter ((e) -> (e.artifactId default '') == 'mule-db-connector' or (e.property default '') == 'db.version'))]" is="#[MunitTools::equalTo(0)]" />
         </munit:validation>
     </munit:test>
 

@@ -117,6 +117,80 @@ fun computePropEdits(chain, matrix) =
             } })
         filter ($.change))
 
+// ── appOverride strategy (default) ──────────────────────────────────────────────────
+// Every version edit is written into the app's OWN module pom (chain[0]) so sibling
+// modules that share a parent/BOM are never touched. Each matrix rule is pinned where it
+// is DECLARED in the app pom:
+//   · a connector/plugin <version> that is a ${property} placeholder → override that
+//     property in the app pom (one edit covers every artifact that references it, e.g.
+//     all munit-* referencing ${munit.version}),
+//   · a literal inline <version> → replace it with the pinned literal,
+//   · a declared coordinate with NO <version> (BOM-managed) → add a <version>.
+// A connector the app pom does NOT declare is skipped — we never add a dependency the app
+// didn't already declare. Pure-property GATES (runtime/java) are added/overridden in the
+// app pom even when only inherited, because they are the Java-17 upgrade targets.
+
+fun isRef(v)   = (v != null) and ((v as String) matches /^\s*\$\{.+\}\s*$/)
+fun refName(v) = trim(v as String) replace /^\$\{/ with "" replace /\}$/ with ""
+
+// needsBump(installed, r): version gate — unknown/external ⇒ pin; else honour in[]/semver.
+fun needsBump(installed, r) =
+    if (installed == null) true
+    else if (r.in?) (r.in contains (installed as String))
+    else lt(installed as String, r.set)
+
+// A property override that lands in the app pom (added if the tag is absent).
+fun appPropEdit(appPath, property, from, to) =
+    { property: property, kind: "pomProperty", file: appPath, from: from, to: to, change: true, addIfAbsent: true }
+
+// Pin one declared occurrence (dependency or plugin) inside the app pom.
+fun pinOccurrence(chain, appPath, r, ver, kind, coords) =
+    if (isRef(ver)) do {                     // ${property} ref → override the property in the app pom
+        var p = refName(ver)
+        ---
+        if (needsBump(resolveProp(chain, p), r)) [ appPropEdit(appPath, p, resolveProp(chain, p), r.set) ] else []
+    }
+    else if (ver != null)                    // inline literal → replace it
+        (if (needsBump(ver as String, r))
+            [ ({ kind: kind, file: appPath, from: (ver as String), to: r.set, change: true, property: r.property } ++ coords) ]
+         else [])
+    else                                     // declared but no <version> (BOM-managed) → add one
+        [ ({ kind: kind, file: appPath, from: null, to: r.set, change: true, property: r.property } ++ coords) ]
+
+// Edits for a single rule under appOverride. isGating ⇒ a pure-property rule (runtime/java)
+// may be ADDED to the app pom even when only inherited.
+fun overrideEditsForRule(chain, r, isGating) = do {
+    var appPath  = chain[0].path
+    var depInApp = if ((r.groupId?) and (r.artifactId?)) findDep([chain[0]], r.groupId, r.artifactId) else null
+    var plgInApp = if (r.pluginArtifactId?) findPlugin([chain[0]], (r.pluginGroupId default null), r.pluginArtifactId) else null
+    ---
+    if (depInApp == null and plgInApp == null)
+        // Not declared in the app pom as a dependency/plugin.
+        (if (isGating and !(r.groupId?) and !(r.pluginArtifactId?))
+            // pure-property gate (runtime/java) → add/override in the app pom
+            (if (needsBump(resolveProp(chain, r.property), r))
+                [ appPropEdit(appPath, r.property, resolveProp(chain, r.property), r.set) ] else [])
+         else [])   // undeclared connector/plugin → never add
+    else
+        ( (if (depInApp != null) pinOccurrence(chain, appPath, r, (depInApp.dep.version default null), "depVersion",
+                                               { groupId: r.groupId, artifactId: r.artifactId }) else [])
+          ++
+          (if (plgInApp != null) pinOccurrence(chain, appPath, r, (plgInApp.plugin.version default null), "pluginVersion",
+                                               { pluginGroupId: (r.pluginGroupId default null), pluginArtifactId: r.pluginArtifactId }) else []) )
+}
+
+/**
+ * appOverride counterpart of computePropEdits: pins every applicable rule into the app pom.
+ */
+fun computePropEditsOverride(chain, matrix) = do {
+    var gatingEdits = flatten(valuesOf(matrix.gating)        map ((r) -> overrideEditsForRule(chain, r, true)))
+    var connEdits   = flatten((matrix.connectors default []) map ((r) -> overrideEditsForRule(chain, r, false)))
+    ---
+    (gatingEdits ++ connEdits) distinctBy ((e) ->
+        (e.kind default "") ++ "|" ++ (e.property default "") ++ "|" ++ (e.groupId default "") ++ "|"
+        ++ (e.artifactId default "") ++ "|" ++ (e.pluginArtifactId default ""))
+}
+
 /**
  * Scans the repo tree + app pom text for custom Java, lookup() usage and builds warnings.
  * tree       : recursive tree object
@@ -154,9 +228,12 @@ fun scanFlags(tree, appPomText) = do {
 fun buildAssessmentResult(
         matrix, chain, appPomText0, muleArtifactCurrent, muleArtifactPath,
         ciWorkflowText, ciWorkflowPath, appName, topology, headSha,
-        hasApiPolicies, customJavaFound, lookupFound, warnings) = do {
+        hasApiPolicies, customJavaFound, lookupFound, warnings, pomEditStrategy = "appOverride") = do {
     var m = matrix
-    var propEdits = computePropEdits(chain, matrix)
+    // pomEditStrategy: "appOverride" (default) writes every edit into the app's own pom;
+    // "inPlace" (legacy) edits the declaring parent/BOM and surfaces a shared-file Warning.
+    var propEdits = if (pomEditStrategy == "inPlace") computePropEdits(chain, matrix)
+                    else computePropEditsOverride(chain, matrix)
     // app-level edits — DIFF-AWARE: emit ONLY when the current value actually differs from target.
     var appPomText = appPomText0 default ""
     // (1) MUnit <runtimeVersion> — literal only. A property-placeholder value is driven by a
@@ -188,13 +265,14 @@ fun buildAssessmentResult(
       ++ (if (ciNeeds)
             [{ file: ciWorkflowPath, kind: "ciWorkflow", from: ciCur, to: m.target.javaVersion }] else [])
     var all = propEdits ++ appEdits
-    // BLAST-RADIUS: property/dependency/plugin edits can land on a shared parent or BOM
-    // pom (any chain entry other than the app's OWN module pom at chain[0]). Editing those
-    // upgrades every module that inherits from them, so surface it as an explicit warning.
-    var appPomPath     = chain[0].path default ''
-    var sharedPomFiles = ((propEdits map $.file) distinctBy $) filter ((f) -> f != appPomPath)
-    var blastWarnings  = if (isEmpty(sharedPomFiles)) []
-        else [ ("BLAST RADIUS: this upgrade edits shared build file(s) [" ++ (sharedPomFiles joinBy ", ")
+    // WARNING (shared build file): property/dependency/plugin edits can land on a shared
+    // parent or BOM pom (any chain entry other than the app's OWN module pom at chain[0]).
+    // Editing those upgrades every module that inherits from them, so surface it explicitly.
+    // Under the default appOverride strategy all edits target the app pom, so this stays empty.
+    var appPomPath      = chain[0].path default ''
+    var sharedPomFiles  = ((propEdits map $.file) distinctBy $) filter ((f) -> f != appPomPath)
+    var sharedFileWarnings = if (isEmpty(sharedPomFiles)) []
+        else [ ("WARNING: this upgrade edits shared build file(s) [" ++ (sharedPomFiles joinBy ", ")
                 ++ "] that are inherited by other modules in the repository. Approving it upgrades EVERY module that inherits from these files, not just "
                 ++ (appName default "this app")
                 ++ " — every inheriting module's build and MUnit tests must pass in CI. Review the wider impact before approving.") ]
@@ -214,6 +292,6 @@ fun buildAssessmentResult(
         hasCustomJavaCode: customJavaFound default false,
         hasLookupFunction: lookupFound default false
       },
-      warnings: (warnings default []) ++ blastWarnings
+      warnings: (warnings default []) ++ sharedFileWarnings
     }
 }

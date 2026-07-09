@@ -17,7 +17,7 @@ http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/cu
          ========================================================================== -->
 	<sub-flow name="pf-notify" doc:id="08b7f046-8af1-4d74-9dbf-e947b2e0071d" doc:description="Send Slack + optional Jira PR-opened notification. Non-fatal." >
 		<try doc:name="TRY notification (non-fatal)" doc:id="a65ccca1-956a-4c3b-9a34-908f21cd258d" >
-			<logger level="INFO" doc:name="LOG INFO pf-notify enter" doc:id="d803b314-c91f-4550-9941-5696370ae2f4" message="#[output application/java --- 'LOG INFO | flow=pf-notify | correlationId=' ++ correlationId ++ ' | jobId=' ++ (vars.jobId default '?') ++ ' | prUrl=' ++ (vars.prUrl default '(none)')]" />
+			<logger level="INFO" doc:name="LOG INFO START pf-notify enter" doc:id="d803b314-c91f-4550-9941-5696370ae2f4" message="#[output application/java --- 'START - pf-notify enter | prUrl=' ++ (vars.prUrl default '(none)')]" />
 			<ee:transform doc:name="DW Build Slack success message" doc:id="739fed17-d1a9-4309-98b0-616633f051a7" >
 				<ee:message >
 					<ee:set-payload ><![CDATA[%dw 2.0
@@ -39,10 +39,11 @@ output application/json
 			<flow-ref doc:name="pf-jira-comment (PR opened)" doc:id="fc12f80d-2d77-4d0e-b45e-1e4668bef3a3" name="pf-jira-comment" />
 			<error-handler >
 				<on-error-continue enableNotifications="true" logException="true" doc:name="swallow notification error" doc:id="ae57166e-8341-47db-ae80-20df793cfb31" type="ANY" >
-					<logger level="WARN" doc:name="LOG WARN notification failed" doc:id="243ee6db-8df4-48bf-b050-ac60d712f6fb" message="#[output application/java --- 'LOG WARN | flow=pf-notify | correlationId=' ++ correlationId ++ ' | jobId=' ++ (vars.jobId default '?') ++ ' | notification error swallowed: ' ++ (error.description default 'unknown')]" />
+					<logger level="WARN" doc:name="LOG WARN notification failed" doc:id="243ee6db-8df4-48bf-b050-ac60d712f6fb" message="#[output application/java --- 'notification error swallowed: ' ++ (error.description default 'unknown')]" />
 				</on-error-continue>
 			</error-handler>
 		</try>
+		<logger level="INFO" doc:name="LOG INFO END pf-notify enter" doc:id="9c4b88e0-545a-42aa-a742-d4ca52ee63ee" message="#[output application/java --- 'END - pf-notify enter | prUrl=' ++ (vars.prUrl default '(none)')]" />
 	</sub-flow>
 	
       <!-- ==========================================================================
@@ -86,13 +87,13 @@ var hasUrl  = url != ""
 					<http:request doc:name="POST Jira comment (final decision)" doc:id="c45630b4-25c3-42ad-bad0-5dd0486470b5" doc:description="Post the ADF comment to the Jira ticket" config-ref="Jira_Request" method="POST" path="#['/rest/api/3/issue/' ++ (vars.jiraTicketId as String) ++ '/comment']" />
 					<error-handler >
 						<on-error-continue enableNotifications="true" logException="true" doc:name="swallow jira comment error" doc:id="1ebed8fc-12ed-4ea2-9c54-796ad8e6d3c3" type="ANY" >
-							<logger level="WARN" doc:name="LOG WARN jira comment failed" doc:id="c4d8cc67-6ea7-4c7c-ada3-fbecbef2bbf6" message="#[output application/java --- 'LOG WARN | flow=pf-jira-comment | jira comment error swallowed: ' ++ (error.description default 'unknown')]" />
+							<logger level="WARN" doc:name="LOG WARN jira comment failed" doc:id="c4d8cc67-6ea7-4c7c-ada3-fbecbef2bbf6" message="#[output application/java --- 'jira comment error swallowed: ' ++ (error.description default 'unknown')]" />
 						</on-error-continue>
 					</error-handler>
 				</try>
 			</when>
 			<otherwise doc:id="pfjc0001-0001-0001-0001-000000000009" >
-				<logger level="DEBUG" doc:name="LOG DEBUG no jira ticket (final)" doc:id="99a95439-a8f4-42ec-831a-18b49d92e385" message="#[output application/java --- 'LOG DEBUG | flow=pf-jira-comment | no jira ticket — skipping comment']" />
+				<logger level="INFO" doc:name="LOG INFO no jira ticket (final)" doc:id="99a95439-a8f4-42ec-831a-18b49d92e385" message="#[output application/java --- 'no jira ticket — skipping comment']" />
 			</otherwise>
 		</choice>
 	</sub-flow>
@@ -107,6 +108,7 @@ var hasUrl  = url != ""
 	     Inputs: vars.appName, vars.jobId ; Config: jira.autoCreate/projectKey/issueType
 	     ========================================================================== -->
 	<sub-flow name="pf-jira-create-issue" doc:id="pfji0001-0001-0001-0001-000000000001" doc:description="Auto-create a Jira migration ticket when none supplied. Self-guarding + non-fatal.">
+		<logger level="INFO" doc:name="LOG INFO START pf-jira-create-issue" doc:id="c408457f-93c9-4563-9ce4-fd3424ca9fd4" message="#[output application/java --- 'START pf-jira-create-issue']" />
 		<choice doc:name="CHOICE auto-create ticket?" doc:id="pfji0001-0001-0001-0001-000000000002">
 			<when expression="#[(vars.jiraTicketId default null) == null and (p('jira.autoCreate') default 'false') == 'true']" doc:id="pfji0001-0001-0001-0001-000000000003">
 				<try doc:name="TRY jira create (non-fatal)" doc:id="pfji0001-0001-0001-0001-000000000004">
@@ -153,18 +155,19 @@ payload mergeWith {
 						</ee:message>
 					</ee:transform>
 					<os:store doc:name="OS Store job record with jiraTicketId" doc:id="pfji0001-0001-0001-0001-000000000010" key="#[vars.jobId]" objectStore="jobStore" />
-					<logger level="INFO" doc:name="LOG INFO jira ticket auto-created" doc:id="pfji0001-0001-0001-0001-000000000011" message="#[output application/java --- 'LOG INFO | flow=pf-jira-create-issue | correlationId=' ++ correlationId ++ ' | jobId=' ++ (vars.jobId default '?') ++ ' | auto-created jiraTicketId=' ++ (vars.jiraTicketId default '?')]" />
+					<logger level="INFO" doc:name="LOG INFO jira ticket auto-created" doc:id="pfji0001-0001-0001-0001-000000000011" message="#[output application/java --- 'jira ticket auto-created | jiraTicketId=' ++ (vars.jiraTicketId default '?')]" />
 					<error-handler>
 						<on-error-continue enableNotifications="true" logException="true" doc:name="swallow jira create error" doc:id="pfji0001-0001-0001-0001-000000000012" type="ANY">
-							<logger level="WARN" doc:name="LOG WARN jira create failed" doc:id="pfji0001-0001-0001-0001-000000000013" message="#[output application/java --- 'LOG WARN | flow=pf-jira-create-issue | correlationId=' ++ correlationId ++ ' | jobId=' ++ (vars.jobId default '?') ++ ' | auto-create failed, proceeding ticket-less: ' ++ (error.description default 'unknown')]" />
+							<logger level="WARN" doc:name="LOG WARN jira create failed" doc:id="pfji0001-0001-0001-0001-000000000013" message="#[output application/java --- 'jira auto-create failed, proceeding ticket-less: ' ++ (error.description default 'unknown')]" />
 						</on-error-continue>
 					</error-handler>
 				</try>
 			</when>
 			<otherwise doc:id="pfji0001-0001-0001-0001-000000000015">
-				<logger level="DEBUG" doc:name="LOG DEBUG jira auto-create skipped" doc:id="pfji0001-0001-0001-0001-000000000016" message="#[output application/java --- 'LOG DEBUG | flow=pf-jira-create-issue | skipped (ticket supplied or autoCreate off)']" />
+				<logger level="DEBUG" doc:name="LOG DEBUG jira auto-create skipped" doc:id="pfji0001-0001-0001-0001-000000000016" message="#[output application/java --- 'jira auto-create skipped (ticket supplied or autoCreate off)']" />
 			</otherwise>
 		</choice>
+		<logger level="INFO" doc:name="LOG INFO END pf-jira-create-issue" doc:id="4776663c-c05e-46f8-b6c5-b627e4c3f252" message="#[output application/java --- 'END pf-jira-create-issue']" />
 	</sub-flow>
 
     <!-- ==========================================================================
@@ -175,8 +178,9 @@ payload mergeWith {
          Inputs: vars.appName, vars.jobId
          ========================================================================== -->
 	<sub-flow name="pf-notify-failure" doc:id="406fc29d-c01e-4cb2-b608-cd6c271927da" doc:description="Send Slack failure notification. Reads status/error from job record. Non-fatal." >
+		<logger level="INFO" doc:name="LOG INFO START pf-notify-failure" doc:id="9199b212-da3f-4093-92dc-ef58f7741074" message="#[output application/java --- 'START pf-notify-failure']" />
 		<try doc:name="TRY failure notification (non-fatal)" doc:id="604d6787-68fa-40ce-b740-e2af3a606795" >
-			<logger level="WARN" doc:name="LOG WARN pf-notify-failure enter" doc:id="46771572-cb37-47e4-bfe4-a736270839e2" message="#[output application/java --- 'LOG WARN | flow=pf-notify-failure | correlationId=' ++ correlationId ++ ' | jobId=' ++ (vars.jobId default '?') ++ ' | sending failure notification']" />
+			<logger level="WARN" doc:name="LOG WARN pf-notify-failure enter" doc:id="46771572-cb37-47e4-bfe4-a736270839e2" message="#[output application/java --- 'pf-notify-failure enter | sending failure notification']" />
 			<os:retrieve doc:name="OS Retrieve job record (for failure notification)" doc:id="3098c8ba-aad5-4a1f-9198-4085dcc16e3e" key="#[vars.jobId]" objectStore="jobStore" >
 				<os:default-value ><![CDATA[#[{}]]]></os:default-value>
 			</os:retrieve>
@@ -202,9 +206,10 @@ output application/json
 			<http:request doc:name="POST Slack failure notification" doc:id="970759ae-0b6d-4239-a230-0d46a585dedd" doc:description="Send upgrade-failed message to the configured Slack channel" config-ref="Slack_Request" method="POST" path="#[vars.slackPath]" />
 			<error-handler >
 				<on-error-continue enableNotifications="true" logException="true" doc:name="swallow failure notification error" doc:id="ffd04e24-06b3-42a5-9fb1-5fe7f55adb00" type="ANY" >
-					<logger level="WARN" doc:name="LOG WARN failure notification itself failed" doc:id="75effa4c-9368-4882-8bd8-247c62f248d6" message="#[output application/java --- 'LOG WARN | flow=pf-notify-failure | correlationId=' ++ correlationId ++ ' | jobId=' ++ (vars.jobId default '?') ++ ' | failure notification error swallowed: ' ++ (error.description default 'unknown')]" />
+					<logger level="WARN" doc:name="LOG WARN failure notification itself failed" doc:id="75effa4c-9368-4882-8bd8-247c62f248d6" message="#[output application/java --- 'failure notification error swallowed: ' ++ (error.description default 'unknown')]" />
 				</on-error-continue>
 			</error-handler>
 		</try>
+		<logger level="INFO" doc:name="LOG INFO END pf-notify-failure1" doc:id="843cebb0-9be1-485b-a28f-e7ef49a9d4bf" message="#[output application/java --- 'END pf-notify-failure']" />
 	</sub-flow>
 </mule>

@@ -2,7 +2,7 @@
 <Configuration>
     <Appenders>
         <Console name="console" target="SYSTEM_OUT">
-            <PatternLayout pattern="%-5p %d [%t] [processor: %X{processorPath}; event: %X{correlationId}] %c: %m%n"/>
+            <PatternLayout pattern="%-5p %d [%t] [processor: %X{processorPath}; event: %X{correlationId}; job: %X{jobId}; app: %X{appName}; txn: %X{externalTranId}] %c: %m%n"/>
         </Console>
     </Appenders>
 

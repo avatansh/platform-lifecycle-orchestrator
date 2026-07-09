@@ -55,6 +55,16 @@ jira:
 registry:
   path: "registry/app-registry.yaml"         # appName → repo coordinates
 
+upgrade:
+  # How version edits are targeted in the pom inheritance chain:
+  #   appOverride (default) — write EVERY edit into the app's own module pom, pinning declared
+  #                           connectors/plugins and overriding inherited runtime/java/munit
+  #                           properties there. Sibling modules that share a parent/BOM are
+  #                           never affected, so no shared-file Warning is emitted.
+  #   inPlace               — legacy: edit the parent/BOM pom that declares the value and
+  #                           surface a shared-file Warning on the result.
+  pomEditStrategy: "appOverride"
+
 osv2:                                        # Object Store v2 partition TTLs (seconds)
   jobTtlSeconds:         "2592000"           # jobStore         — job records, 30d rolling
   lockTtlSeconds:        "86400"             # locksStore       — single-flight locks, 1d safety net

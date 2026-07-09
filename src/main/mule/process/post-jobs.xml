@@ -34,10 +34,7 @@ http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/htt
 				<ee:set-variable variableName="approvedChangePlan" ><![CDATA[payload.approvedChangePlan default null]]></ee:set-variable>
 			</ee:variables>
 		</ee:transform>
-		<logger level="DEBUG"
-                doc:name="LOG DEBUG Request"
-                doc:id="f6a7b8c9-0006-0006-0006-000000000002"
-                message="#[output application/java --- 'LOG DEBUG | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | app=' ++ (payload.appName default 'unknown')]" />
+		<flow-ref name="pf-mdc-stamp" doc:name="pf-mdc-stamp" doc:id="f6a7b8c9-0006-0006-0006-00000000000a" />
 
         <!-- Map HTTP request body fields to variables expected by pf-start-upgrade -->
 
@@ -69,8 +66,10 @@ payload]]></ee:set-payload>
          Returns:  payload = { jobId }  (synchronous â€” 202 Accepted)
          Kicks off an <async> upgrade pipeline after returning the jobId. -->
 	<sub-flow name="pf-start-upgrade" doc:id="22a1d67e-173f-468a-9948-1ccfaba2406e" doc:description="Pre-flight assess synchronously; short-circuit when already upgraded or repo missing; else lock, persist job, return 202 and run the async pipeline." >
-		<logger level="INFO" doc:name="LOG INFO pf-start-upgrade enter" doc:id="aa5193cf-9e67-43c5-94d7-a185b6aad20f" message="#[output application/java --- 'LOG INFO | flow=pf-start-upgrade | correlationId=' ++ correlationId ++ ' | app=' ++ (vars.appName default 'unknown') ++ ' | env=' ++ (vars.environment default 'unknown')]" />
+		<flow-ref name="pf-mdc-stamp" doc:name="pf-mdc-stamp (appName)" doc:id="aa5193cf-9e67-43c5-94d7-a185b6aad20e" />
+		<logger level="INFO" doc:name="LOG INFO START pf-start-upgrade enter" doc:id="aa5193cf-9e67-43c5-94d7-a185b6aad20f" message="#[output application/java --- 'START - pf-start-upgrade - enter | env=' ++ (vars.environment default 'unknown')]" />
 		<set-variable value="#['job-' ++ uuid()]" doc:name="PV SET jobId" doc:id="97690486-3036-4574-b1b5-25a42592facd" variableName="jobId" />
+		<flow-ref name="pf-mdc-stamp" doc:name="pf-mdc-stamp (jobId)" doc:id="97690486-3036-4574-b1b5-25a42592face" />
 		<!-- PRE-FLIGHT (synchronous): assess BEFORE creating a job, acquiring the lock, or
 		     entering the async pipeline. This lets us (a) fail fast with 404 when the app cannot
 		     be located on GitHub and (b) short-circuit with a 200 "already in desired state"
@@ -81,16 +80,22 @@ payload]]></ee:set-payload>
 			<flow-ref doc:name="pf-assess-app (pre-flight)" doc:id="pfsu0001-0001-0001-0001-000000000002" name="pf-assess-app" />
 			<error-handler>
 				<on-error-continue type="HTTP:NOT_FOUND" enableNotifications="false" logException="false" doc:name="repo not found =&gt; APP_NOT_FOUND" doc:id="pfsu0001-0001-0001-0001-000000000003">
-					<logger level="WARN" doc:name="LOG WARN repo not found" doc:id="pfsu0001-0001-0001-0001-000000000004" message="#[output application/java --- 'LOG WARN | flow=pf-start-upgrade | correlationId=' ++ correlationId ++ ' | app=' ++ (vars.appName default '?') ++ ' | repo not found on GitHub (' ++ (vars.coords.owner default '?') ++ '/' ++ (vars.coords.repo default '?') ++ ')']" />
+					<logger level="ERROR" doc:name="LOG ERROR repo not found" doc:id="pfsu0001-0001-0001-0001-000000000004" message="#[output application/java --- 'repo not found on GitHub (' ++ (vars.coords.owner default '?') ++ '/' ++ (vars.coords.repo default '?') ++ ')']" />
 					<raise-error type="VALIDATION:APP_NOT_FOUND" doc:name="RAISE VALIDATION:APP_NOT_FOUND" doc:id="pfsu0001-0001-0001-0001-000000000005" description="#[output application/java --- 'App &quot;' ++ (vars.appName default '?') ++ '&quot; could not be found on GitHub (resolved to ' ++ (vars.coords.owner default '?') ++ '/' ++ (vars.coords.repo default '?') ++ '). Verify the app name, its app-registry.yaml entry, or the owner/repo supplied in the request.']" />
 				</on-error-continue>
 			</error-handler>
 		</try>
-		<set-variable value="#[payload]" doc:name="PV SET assessment" doc:id="pfsu0001-0001-0001-0001-000000000006" variableName="assessment" />
-		<set-variable value="#[payload.changePlan]" doc:name="PV SET changePlan" doc:id="pfsu0001-0001-0001-0001-000000000007" variableName="changePlan" />
+		<ee:transform doc:name="PV SET assessment and changePlan" doc:id="d402fd2d-ac99-433f-97b0-1ff9a7889b15" >
+			<ee:message >
+			</ee:message>
+			<ee:variables >
+				<ee:set-variable variableName="changePlan" ><![CDATA[payload.changePlan]]></ee:set-variable>
+				<ee:set-variable variableName="assessment" ><![CDATA[payload]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
 		<choice doc:name="CHOICE already in desired state?" doc:id="pfsu0001-0001-0001-0001-000000000008" doc:description="Short-circuit when the assessment found no file edits — nothing to upgrade">
 			<when expression="#[isEmpty((vars.changePlan.fileEdits default []))]" doc:id="pfsu0001-0001-0001-0001-000000000009">
-				<logger level="INFO" doc:name="LOG INFO already upgraded" doc:id="pfsu0001-0001-0001-0001-000000000010" message="#[output application/java --- 'LOG INFO | flow=pf-start-upgrade | correlationId=' ++ correlationId ++ ' | app=' ++ (vars.appName default '?') ++ ' | ALREADY_UPGRADED (no file edits) | runtime=' ++ (vars.assessment.currentRuntime default '?') ++ ' | java=' ++ (vars.assessment.currentJavaVersion default '?')]" />
+				<logger level="INFO" doc:name="LOG INFO already upgraded" doc:id="pfsu0001-0001-0001-0001-000000000010" message="#[output application/java --- 'ALREADY_UPGRADED (no file edits) | runtime=' ++ (vars.assessment.currentRuntime default '?') ++ ' | java=' ++ (vars.assessment.currentJavaVersion default '?')]" />
 				<ee:transform doc:name="DW Build ALREADY_UPGRADED response" doc:id="pfsu0001-0001-0001-0001-000000000011">
 					<ee:message>
 						<ee:set-payload><![CDATA[%dw 2.0
@@ -127,14 +132,14 @@ var branch = vars.coords.defaultBranch default ""
 		</os:retrieve>
 		<choice doc:name="CHOICE lock held?" doc:id="0a1733f8-acad-4a33-8aa7-f675b2e79574" doc:description="Reject concurrent upgrades for the same app" >
 			<when expression="#[vars.existingLock != false]" doc:id="pf000002-0002-0002-0002-000000000014" >
-				<logger level="WARN" doc:name="LOG WARN upgrade in progress" doc:id="b7fc832f-9964-4722-b9b0-b2f3efd745f7" message="#[output application/java --- 'LOG WARN | flow=pf-start-upgrade | correlationId=' ++ correlationId ++ ' | app=' ++ vars.appName ++ ' already has an upgrade in progress â€” jobId=' ++ vars.existingLock]" />
+				<logger level="ERROR" doc:name="LOG ERROR upgrade in progress" doc:id="b7fc832f-9964-4722-b9b0-b2f3efd745f7" message="#[output application/java --- 'upgrade already in progress | heldByJobId=' ++ vars.existingLock]" />
 				<raise-error doc:name="RAISE CONFLICT:UPGRADE_IN_PROGRESS" doc:id="cb671065-73d6-46b0-a92e-d1ffb9bdbe30" type="CONFLICT:UPGRADE_IN_PROGRESS" description="#[output application/java --- 'An upgrade for app &quot;' ++ vars.appName ++ '&quot; is already in progress (jobId=' ++ vars.existingLock ++ '). Wait for it to complete or fail before starting a new one.']" />
 			</when>
 			<otherwise doc:id="pf000002-0002-0002-0002-000000000017" >
 				<os:store doc:name="OS Store upgrade lock" doc:id="92eece25-12ea-4ff3-baac-cf7951a903b8" key="#['lock::' ++ vars.appName]" objectStore="locksStore" >
 					<os:value ><![CDATA[#[vars.jobId]]]></os:value>
 				</os:store>
-				<logger level="INFO" doc:name="LOG INFO lock acquired" doc:id="e99daf9e-3515-4e6b-ab02-47c945a99183" message="#[output application/java --- 'LOG INFO | flow=pf-start-upgrade | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | lock acquired for app=' ++ vars.appName]" />
+				<logger level="INFO" doc:name="LOG INFO lock acquired" doc:id="e99daf9e-3515-4e6b-ab02-47c945a99183" message="#[output application/java --- 'lock acquired']" />
 			</otherwise>
 		</choice>
 		<ee:transform doc:name="DW Build Job Record" doc:id="c29364cc-b9c4-4ce8-a6b2-752e90ead624" >
@@ -162,7 +167,7 @@ import nowUtc from dwl::dates
 			</ee:message>
 		</ee:transform>
 		<os:store doc:name="OS Store Job Record" doc:id="27dbb572-ae74-49d4-a354-671a960a56ae" key="#[vars.jobId]" objectStore="jobStore" />
-		<logger level="INFO" doc:name="LOG INFO job record stored" doc:id="5e29b88b-3928-4c64-88ae-3692cc5ac5c4" message="#[output application/java --- 'LOG INFO | flow=pf-start-upgrade | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | status=PROCESSING | app=' ++ vars.appName]" />
+		<logger level="INFO" doc:name="LOG INFO job record stored" doc:id="5e29b88b-3928-4c64-88ae-3692cc5ac5c4" message="#[output application/java --- 'job record stored | status=PROCESSING']" />
 		<ee:transform doc:name="DW Return jobId" doc:id="86f1a73d-dac7-49c4-b0ab-4e4e32cbcc34" >
 			<ee:message >
 				<ee:set-payload ><![CDATA[%dw 2.0
@@ -173,25 +178,27 @@ output application/json
 		</ee:transform>
 		<async doc:name="ASYNC upgrade pipeline" doc:id="f0ee3f5d-4386-4b12-aa3a-64de565a5b05" >
 			<try doc:name="TRY upgrade stages" doc:id="f7708698-783d-4357-8bdb-6a8b7ba13548" >
+				<!-- Re-stamp MDC on the async branch so every pipeline log line carries jobId/appName. -->
+				<flow-ref name="pf-mdc-stamp" doc:name="pf-mdc-stamp (async)" doc:id="f7708698-783d-4357-8bdb-6a8b7ba13549" />
 				<flow-ref doc:name="pf-jira-create-issue" doc:id="pfji0001-0001-0001-0001-000000000020" name="pf-jira-create-issue" />
 				<!-- Assessment already ran synchronously as a pre-flight; vars.changePlan is set.
 				     The async pipeline starts straight at the COMMITTING stage. -->
 				<set-variable value="COMMITTING" doc:name="PV SET targetStatus=COMMITTING" doc:id="9ddbc8a1-494e-4ba6-8306-e52700597d46" variableName="targetStatus" />
 				<flow-ref doc:name="pf-set-status (COMMITTING)" doc:id="137d00bf-3822-48ab-a048-42e1856283f6" name="pf-set-status" />
 				<flow-ref doc:name="pf-apply-transforms" doc:id="6d2b520f-b093-4412-bc37-73fb3b33ce3f" name="pf-apply-transforms" />
-				<logger level="INFO" doc:name="LOG INFO transforms applied" doc:id="99cefc78-7421-435b-a8c5-3000048ebe20" message="#[output application/java --- 'LOG INFO | flow=pf-start-upgrade | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | stagedFiles=' ++ sizeOf(vars.stagedFiles default [])]" />
+				<logger level="INFO" doc:name="LOG INFO transforms applied" doc:id="99cefc78-7421-435b-a8c5-3000048ebe20" message="#[output application/java --- 'transforms applied | stagedFiles=' ++ sizeOf(vars.stagedFiles default [])]" />
 				<flow-ref doc:name="pf-atomic-commit" doc:id="834c0147-56cc-435d-beb3-5ca30a070902" name="pf-atomic-commit" />
 				<set-variable value="COMMITTED" doc:name="PV SET targetStatus=COMMITTED" doc:id="2edea39e-a51a-4dda-acda-6890be97a522" variableName="targetStatus" />
 				<flow-ref doc:name="pf-set-status (COMMITTED)" doc:id="233b16b8-0594-4090-ba9f-55bd2996d736" name="pf-set-status" />
-				<logger level="INFO" doc:name="LOG INFO committed" doc:id="e53a678d-e40e-4ef1-bcfb-45e4babf681c" message="#[output application/java --- 'LOG INFO | flow=pf-start-upgrade | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | changes committed to branch']" />
+				<logger level="INFO" doc:name="LOG INFO committed" doc:id="e53a678d-e40e-4ef1-bcfb-45e4babf681c" message="#[output application/java --- 'changes committed to branch']" />
 				<flow-ref doc:name="pf-open-pr" doc:id="3a6a4906-d148-49b8-a653-5f1cc0f6e674" name="pf-open-pr" />
 				<set-variable value="PR_OPEN" doc:name="PV SET targetStatus=PR_OPEN" doc:id="463d7c81-7c29-4d68-b06b-00c24f2d9188" variableName="targetStatus" />
 				<flow-ref doc:name="pf-set-status (PR_OPEN)" doc:id="c1ee1374-18b3-46d9-8879-7969f5a5be93" name="pf-set-status" />
-				<logger level="INFO" doc:name="LOG INFO PR open" doc:id="dc417f51-2b9a-4c23-898f-f101aa4e8b92" message="#[output application/java --- 'LOG INFO | flow=pf-start-upgrade | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | PR opened']" />
+				<logger level="INFO" doc:name="LOG INFO PR open" doc:id="dc417f51-2b9a-4c23-898f-f101aa4e8b92" message="#[output application/java --- 'PR opened']" />
 				<flow-ref doc:name="pf-notify" doc:id="0862d465-a147-4897-a37c-bf8ca1a6e666" name="pf-notify" />
-				<error-handler >
+						<error-handler >
 					<on-error-continue enableNotifications="true" logException="true" doc:name="handle any async failure" doc:id="76fb0564-9e37-4d7d-a5a4-28dec7d50bf9" type="ANY" >
-						<logger level="ERROR" doc:name="LOG ERROR async stage failed" doc:id="cece4067-ceef-4c4f-9914-1c964326af3e" message="#[output application/java --- 'LOG ERROR | flow=pf-start-upgrade | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | errorType=' ++ (error.errorType.namespace default '') ++ ':' ++ (error.errorType.identifier default '') ++ ' | ' ++ (error.description default '')]" />
+						<logger level="ERROR" doc:name="LOG ERROR async stage failed" doc:id="cece4067-ceef-4c4f-9914-1c964326af3e" message="#[output application/java --- 'async stage failed | errorType=' ++ (error.errorType.namespace default '') ++ ':' ++ (error.errorType.identifier default '') ++ ' | ' ++ (error.description default '')]" />
 						<ee:transform doc:name="DW Determine failureStatus" doc:id="75af9174-c8ef-4015-b647-3b41f9f660f1" >
 							<ee:variables >
 								<ee:set-variable variableName="failureStatus" ><![CDATA[%dw 2.0
@@ -222,7 +229,7 @@ payload mergeWith {
 						<os:store doc:name="OS Store failed job record" doc:id="40707b33-6ea9-4152-852a-596fc50a1f5c" key="#[vars.jobId]" objectStore="jobStore" />
 						<set-variable variableName="lockApp" value="#[vars.appName default '']" doc:name="PV lockApp" doc:id="7d73989f-c1e5-49b4-b8e1-0076f937140b" />
 						<flow-ref name="pf-release-lock" doc:name="pf-release-lock" doc:id="7d73989f-c1e5-49b4-b8e1-0076f937140a" />
-						<logger level="INFO" doc:name="LOG INFO job marked failed + lock released" doc:id="0d8c57f9-3a5a-4e5c-8127-7f1243f38111" message="#[output application/java --- 'LOG INFO | flow=pf-start-upgrade | correlationId=' ++ correlationId ++ ' | jobId=' ++ vars.jobId ++ ' | status=' ++ (vars.failureStatus default 'FAILED') ++ ' | lock released']" />
+						<logger level="INFO" doc:name="LOG INFO job marked failed + lock released" doc:id="0d8c57f9-3a5a-4e5c-8127-7f1243f38111" message="#[output application/java --- 'job marked failed + lock released | status=' ++ (vars.failureStatus default 'FAILED')]" />
 						<flow-ref doc:name="pf-notify-failure" doc:id="2fd51e16-30ec-4850-9a46-bd9c155f7a50" name="pf-notify-failure" />
 					</on-error-continue>
 				</error-handler>
@@ -230,6 +237,7 @@ payload mergeWith {
 		</async>
 			</otherwise>
 		</choice>
+		<logger level="INFO" doc:name="LOG INFO END pf-start-upgrade enter" doc:id="6027831a-a42b-4dba-9b04-c7d2b3a6669b" message="#[output application/java --- 'END - pf-start-upgrade']" />
 	</sub-flow>
 
     <!-- ==========================================================================
@@ -245,6 +253,7 @@ payload mergeWith {
          ========================================================================== -->
 	<sub-flow name="pf-release-lock" doc:id="pf00lock-0000-0000-0000-000000000001"
 	          doc:description="Idempotently + non-fatally release the single-flight lock for vars.lockApp (never throws when absent).">
+		<logger level="INFO" doc:name="LOG INFO START pf-release-lock" doc:id="4a999a7d-64fa-4c23-8850-d63a5facb51f" message="#[output application/java --- 'START - pf-release-lock']" />
 		<set-variable variableName="lockPayloadSnapshot" value="#[payload]"
 		              doc:name="PV snapshot payload" doc:id="pf00lock-0000-0000-0000-000000000002" />
 		<os:contains key="#['lock::' ++ (vars.lockApp default '')]" objectStore="locksStore"
@@ -256,21 +265,22 @@ payload mergeWith {
 					           doc:name="OS Remove lock" doc:id="pf00lock-0000-0000-0000-000000000006" />
 					<error-handler>
 						<on-error-continue type="ANY" doc:id="pf00lock-0000-0000-0000-000000000007">
-							<logger level="DEBUG" doc:name="LOG DEBUG lock removal raced" doc:id="pf00lock-0000-0000-0000-000000000008"
-							        message="#[output application/java --- 'LOG DEBUG | flow=pf-release-lock | lock removal raced (removed concurrently) | app=' ++ (vars.lockApp default '?')]" />
+							<logger level="INFO" doc:name="LOG INFO lock removal raced" doc:id="pf00lock-0000-0000-0000-000000000008"
+							        message="#[output application/java --- 'lock removal raced (removed concurrently) | app=' ++ (vars.lockApp default '?')]" />
 						</on-error-continue>
 					</error-handler>
 				</try>
-				<logger level="DEBUG" doc:name="LOG DEBUG lock released" doc:id="pf00lock-0000-0000-0000-000000000009"
-				        message="#[output application/java --- 'LOG DEBUG | flow=pf-release-lock | lock released | app=' ++ (vars.lockApp default '?')]" />
+				<logger level="INFO" doc:name="LOG INFO BUG lock released" doc:id="pf00lock-0000-0000-0000-000000000009"
+				        message="#[output application/java --- 'lock released | app=' ++ (vars.lockApp default '?')]" />
 			</when>
 			<otherwise>
-				<logger level="DEBUG" doc:name="LOG DEBUG lock absent" doc:id="pf00lock-0000-0000-0000-000000000010"
-				        message="#[output application/java --- 'LOG DEBUG | flow=pf-release-lock | lock already absent, nothing to release | app=' ++ (vars.lockApp default '?')]" />
+				<logger level="INFO" doc:name="LOG INFO lock absent" doc:id="pf00lock-0000-0000-0000-000000000010"
+				        message="#[output application/java --- 'lock already absent, nothing to release | app=' ++ (vars.lockApp default '?')]" />
 			</otherwise>
 		</choice>
 		<set-payload value="#[vars.lockPayloadSnapshot]"
 		             doc:name="PV restore payload" doc:id="pf00lock-0000-0000-0000-000000000011" />
+		<logger level="INFO" doc:name="LOG INFO END pf-release-lock" doc:id="02b21602-e3ac-49e5-87a7-e97945c629b2" message="#[output application/java --- 'END - pf-release-lock']" />
 	</sub-flow>
 
     <!-- ==========================================================================
@@ -279,7 +289,7 @@ payload mergeWith {
          persisted job record and re-stores it (rolling TTL). Transport-agnostic.
          ========================================================================== -->
 	<sub-flow name="pf-set-status" doc:id="f770326a-c10f-45ed-b478-ecb162032e4c" doc:description="Merge vars.targetStatus + updatedAt into the persisted job record." >
-		<logger level="DEBUG" doc:name="LOG DEBUG pf-set-status" doc:id="f95ad884-8394-44c5-ac84-87de4fb62885" message="#[output application/java --- 'LOG DEBUG | flow=pf-set-status | correlationId=' ++ correlationId ++ ' | jobId=' ++ (vars.jobId default '?') ++ ' | targetStatus=' ++ (vars.targetStatus default '?')]" />
+		<logger level="DEBUG" doc:name="LOG DEBUG pf-set-status" doc:id="f95ad884-8394-44c5-ac84-87de4fb62885" message="#[output application/java --- 'pf-set-status | targetStatus=' ++ (vars.targetStatus default '?')]" />
 		<os:retrieve doc:name="OS Retrieve job for status update" doc:id="e2cd30be-3c34-411b-bfdf-fe7e314755a5" key="#[vars.jobId]" objectStore="jobStore" >
 			<os:default-value ><![CDATA[#[{}]]]></os:default-value>
 		</os:retrieve>
@@ -304,7 +314,7 @@ payload mergeWith {
     Requires vars.coords {owner,repo} and vars.changePlan {headSha,fileEdits}. -->
     
 	<sub-flow name="pf-apply-transforms" doc:id="5b57f53a-ad8d-42b2-bdcb-52151253e25d" doc:description="Fetch each changed file and apply matrix rewrites; stage new contents." >
-		<logger level="DEBUG" doc:name="LOG DEBUG apply-transforms enter" doc:id="2fd827fa-d54b-4ab0-9b0e-f6713ee98f36" message="#[output application/java --- 'LOG DEBUG | flow=pf-apply-transforms | correlationId=' ++ correlationId ++ ' | files=' ++ sizeOf((vars.changePlan.fileEdits default []) map $.file distinctBy $)]" />
+		<logger level="INFO" doc:name="LOG INFO START apply-transforms enter" doc:id="2fd827fa-d54b-4ab0-9b0e-f6713ee98f36" message="#[output application/java --- 'START - pf-apply-transforms | files=' ++ sizeOf((vars.changePlan.fileEdits default []) map $.file distinctBy $)]" />
 		<ee:transform doc:name="DW Group edits by file" doc:id="da2320d2-2386-41f8-ba93-62bf3d0fc5cc" >
 			<ee:variables >
 				<ee:set-variable variableName="fileGroups" ><![CDATA[%dw 2.0
@@ -326,9 +336,11 @@ output application/java
 					<ee:set-variable variableName="currentFileEdits" ><![CDATA[payload.edits]]></ee:set-variable>
 				</ee:variables>
 			</ee:transform>
+			<logger level="DEBUG" doc:name="LOG DEBUG Request" doc:id="7db4fb06-a136-49f4-a7fd-39c1467eb1fb" message="#[output application/java --- 'Sending Request to URL: /repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/contents/' ++ vars.currentPath]"/>
 			<http:request doc:name="GET file (Contents API)" doc:id="d5952ff0-1728-45de-88ca-086eac423f5a" config-ref="GitHub_Request" path="#['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/contents/' ++ vars.currentPath]" >
 				<http:query-params ><![CDATA[#[{ ref: vars.changePlan.headSha }]]]></http:query-params>
 			</http:request>
+			<logger level="DEBUG" doc:name="LOG DEBUG Response" doc:id="9f96f9a7-6fb5-43ff-a80e-a6ab7c7b287e" message="#[output application/java --- 'Response Received Payload: ' ++ write(payload, 'application/json', {'indent': false})]"/>
 			<ee:transform doc:name="DW Apply rewrites" doc:id="a28b300d-1c4f-45b1-871d-099e9f266764" >
 				<ee:message >
 					<ee:set-payload ><![CDATA[%dw 2.0
@@ -348,7 +360,7 @@ output application/java
 vars.stagedFiles default []]]></ee:set-payload>
 			</ee:message>
 		</ee:transform>
-		<logger level="INFO" doc:name="LOG INFO staged files" doc:id="dc67b672-4587-4600-a69f-3fe9ea5f1a3e" message="#[output application/java --- 'LOG INFO | flow=pf-apply-transforms | correlationId=' ++ correlationId ++ ' | staged=' ++ sizeOf(vars.stagedFiles default [])]" />
+		<logger level="INFO" doc:name="LOG INFO END pf-apply-transforms" doc:id="dc67b672-4587-4600-a69f-3fe9ea5f1a3e" message="#[output application/java --- 'END - pf-apply-transforms | staged files | staged=' ++ sizeOf(vars.stagedFiles default [])]" />
 	</sub-flow>
 
 </mule>

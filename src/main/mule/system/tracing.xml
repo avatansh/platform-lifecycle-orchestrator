@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:tracing="http://www.mulesoft.org/schema/mule/tracing"
+      xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/tracing http://www.mulesoft.org/schema/mule/tracing/current/mule-tracing.xsd">
+
+    <!-- ==========================================================================
+         pf-mdc-stamp — MDC (Mapped Diagnostic Context) stamping.
+
+         Writes jobId / appName / externalTranId into the event's logging context via
+         the Tracing module, so Log4j2 auto-appends them (via %X{...}) to EVERY log
+         line for the rest of the event — including framework, connector and error
+         handler logs we never wrote by hand. correlationId + processorPath are put
+         in the MDC by the runtime already, so they are NOT re-stamped here.
+
+         Logging variables are EVENT-scoped (not thread-local): the runtime re-applies
+         them on whichever thread processes the event, so they survive flow-ref chains
+         and the <async> upgrade pipeline. They persist after this sub-flow returns
+         (like vars), which is why a single reusable stamp sub-flow works.
+
+         Call it right AFTER the vars it reads are set. Re-calling refines the values
+         (e.g. pf-start-upgrade re-stamps once jobId is generated). set-logging-variable
+         values must never be null, hence the defaults ('-' for unknown ids).
+
+         Keeping the tracing namespace confined to THIS file avoids namespace churn:
+         every other file just does <flow-ref name="pf-mdc-stamp"/>.
+         ========================================================================== -->
+    <sub-flow name="pf-mdc-stamp" doc:id="pfmd0001-0001-0001-0001-000000000001"
+              doc:description="Stamp jobId/appName/externalTranId into the logging MDC for this event.">
+        <tracing:set-logging-variable variableName="jobId"
+                                      value="#[(vars.jobId default '-') as String]"
+                                      doc:name="MDC jobId" doc:id="pfmd0001-0001-0001-0001-000000000002" />
+        <tracing:set-logging-variable variableName="appName"
+                                      value="#[(vars.appName default '-') as String]"
+                                      doc:name="MDC appName" doc:id="pfmd0001-0001-0001-0001-000000000003" />
+        <tracing:set-logging-variable variableName="externalTranId"
+                                      value="#[(vars.externalTranId default correlationId) as String]"
+                                      doc:name="MDC externalTranId" doc:id="pfmd0001-0001-0001-0001-000000000004" />
+    </sub-flow>
+
+</mule>

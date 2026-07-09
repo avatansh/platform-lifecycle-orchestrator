@@ -243,6 +243,17 @@
 			<classifier>mule-plugin</classifier>
 		</dependency>
 
+		<!-- Tracing Module — MDC logging variables (jobId/appName/externalTranId).
+		     groupId is org.mule.modules (the docs' com.mulesoft.modules is a doc error).
+		     1.2.1 (May 2026) fixes Java 17 connector metadata generation (W-21748187);
+		     compatible with Mule 4.4+ on OpenJDK 8/11/17. -->
+		<dependency>
+			<groupId>org.mule.modules</groupId>
+			<artifactId>mule-tracing-module</artifactId>
+			<version>1.2.1</version>
+			<classifier>mule-plugin</classifier>
+		</dependency>
+
 		<!-- MUnit Test Dependencies (Exchange — needs auth) -->
 		<dependency>
 			<groupId>com.mulesoft.munit</groupId>
@@ -277,7 +288,7 @@
 		<dependency>
 			<groupId>2e14f8c6-4d60-481b-bfb6-798695efc8f4</groupId>
 			<artifactId>platform-lifecycle-orchestrator-api</artifactId>
-			<version>1.0.1</version>
+			<version>1.0.2</version>
 			<classifier>raml</classifier>
 			<type>zip</type>
 		</dependency>

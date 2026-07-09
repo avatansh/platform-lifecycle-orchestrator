@@ -29,10 +29,6 @@ http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/htt
 				<ee:set-variable variableName="jiraTicketId"><![CDATA[payload.jiraTicketId]]></ee:set-variable>
 			</ee:variables>
 		</ee:transform>
-		<logger level="DEBUG"
-                doc:name="LOG DEBUG Request"
-                doc:id="e5f6a7b8-0005-0005-0005-000000000002"
-                message="#[output application/java --- 'LOG DEBUG | flow=' ++ flow.name ++ ' | correlationId=' ++ correlationId ++ ' | app=' ++ (payload.appName default 'unknown') ++ ' | env=' ++ (payload.environment default 'unknown')]" />
 
         <!-- Map HTTP request body fields to variables expected by pf-assess-app -->
 
@@ -46,31 +42,63 @@ http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/htt
     <!-- pf-assess-app: assesses application migration readiness             -->
     <!-- Requires: vars.appName, vars.environment, vars.jiraTicketId(opt)    -->
     <!-- Returns:  payload = AssessmentResult JSON                           -->
+	<sub-flow name="sf-github-http-get" doc:id="599926fa-45b7-46b7-bd1b-0a7cd52d6bcc" >
+		<logger level="DEBUG" doc:name="LOG DEBUG Send Request" doc:id="54394170-d9d7-499f-9dd9-b348df067c95" message="#[output application/java --- 'Sending Request to URL: ' ++ vars.urlPath]" />
+		<http:request doc:name="HTTP GET GitHub" doc:id="2491ca98-0def-47b3-97ca-d88b13418de0" doc:description="Fetch HEAD commit on defaultBranch to pin all Contents API calls to a consistent tree SHA" config-ref="GitHub_Request" path="#[vars.urlPath]" >
+			<http:query-params ><![CDATA[#[output application/java
+---
+vars.queryParams default {}]]]></http:query-params>
+		</http:request>
+		<logger level="DEBUG" doc:name="LOG DEBUG Response Received" doc:id="56a4a875-3d87-4676-87b1-608d3843309d" message="#[output application/java --- 'Response Received Payload: ' ++ write(payload, 'application/json', {'indent': false})]" />
+	</sub-flow>
+	<sub-flow name="sf-contents-api-http-get" doc:id="2b3ace74-1b19-4a5c-9998-95a1838c6af0" >
+		<logger level="DEBUG" doc:name="LOG DEBUG Send Request" doc:id="01e71f68-e4ed-4772-afa6-6cf479883a65" message="#[output application/java --- 'Sending Request to URL: ' ++ vars.urlPath]" />
+		<http:request doc:name="HTTP GET CONTENT API" doc:id="361c0cda-24ab-49fe-b2ba-4613ab0e766a" doc:description="Fetch app pom.xml via Contents API; response contains base64-encoded file content" config-ref="GitHub_Request" path="#[vars.urlPath]">
+			<http:query-params><![CDATA[#[output application/java
+---
+vars.queryParams default {}]]]></http:query-params>
+		</http:request>
+		<logger level="DEBUG" doc:name="LOG DEBUG Response Received" doc:id="84a8ea8b-a739-4323-a8cf-430c1ba0f7da" message="#[output application/java --- 'Response Received Payload: ' ++ write(payload, 'application/json', {'indent': false})]" />
+	</sub-flow>
 	<sub-flow name="pf-assess-app" doc:id="a8f8c1c7-66e2-441e-af4d-59e690ae977a" doc:description="Shared: assess MuleSoft app for Java 17 upgrade. Called by REST and MCP." >
-		<logger level="DEBUG" doc:name="LOG DEBUG pf-assess-app enter" doc:id="cc5b86ce-1e14-4d48-8d60-abe102b14173" message="#[output application/java --- 'LOG DEBUG | flow=pf-assess-app | correlationId=' ++ correlationId ++ ' | app=' ++ (vars.appName default 'unknown') ++ ' | env=' ++ (vars.environment default 'unknown')]" />
+		<logger level="INFO" doc:name="LOG INFO START pf-assess-app enter" doc:id="cc5b86ce-1e14-4d48-8d60-abe102b14173" message="#[output application/java --- 'START - pf-assess-app enter']" />
 		<flow-ref doc:name="pf-load-matrix" doc:id="4e3a8d7e-fd87-40bb-a548-1183f96d6f2e" name="pf-load-matrix" />
 		<flow-ref doc:name="pf-resolve-coordinates" doc:id="5a9c2057-abee-44a5-a529-f8cd72f5eb0d" name="pf-resolve-coordinates" />
 		<choice doc:name="CHOICE env empty?" doc:id="7a33cf1b-b2c0-482c-a9fd-0a07a1a2ef36" doc:description="Reject immediately if no environment was supplied" >
 			<when expression="#[vars.environment == null or vars.environment == '']" doc:id="pf000001-0001-0001-0001-000000000013" >
+				<logger level="ERROR" doc:name="LOG ERROR environment not set" doc:id="c8cd1552-4e54-44f7-8f3e-199bb2980bf8" message="#[output application/java --- 'vars.environment is not set']" />
 				<raise-error doc:name="RAISE VALIDATION:ENV_REQUIRED" doc:id="5d5dfe84-4c5f-4543-b489-cc807579910a" type="VALIDATION:ENV_REQUIRED" description="vars.environment must be set before calling pf-assess-app" />
 			</when>
 			<otherwise doc:id="pf000001-0001-0001-0001-000000000015" >
-				<logger level="DEBUG" doc:name="LOG DEBUG env present" doc:id="cd890a30-c071-4abb-85d9-927a6f5f17a2" message="#[output application/java --- 'LOG DEBUG | flow=pf-assess-app | env=' ++ vars.environment ++ ' | owner=' ++ (vars.coords.owner default '') ++ ' | repo=' ++ (vars.coords.repo default '')]" />
+				<logger level="INFO" doc:name="LOG INFO env present" doc:id="cd890a30-c071-4abb-85d9-927a6f5f17a2" message="#[output application/java --- 'env present | env=' ++ vars.environment ++ ' | owner=' ++ (vars.coords.owner default '') ++ ' | repo=' ++ (vars.coords.repo default '')]" />
 			</otherwise>
 		</choice>
 		<choice doc:name="CHOICE coords complete?" doc:id="907d9888-e616-4602-998b-40255fdb000c" doc:description="Reject if owner or repo could not be resolved" >
 			<when expression="#[vars.coords.owner == null or vars.coords.repo == null]" doc:id="pf000001-0001-0001-0001-000000000018" >
+				<logger level="ERROR" doc:name="LOG ERROR app not set" doc:id="104aa7da-2465-4b47-918f-d909e4e119f1" message="#[output application/java --- 'App not set']" />
 				<raise-error doc:name="RAISE VALIDATION:APP_NOT_REGISTERED" doc:id="93802119-8312-4e8b-8b76-f9a3750daff6" type="VALIDATION:APP_NOT_REGISTERED" description="#[output application/java --- 'Cannot resolve repo coordinates for app &quot;' ++ vars.appName ++ '&quot;. Provide owner/repo in the registry or request body.']" />
 			</when>
 			<otherwise doc:id="pf000001-0001-0001-0001-000000000020" >
-				<logger level="DEBUG" doc:name="LOG DEBUG coords present" doc:id="956734f1-db62-4b62-8b80-387cbb8ef031" message="#[output application/java --- 'LOG DEBUG | flow=pf-assess-app | coords ok | owner=' ++ (vars.coords.owner default '') ++ ' | repo=' ++ (vars.coords.repo default '')]" />
+				<logger level="INFO" doc:name="LOG INFO coords present" doc:id="956734f1-db62-4b62-8b80-387cbb8ef031" message="#[output application/java --- 'coords ok | owner=' ++ (vars.coords.owner default '') ++ ' | repo=' ++ (vars.coords.repo default '')]" />
 			</otherwise>
 		</choice>
-		<http:request doc:name="GET GitHub commit SHA" doc:id="d7832dbe-fc24-4d9b-bd69-92b6f6c09fce" doc:description="Fetch HEAD commit on defaultBranch to pin all Contents API calls to a consistent tree SHA" config-ref="GitHub_Request" path="#['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/commits/' ++ vars.coords.defaultBranch]" />
-		<set-variable value="#[payload.sha]" doc:name="PV SET vars.headSha" doc:id="26612ae6-1bf9-4c14-9169-bd5e87aa0b89" doc:description="Store commit SHA; used as ref= parameter in all subsequent Contents API calls" variableName="headSha" />
-		<http:request doc:name="GET GitHub tree (recursive)" doc:id="96326571-db42-4713-a4f5-b9db6c5136d8" doc:description="Fetch the full recursive file tree to locate pom.xml, mule-artifact.json, and CI workflow files" config-ref="GitHub_Request" path="#['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/git/trees/' ++ vars.headSha]" >
-			<http:query-params ><![CDATA[#[{ recursive: "1" }]]]></http:query-params>
-		</http:request>
+		<set-variable value="#['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/commits/' ++ vars.coords.defaultBranch]" doc:name="Set urlPath" doc:id="c66535d3-3ba6-429d-bfe3-5e25c9de3dd4" variableName="urlPath"/>
+		<flow-ref doc:name="Flow Ref sf-github-http-get | Commit SHA " doc:id="a3329d0e-b151-4c63-8d60-97f11bd65fb6" name="sf-github-http-get"/>
+		<ee:transform doc:name="SET headSha and urlPath, queryParams" doc:id="e42b93df-4a92-464c-8b96-d836252a68ea" >
+			<ee:message >
+			</ee:message>
+			<ee:variables >
+				<ee:set-variable variableName="headSha" ><![CDATA[payload.sha]]></ee:set-variable>
+				<ee:set-variable variableName="urlPath" ><![CDATA['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/git/trees/' ++ vars.headSha]]></ee:set-variable>
+				<ee:set-variable variableName="queryParams" ><![CDATA[%dw 2.0
+output application/java
+---
+{
+	recursive: "1"
+}]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+		<flow-ref doc:name="Flow Ref sf-github-http-get | Tree (Recursive)" doc:id="23574281-f241-4c87-908c-34697535f66c" name="sf-github-http-get"/>
 		<set-variable value="#[payload]" doc:name="PV SET vars.tree" doc:id="ddfc2261-94c1-42bd-be75-53af16c1c520" doc:description="Store full tree object for path lookups in subsequent steps" variableName="tree" />
 		<ee:transform doc:name="DW Analyse Tree" doc:id="360b57eb-3ebb-4774-aaaa-01882881ef42" doc:description="Locate appPomPath, mule-artifact.json, CI workflow, and build allProps list from the recursive tree" >
 			<ee:variables >
@@ -88,11 +116,17 @@ analyzeTree(vars.tree, vars.coords.appPath, vars.matrix.gating, vars.matrix.conn
 				<ee:set-variable variableName="muleArtifactPath" ><![CDATA[#[vars.treeAnalysis.muleArtifactPath]]]></ee:set-variable>
 				<ee:set-variable variableName="ciWorkflowPath" ><![CDATA[#[vars.treeAnalysis.ciWorkflowPath]]]></ee:set-variable>
 				<ee:set-variable variableName="allProps" ><![CDATA[#[vars.treeAnalysis.allProps]]]></ee:set-variable>
+				<ee:set-variable variableName="urlPath" ><![CDATA['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/contents/' ++ vars.appPomPath]]></ee:set-variable>
+				<ee:set-variable variableName="queryParams" ><![CDATA[%dw 2.0
+output application/java
+---
+{
+	ref: vars.headSha
+}]]></ee:set-variable>
 			</ee:variables>
 		</ee:transform>
-		<http:request doc:name="GET app pom.xml (Contents API)" doc:id="85fcb00d-0c66-444a-8357-b469abc05587" doc:description="Fetch app pom.xml via Contents API; response contains base64-encoded file content" config-ref="GitHub_Request" path="#['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/contents/' ++ vars.appPomPath]" >
-			<http:query-params ><![CDATA[#[{ ref: vars.headSha }]]]></http:query-params>
-		</http:request>
+		<set-variable value="#[p('matrix.exchange.assetId') ++ '/maven-metadata.xml']" doc:name="Set urlPath" doc:id="cbf7e962-f293-45e6-9877-0ccf9bd0d68e" variableName="urlPath" />
+		<flow-ref doc:name="Flow Ref sf-contents-api-http-get | app pom.xml" doc:id="6387693a-8cc6-48bd-b712-6a06afe38cd5" name="sf-contents-api-http-get"/>
 		<ee:transform doc:name="DW Parse App Pom — init chain" doc:id="ff4046fa-820f-487b-901b-7f422f2a73eb" doc:description="Base64-decode app pom content, parse XML, initialise vars.chain, compute next parent path" >
 			<ee:variables >
 				<ee:set-variable variableName="appPomParsed" ><![CDATA[%dw 2.0
@@ -107,13 +141,18 @@ initChain(payload.content, vars.appPomPath, (vars.tree.tree map $.path))]]></ee:
 				<ee:set-variable variableName="appPomText" ><![CDATA[#[vars.appPomParsed.appPomText]]]></ee:set-variable>
 				<ee:set-variable variableName="chain" ><![CDATA[#[vars.appPomParsed.chain]]]></ee:set-variable>
 				<ee:set-variable variableName="nextParentPath" ><![CDATA[#[vars.appPomParsed.nextParentPath]]]></ee:set-variable>
+				<ee:set-variable variableName="queryParams" ><![CDATA[%dw 2.0
+output application/java
+---
+{
+	ref: vars.headSha
+}]]></ee:set-variable>
+				<ee:set-variable variableName="urlPath" ><![CDATA['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/contents/' ++ vars.nextParentPath]]></ee:set-variable>
 			</ee:variables>
 		</ee:transform>
 		<choice doc:name="CHOICE fetch parent pom (level 1)?" doc:id="b59c8d0d-4978-47b2-ade7-e74be0b68c22" doc:description="Fetch direct parent pom when app pom declares a resolvable relativePath" >
 			<when expression="#[vars.nextParentPath != null]" doc:id="pf000001-0001-0001-0001-000000000041" >
-				<http:request doc:name="GET parent pom.xml level-1 (Contents API)" doc:id="903a1705-cde8-485a-a45a-6bb36361d345" doc:description="Fetch the direct parent pom.xml via Contents API" config-ref="GitHub_Request" path="#['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/contents/' ++ vars.nextParentPath]" >
-					<http:query-params ><![CDATA[#[{ ref: vars.headSha }]]]></http:query-params>
-				</http:request>
+				<flow-ref doc:name="Flow Ref sf-contents-api-http-get | parent pom.xml level-1" doc:id="24f43b67-0fd3-4a06-b21e-07fdde0668e8" name="sf-contents-api-http-get"/>
 				<ee:transform doc:name="DW Parse Parent Pom level-1 — update chain" doc:id="4e9c8b5c-8da5-4617-95d4-2455d4aaa582" doc:description="Base64-decode parent-1 pom, parse XML, append to vars.chain, compute grandparent path" >
 					<ee:variables >
 						<ee:set-variable variableName="parent1Data" ><![CDATA[%dw 2.0
@@ -131,14 +170,13 @@ appendParent(payload.content, vars.nextParentPath, vars.chain, (vars.tree.tree m
 				</ee:transform>
 			</when>
 			<otherwise doc:id="pf000001-0001-0001-0001-000000000045" >
-				<logger level="DEBUG" doc:name="LOG DEBUG no level-1 parent" doc:id="93a8d396-2473-40cf-acaf-f1ffc050db74" message="#[output application/java --- 'LOG DEBUG | flow=pf-assess-app | app=' ++ vars.appName ++ ' | chain depth=1 (APP_STANDALONE)']" />
+				<logger level="INFO" doc:name="LOG INFO no level-1 parent" doc:id="93a8d396-2473-40cf-acaf-f1ffc050db74" message="#[output application/java --- 'chain depth=1 (APP_STANDALONE)']" />
 			</otherwise>
 		</choice>
 		<choice doc:name="CHOICE fetch grandparent pom (level 2)?" doc:id="53a4b1f0-08e2-4673-ac32-91d404f3e561" doc:description="Fetch grandparent (BOM) pom when the level-1 parent also declared a relativePath" >
 			<when expression="#[vars.nextParentPath != null]" doc:id="pf000001-0001-0001-0001-000000000051" >
-				<http:request doc:name="GET grandparent pom.xml level-2 (Contents API)" doc:id="81edf673-957c-490a-9c97-eea9873aaab4" doc:description="Fetch the grandparent (typically BOM) pom.xml via Contents API" config-ref="GitHub_Request" path="#['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/contents/' ++ vars.nextParentPath]" >
-					<http:query-params ><![CDATA[#[{ ref: vars.headSha }]]]></http:query-params>
-				</http:request>
+				<set-variable value="#['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/contents/' ++ vars.nextParentPath]" doc:name="Set urlPath" doc:id="05c20396-def7-4410-a3d7-46cf671dd8a4" variableName="urlPath"/>
+				<flow-ref doc:name="Flow Ref sf-contents-api-http-get | grandparent pom.xml level-2" doc:id="73e174d3-9bc5-4b20-90aa-1a4ab4c7af5c" name="sf-contents-api-http-get"/>
 				<ee:transform doc:name="DW Parse Grandparent Pom level-2 — update chain" doc:id="2eb61656-1e6b-4e8e-b89c-5ad680cc1e2a" doc:description="Base64-decode grandparent pom, parse XML, append to vars.chain (chain is now complete)" >
 					<ee:variables >
 						<ee:set-variable variableName="parent2Data" ><![CDATA[%dw 2.0
@@ -156,7 +194,7 @@ appendParent(payload.content, vars.nextParentPath, vars.chain, (vars.tree.tree m
 				</ee:transform>
 			</when>
 			<otherwise doc:id="pf000001-0001-0001-0001-000000000055" >
-				<logger level="DEBUG" doc:name="LOG DEBUG grandparent not present" doc:id="044a7498-9fe8-4a43-9014-1b7c51d11dbc" message="#[output application/java --- 'LOG DEBUG | flow=pf-assess-app | app=' ++ vars.appName ++ ' | chain depth=' ++ sizeOf(vars.chain) ++ ' — no grandparent pom']" />
+				<logger level="INFO" doc:name="LOG INFO grandparent not present" doc:id="044a7498-9fe8-4a43-9014-1b7c51d11dbc" message="#[output application/java --- 'chain depth=' ++ sizeOf(vars.chain) ++ ' — no grandparent pom']" />
 			</otherwise>
 		</choice>
 		<ee:transform doc:name="DW Scan Flags" doc:id="027eeac1-acf4-422d-a0c8-26f416410bb9" doc:description="Detect custom Java files, lookup() usage, and build warnings list from tree and pom text" >
@@ -178,9 +216,8 @@ scanFlags(vars.tree, vars.appPomText)]]></ee:set-variable>
 		</ee:transform>
 		<choice doc:name="CHOICE fetch mule-artifact.json?" doc:id="38855c51-99bc-4313-89d0-8e98a883ebef" doc:description="Fetch and parse mule-artifact.json only when present in the tree" >
 			<when expression="#[vars.muleArtifactExists default false]" doc:id="pf000001-0001-0001-0001-0000000000a1" >
-				<http:request doc:name="GET mule-artifact.json (Contents API)" doc:id="b14b7be0-3afe-435e-8ddd-6a9655cfde82" doc:description="Fetch mule-artifact.json content via Contents API" config-ref="GitHub_Request" path="#['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/contents/' ++ vars.muleArtifactPath]" >
-					<http:query-params ><![CDATA[#[{ ref: vars.headSha }]]]></http:query-params>
-				</http:request>
+				<set-variable value="#['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/contents/' ++ vars.muleArtifactPath]" doc:name="Set urlPath" doc:id="88352539-936b-44dd-8512-5cc02e10b4e9" variableName="urlPath"/>
+				<flow-ref doc:name="Flow Ref sf-contents-api-http-get | mule-artifact.json" doc:id="ca03461a-4162-41f1-a991-1f841e7400a7" name="sf-contents-api-http-get"/>
 				<ee:transform doc:name="DW Decode mule-artifact.json" doc:id="e6ad1f90-5bd4-4f1a-a6d8-24a18c930fb8" >
 					<ee:variables >
 						<ee:set-variable variableName="muleArtifactCurrent" ><![CDATA[%dw 2.0
@@ -201,9 +238,8 @@ read((fromBase64((payload.content default "") replace /[\r\n\t ]/ with "")) as S
 		</choice>
 		<choice doc:name="CHOICE fetch CI workflow?" doc:id="2f1491ad-1d11-426b-9616-90f423e26e43" doc:description="Fetch CI workflow text only when a workflow path was found" >
 			<when expression="#[vars.ciWorkflowPath != null]" doc:id="pf000001-0001-0001-0001-0000000000b1" >
-				<http:request doc:name="GET CI workflow (Contents API)" doc:id="c8720155-2e66-4d4e-9273-d3987d4a77c2" doc:description="Fetch CI workflow YAML content via Contents API" config-ref="GitHub_Request" path="#['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/contents/' ++ vars.ciWorkflowPath]" >
-					<http:query-params ><![CDATA[#[{ ref: vars.headSha }]]]></http:query-params>
-				</http:request>
+				<set-variable value="#['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/contents/' ++ vars.ciWorkflowPath]" doc:name="Set urlPath" doc:id="9faad61d-7daa-43f4-abba-a463fa4b7620" variableName="urlPath"/>
+				<flow-ref doc:name="Flow Ref sf-contents-api-http-get | CI workflow" doc:id="4d3b24e5-cfe2-4356-a92b-515e7c20637a" name="sf-contents-api-http-get"/>
 				<ee:transform doc:name="DW Decode CI workflow" doc:id="b87ccfb3-e24b-4fb5-90ea-a4de134908dd" >
 					<ee:variables >
 						<ee:set-variable variableName="ciWorkflowText" ><![CDATA[%dw 2.0
@@ -246,10 +282,11 @@ import buildAssessmentResult from dwl::assessment
 buildAssessmentResult(
     vars.matrix, vars.chain, vars.appPomText, vars.muleArtifactCurrent, vars.muleArtifactPath,
     vars.ciWorkflowText, vars.ciWorkflowPath, vars.appName, vars.topology, vars.headSha,
-    vars.hasApiPolicies, vars.customJavaFound, vars.lookupFound, vars.warnings)]]></ee:set-payload>
+    vars.hasApiPolicies, vars.customJavaFound, vars.lookupFound, vars.warnings,
+    (p('upgrade.pomEditStrategy') default 'appOverride'))]]></ee:set-payload>
 			</ee:message>
 		</ee:transform>
-		<logger level="DEBUG" doc:name="LOG DEBUG pf-assess-app done" doc:id="4e74d6e1-36c1-4409-a36d-2a6db4b1a704" message="#[output application/java --- 'LOG DEBUG | flow=pf-assess-app | correlationId=' ++ correlationId ++ ' | app=' ++ vars.appName ++ ' | topology=' ++ (vars.topology default 'unknown') ++ ' | fileEdits=' ++ sizeOf(payload.changePlan.fileEdits default []) ++ ' | warnings=' ++ sizeOf(payload.warnings default [])]" />
+		<logger level="TRACE" doc:name="LOG INFO END pf-assess-app done" doc:id="4e74d6e1-36c1-4409-a36d-2a6db4b1a704" message="#[output application/java --- 'pf-assess-app done | topology=' ++ (vars.topology default 'unknown') ++ ' | fileEdits=' ++ sizeOf(payload.changePlan.fileEdits default []) ++ ' | warnings=' ++ sizeOf(payload.warnings default [])]" />
 	</sub-flow>
 
 </mule>
