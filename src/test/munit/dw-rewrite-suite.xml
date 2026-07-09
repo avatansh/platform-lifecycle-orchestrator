@@ -477,4 +477,41 @@ rewriteDepVersions(samplePom, [
         </munit:validation>
     </munit:test>
 
+    <!-- ══════════════════════════════════════════════════════════════════════════
+         rewriteMunitArgLines :: Tier-0 JPMS argLine stripping
+         ══════════════════════════════════════════════════════════════════════════ -->
+
+    <!--
+        Test 12: JPMS argLines (add-opens / add-exports / add-modules) are stripped ONLY from
+        MUnit plugin blocks; the MUnit plugin itself is retained and a non-MUnit plugin's argLine
+        is left untouched.
+    -->
+    <munit:test name="rewriteMunitArgLines-strips-munit-jpms-flags"
+                doc:id="dw-test-0012"
+                description="rewriteMunitArgLines removes JPMS argLines from MUnit plugins only, preserving other plugins">
+        <munit:execution>
+            <ee:transform doc:name="DW invoke rewriteMunitArgLines" doc:id="dw-test-0012-exec">
+                <ee:variables>
+                    <ee:set-variable variableName="result"><![CDATA[%dw 2.0
+import rewriteMunitArgLines from dwl::rewriteMunitArgLines
+output application/java
+var samplePom = "<build><plugins>
+  <plugin><groupId>com.mulesoft.munit.tools</groupId><artifactId>munit-maven-plugin</artifactId><configuration><argLines><argLine>--add-opens java.base/java.lang=ALL-UNNAMED</argLine></argLines></configuration></plugin>
+  <plugin><groupId>com.mulesoft.munit.tools</groupId><artifactId>munit-extensions-maven-plugin</artifactId><configuration><argLines><argLine>--add-modules java.se</argLine><argLine>-Dfoo=bar</argLine></argLines></configuration></plugin>
+  <plugin><artifactId>some-other-plugin</artifactId><configuration><argLines><argLine>--add-opens keep.this=ALL-UNNAMED</argLine></argLines></configuration></plugin>
+</plugins></build>"
+---
+rewriteMunitArgLines(samplePom, ["--add-opens", "--add-exports", "--add-modules"])]]></ee:set-variable>
+                </ee:variables>
+            </ee:transform>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="munit add-opens removed" expression="#[vars.result contains 'java.base/java.lang']" is="#[MunitTools::equalTo(false)]" />
+            <munit-tools:assert-that doc:name="munit add-modules removed" expression="#[vars.result contains 'java.se']" is="#[MunitTools::equalTo(false)]" />
+            <munit-tools:assert-that doc:name="munit non-jpms argLine kept" expression="#[vars.result]" is="#[MunitTools::containsString('-Dfoo=bar')]" />
+            <munit-tools:assert-that doc:name="munit plugin retained" expression="#[vars.result]" is="#[MunitTools::containsString('munit-maven-plugin')]" />
+            <munit-tools:assert-that doc:name="other plugin argLine untouched" expression="#[vars.result]" is="#[MunitTools::containsString('keep.this')]" />
+        </munit:validation>
+    </munit:test>
+
 </mule>

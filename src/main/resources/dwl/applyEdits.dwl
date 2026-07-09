@@ -12,12 +12,14 @@ import rewritePluginVersions from dwl::rewritePluginVersions
 import rewriteMunitRuntime   from dwl::rewriteMunitRuntime
 import rewriteMuleArtifact   from dwl::rewriteMuleArtifact
 import rewriteCiWorkflow     from dwl::rewriteCiWorkflow
+import rewriteMunitArgLines  from dwl::rewriteMunitArgLines
 import fromBase64 from dw::core::Binaries
 
 /**
  * base64Content : raw base64 file content from the GitHub Contents API
  * edits         : the edit list for this file (kinds: depVersion, pluginVersion,
- *                 pomProperty, munitRuntimeVersion, muleArtifactJson, ciWorkflow)
+ *                 pomProperty, munitRuntimeVersion, muleArtifactJson, ciWorkflow,
+ *                 munitArgLines)
  * returns       : the rewritten file text
  *
  * Inline dependency + plugin <version> rewrites run first, then property rewrites
@@ -39,6 +41,9 @@ fun applyEdits(base64Content, edits) = do {
                     else step2
     var ciEdit    = (edits filter ((e) -> e.kind == "ciWorkflow"))[0]
     var step4     = if (ciEdit != null) rewriteCiWorkflow(step3, ciEdit.to as String) else step3
+    // Tier-0 hygiene: strip JPMS argLines from MUnit plugin blocks so MUnit runs on Java 17.
+    var argEdit   = (edits filter ((e) -> e.kind == "munitArgLines"))[0]
+    var step5     = if (argEdit != null) rewriteMunitArgLines(step4, argEdit.flags) else step4
     ---
-    step4
+    step5
 }

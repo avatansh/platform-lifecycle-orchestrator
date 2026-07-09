@@ -191,6 +191,43 @@ fun computePropEditsOverride(chain, matrix) = do {
         ++ (e.artifactId default "") ++ "|" ++ (e.pluginArtifactId default ""))
 }
 
+// ── Tier-0 hygiene: strip JPMS argLines from MUnit plugin blocks ──────────────────────
+// On Mule 4.9 / Java 17 the embedded MUnit container REJECTS boot-module-layer tweaks
+// (--add-opens/--add-exports/--add-modules) declared as MUnit plugin <argLine>s. These
+// must be removed from the pom that DECLARES them (a child can't override an inherited
+// argLine), so we scan every in-repo chain pom and emit a `munitArgLines` edit per file.
+
+fun isMunitPluginArtifact(a) =
+    ["munit-maven-plugin", "munit-extensions-maven-plugin"] contains ((a default "") as String)
+
+// All <argLine> string values declared on a plugin (top-level config + executions).
+fun pluginArgLineValues(p) = do {
+    var top = ((p.configuration.argLines default {}).*argLine) default []
+    var exe = flatten((((p.executions default {}).*execution) default [])
+                map ((e) -> ((e.configuration.argLines default {}).*argLine) default []))
+    --- (top ++ exe) map ((v) -> (v default "") as String)
+}
+
+// True when a pom declares a MUnit plugin whose argLines carry any configured JPMS flag.
+fun pomHasMunitJpmsArgLine(pom, flags) = do {
+    var ps  = ((pom.project.build.plugins default {}).*plugin) default []
+    var pms = ((pom.project.build.pluginManagement.plugins default {}).*plugin) default []
+    var vals = flatten(((ps ++ pms) filter ((p) -> isMunitPluginArtifact(p.artifactId)))
+                map ((p) -> pluginArgLineValues(p)))
+    --- !isEmpty(vals filter ((s) ->
+            !isEmpty((flags default []) filter ((f) -> s contains (f as String)))))
+}
+
+// One munitArgLines edit per in-repo pom that carries offending argLines.
+fun computeMunitArgLineEdits(chain, matrix) = do {
+    var flags = matrix.removeMunitJpmsFlags default []
+    ---
+    if (isEmpty(flags)) []
+    else (chain filter ((c) -> pomHasMunitJpmsArgLine(c.pom, flags)))
+            map ((c) -> { kind: "munitArgLines", file: c.path, flags: flags, change: true })
+            distinctBy ((e) -> e.file)
+}
+
 /**
  * Scans the repo tree + app pom text for custom Java, lookup() usage and builds warnings.
  * tree       : recursive tree object
@@ -264,7 +301,9 @@ fun buildAssessmentResult(
                      javaSpecificationVersions: m.muleArtifact.javaSpecificationVersions } }] else [])
       ++ (if (ciNeeds)
             [{ file: ciWorkflowPath, kind: "ciWorkflow", from: ciCur, to: m.target.javaVersion }] else [])
-    var all = propEdits ++ appEdits
+    // Tier-0 hygiene edits — strip JPMS argLines from MUnit plugin blocks (any in-repo pom).
+    var argLineEdits = computeMunitArgLineEdits(chain, m)
+    var all = propEdits ++ appEdits ++ argLineEdits
     // WARNING (shared build file): property/dependency/plugin edits can land on a shared
     // parent or BOM pom (any chain entry other than the app's OWN module pom at chain[0]).
     // Editing those upgrades every module that inherits from them, so surface it explicitly.
