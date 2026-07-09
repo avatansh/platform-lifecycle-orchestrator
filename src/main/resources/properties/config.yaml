@@ -22,7 +22,7 @@ mcp:
 
 github:
   apiBase: "https://api.github.com"      # constant (override in an env file only for GitHub Enterprise)
-  defaultBranch: "main"                  # convention fallback; registry/request/discovery can override
+  defaultBranch: "develop"                  # convention fallback; registry/request/discovery can override
 
 naming:                                  # convention used when an app is NOT in the registry
   repoEqualsAppName: "true"              # repo = appName

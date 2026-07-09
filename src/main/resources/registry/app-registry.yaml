@@ -6,6 +6,6 @@ apps:
     owner: "avatansh"
     repo: "Mule-Apps"            # differs from appName → convention wouldn't find it
     appPath: "customer-web-eapi"     # dir holding the app pom.xml + mule-artifact.json
-    defaultBranch: "main"           # optional — else fetched from the GitHub repo API
+    defaultBranch: "develop"           # optional — else fetched from the GitHub repo API
     orgId: "2e14f8c6-4d60-481b-bfb6-798695efc8f4"  # optional — else from ARM / defaultOrgId
   # A convention-following app (repo=appName, at root) needs NOTHING here.
