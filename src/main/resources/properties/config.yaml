@@ -42,9 +42,12 @@ matrix:
   refreshSeconds: "86400"                    # matrix cache TTL = 1 day (bucketed floor(epoch/refreshSeconds))
   exchange:                                  # Exchange asset IDENTITY (orgId is env-specific → env file)
     assetId: "java17-compatibility-matrix"
-    version: "1.0.1"                         # bump when you publish a new matrix version (or use source=exchange-latest)
+    version: "1.0.3"                         # published on Exchange (matches bundled classpath copy incl. sockets 1.2.8); bump on new revision or use source=exchange-latest
     classifier: "custom"                     # Exchange custom-asset classifier ("" if none)
     packaging: "yaml"                        # main file extension of the published asset
+  notifyMissing: "true"                      # Slack-alert connectors the app declares but the matrix doesn't cover
+  missing:
+    excludeArtifacts: "munit-runner,munit-tools"   # never treated as "missing" (not connectors to pin)
 
 jira:
   # Constant defaults; env files override. autoCreate defaults OFF for safety so no
@@ -53,7 +56,14 @@ jira:
   issueType:  "Task"                         # Jira issue type used for auto-created migration tickets
 
 registry:
-  path: "registry/app-registry.yaml"         # appName → repo coordinates
+  path: "registry/app-registry.yaml"         # classpath fallback copy — appName → repo coordinates
+  source: "exchange-latest"                  # exchange | exchange-latest | classpath (mirrors matrix.source)
+  refreshSeconds: "86400"                    # registry cache TTL = 1 day (env files override; dev/local = 30s)
+  exchange:                                  # Exchange asset IDENTITY (orgId is env-specific → env file)
+    assetId: "app-registry"
+    version: "1.0.1"                         # published on Exchange (matches bundled classpath copy); used only when source=exchange (pinned), ignored for -latest
+    classifier: "custom"                     # Exchange custom-asset classifier ("" if none)
+    packaging: "yaml"                        # main file extension of the published asset
 
 upgrade:
   # How version edits are targeted in the pom inheritance chain:

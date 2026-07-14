@@ -35,8 +35,12 @@ BACKLOG.md
 LOCAL_TESTING_PLAYBOOK.html
 job.json
 job-unregistered.json
+job-*.json
 assess.json
 webhook-merge.json
+body-cd.json
+body-*.json
+parent-pom-upgrade.json
 .tmp-*.json
 test-ch2-e2e.bat
 CH2.0_VERIFICATION_GUIDE.html

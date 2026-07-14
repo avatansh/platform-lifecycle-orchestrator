@@ -1,0 +1,180 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns:os="http://www.mulesoft.org/schema/mule/os"
+      xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+    <!--
+        REST entry point for DELETE /jobs/{jobId} (admin / maintenance).
+        Permanently removes a job record from jobStore and clears its branch->jobId
+        entry in indexStore. The upgrade lifecycle never deletes jobs (they age out via
+        the 30-day jobStore TTL); this exists for test teardown and manual cleanup.
+        The initial os:retrieve throws OS:KEY_NOT_FOUND (mapped to 404 by the global
+        error handler) when the job does not exist, so deleting an unknown job returns
+        a clean 404. Governed at deploy time (API Manager / gateway policy).
+    -->
+    <flow name="mf-impl-delete-job"
+          doc:id="a7b8c9d0-0007-0007-0007-000000000101"
+          doc:name="mf-impl-delete-job"
+          doc:description="REST entry for DELETE /jobs/{jobId}: bind the URI jobId, delegate to shared pf-delete-job.">
+
+        <set-variable variableName="jobId"
+                      value="#[attributes.uriParams.jobId]"
+                      doc:name="PV SET jobId (from URI)"
+                      doc:id="a7b8c9d0-0007-0007-0007-000000000102" />
+
+        <flow-ref name="pf-delete-job" doc:name="pf-delete-job" doc:id="a7b8c9d0-0007-0007-0007-000000000130" />
+
+    </flow>
+
+    <!-- ==========================================================================
+         pf-delete-job  (shared, transport-agnostic)
+         Deletes the job record + clears its branch->jobId index + releases the app's
+         single-flight lock. Reads vars.jobId. Called by the REST DELETE /jobs/{jobId}
+         flow and the MCP delete_job tool, so both transports behave identically.
+         The initial os:retrieve throws OS:KEY_NOT_FOUND for an unknown jobId (REST → 404
+         via the global handler; MCP → error envelope via the MCP handler).
+         ========================================================================== -->
+    <sub-flow name="pf-delete-job"
+              doc:id="a7b8c9d0-0007-0007-0007-000000000131"
+              doc:description="Shared: delete job record, clear branch index, release app lock by vars.jobId.">
+
+        <flow-ref name="pf-mdc-stamp" doc:name="pf-mdc-stamp" doc:id="a7b8c9d0-0007-0007-0007-000000000103" />
+
+        <logger level="INFO" doc:name="LOG INFO START delete job"
+                doc:id="a7b8c9d0-0007-0007-0007-000000000104"
+                message="#[output application/java --- 'START - delete job']" />
+
+        <!-- Retrieve first: (a) 404 cleanly if absent, (b) read branchName to clear the
+             branch->jobId index. Throws OS:KEY_NOT_FOUND -> 404 via the global handler. -->
+        <os:retrieve doc:name="OS Retrieve Job Record"
+                     doc:id="a7b8c9d0-0007-0007-0007-000000000105"
+                     key="#[vars.jobId]" objectStore="jobStore" />
+
+        <set-variable variableName="branchName"
+                      value="#[payload.branchName default null]"
+                      doc:name="PV SET branchName"
+                      doc:id="a7b8c9d0-0007-0007-0007-000000000106" />
+
+        <set-variable variableName="appName"
+                      value="#[payload.appName default null]"
+                      doc:name="PV SET appName"
+                      doc:id="a7b8c9d0-0007-0007-0007-000000000120" />
+
+        <!-- Remove the job record. -->
+        <os:remove doc:name="OS Remove Job Record"
+                   doc:id="a7b8c9d0-0007-0007-0007-000000000107"
+                   key="#[vars.jobId]" objectStore="jobStore" />
+
+        <!-- Clear the branch->jobId index only if the job reached the branch stage.
+             Non-fatal: an early-stage job (no branch yet) or an already-expired index
+             key must not fail the delete. -->
+        <choice doc:name="CHOICE branch index present?"
+                doc:id="a7b8c9d0-0007-0007-0007-000000000108">
+            <when expression="#[vars.branchName != null]">
+                <try doc:name="TRY remove branch index (non-fatal)"
+                     doc:id="a7b8c9d0-0007-0007-0007-000000000109">
+                    <os:remove doc:name="OS Remove Branch Index"
+                               doc:id="a7b8c9d0-0007-0007-0007-00000000010a"
+                               key="#['branch::' ++ (vars.branchName as String)]"
+                               objectStore="indexStore" />
+                    <error-handler>
+                        <on-error-continue type="OS:KEY_NOT_FOUND"
+                                           enableNotifications="false"
+                                           logException="false"
+                                           doc:name="branch index already absent"
+                                           doc:id="a7b8c9d0-0007-0007-0007-00000000010b">
+                            <logger level="INFO" doc:name="LOG INFO branch index absent"
+                                    doc:id="a7b8c9d0-0007-0007-0007-00000000010c"
+                                    message="#[output application/java --- 'branch index already absent for branch=' ++ (vars.branchName default '?')]" />
+                        </on-error-continue>
+                    </error-handler>
+                </try>
+            </when>
+            <otherwise doc:id="a7b8c9d0-0007-0007-0007-00000000010d">
+                <logger level="INFO" doc:name="LOG INFO no branch index"
+                        doc:id="a7b8c9d0-0007-0007-0007-00000000010e"
+                        message="#[output application/java --- 'no branchName on job - nothing to clear in indexStore']" />
+            </otherwise>
+        </choice>
+
+        <!-- Release the single-flight upgrade lock (key = 'lock::' ++ appName) so a
+             re-run of start_upgrade for this app is not blocked by a leftover lock.
+             os:contains gives an accurate lockReleased flag; the remove is wrapped
+             non-fatally in case the lock expired between the check and the remove. -->
+        <set-variable variableName="lockReleased" value="#[false]"
+                      doc:name="PV SET lockReleased=false"
+                      doc:id="a7b8c9d0-0007-0007-0007-000000000121" />
+        <choice doc:name="CHOICE appName present?"
+                doc:id="a7b8c9d0-0007-0007-0007-000000000122">
+            <when expression="#[vars.appName != null]">
+                <os:contains doc:name="OS Contains upgrade lock"
+                             doc:id="a7b8c9d0-0007-0007-0007-000000000123"
+                             key="#['lock::' ++ (vars.appName as String)]"
+                             objectStore="locksStore" target="lockExists" />
+                <choice doc:name="CHOICE lock held?"
+                        doc:id="a7b8c9d0-0007-0007-0007-000000000124">
+                    <when expression="#[vars.lockExists default false]">
+                        <try doc:name="TRY remove upgrade lock (non-fatal)"
+                             doc:id="a7b8c9d0-0007-0007-0007-000000000125">
+                            <os:remove doc:name="OS Remove upgrade lock"
+                                       doc:id="a7b8c9d0-0007-0007-0007-000000000126"
+                                       key="#['lock::' ++ (vars.appName as String)]"
+                                       objectStore="locksStore" />
+                            <set-variable variableName="lockReleased" value="#[true]"
+                                          doc:name="PV SET lockReleased=true"
+                                          doc:id="a7b8c9d0-0007-0007-0007-000000000127" />
+                            <error-handler>
+                                <on-error-continue type="OS:KEY_NOT_FOUND"
+                                                   enableNotifications="false"
+                                                   logException="false"
+                                                   doc:name="lock already released"
+                                                   doc:id="a7b8c9d0-0007-0007-0007-000000000128">
+                                    <logger level="INFO" doc:name="LOG INFO lock already released"
+                                            doc:id="a7b8c9d0-0007-0007-0007-000000000129"
+                                            message="#[output application/java --- 'upgrade lock already released for app=' ++ (vars.appName default '?')]" />
+                                </on-error-continue>
+                            </error-handler>
+                        </try>
+                    </when>
+                    <otherwise doc:id="a7b8c9d0-0007-0007-0007-00000000012a">
+                        <logger level="INFO" doc:name="LOG INFO no lock held"
+                                doc:id="a7b8c9d0-0007-0007-0007-00000000012b"
+                                message="#[output application/java --- 'no upgrade lock held for app=' ++ (vars.appName default '?')]" />
+                    </otherwise>
+                </choice>
+            </when>
+            <otherwise doc:id="a7b8c9d0-0007-0007-0007-00000000012c">
+                <logger level="INFO" doc:name="LOG INFO no appName"
+                        doc:id="a7b8c9d0-0007-0007-0007-00000000012d"
+                        message="#[output application/java --- 'no appName on job - nothing to release in locksStore']" />
+            </otherwise>
+        </choice>
+
+        <ee:transform doc:name="DW Build Delete Response"
+                      doc:id="a7b8c9d0-0007-0007-0007-00000000010f">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    deleted: true,
+    jobId: vars.jobId,
+    branchIndexCleared: (vars.branchName != null),
+    branch: vars.branchName,
+    lockReleased: (vars.lockReleased default false),
+    appName: vars.appName
+}]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+
+        <logger level="INFO" doc:name="LOG INFO END delete job"
+                doc:id="a7b8c9d0-0007-0007-0007-000000000110"
+                message="#[output application/java --- 'END - job deleted | branchCleared=' ++ (vars.branchName != null) ++ ' | lockReleased=' ++ (vars.lockReleased default false)]" />
+
+    </sub-flow>
+
+</mule>

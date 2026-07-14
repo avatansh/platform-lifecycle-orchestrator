@@ -26,14 +26,17 @@
         keyGenerationExpression="#[if ((p('matrix.source') default 'classpath') startsWith 'exchange') ('compatibility-matrix-' ++ (floor((now() as Number {unit: 'seconds'}) / (p('matrix.refreshSeconds') as Number)) as String)) else 'compatibility-matrix-static']" />
 
     <!--
-        registryCachingStrategy: constant cache key — the app-registry.yaml is also a
-        classpath resource. Cache once per application restart.
+        registryCachingStrategy:
+          • source=classpath        → constant key: one read per JVM lifetime (registry is bundled).
+          • source=exchange[-latest] → time-bucketed key (floor(epochSeconds / registry.refreshSeconds)),
+            mirroring the matrix. The key rotates every refresh window so a re-published Exchange
+            registry (e.g. a newly on-boarded app) is picked up WITHOUT a redeploy.
     -->
     <ee:object-store-caching-strategy
         name="registryCachingStrategy"
         doc:name="Registry Caching Strategy"
         doc:id="pfcs0002-0002-0002-0002-000000000001"
-        keyGenerationExpression="#['app-registry-static']" />
+        keyGenerationExpression="#[if ((p('registry.source') default 'classpath') startsWith 'exchange') ('app-registry-' ++ (floor((now() as Number {unit: 'seconds'}) / (p('registry.refreshSeconds') as Number)) as String)) else 'app-registry-static']" />
 
     <!--
         repoBranchCachingStrategy: per-repo cache for the GitHub default-branch discovery
@@ -118,7 +121,7 @@
                             <when expression="#[p('matrix.source') == 'exchange-latest']"
                                   doc:name="source = exchange-latest"
                                   doc:id="pflm0001-0001-0001-0001-000000000017">
-								<set-variable value="#[p('matrix.exchange.assetId') ++ '/maven-metadata.xml']" doc:name="Set urlPath" doc:id="89888bd3-623a-4617-bb24-1cd11cc472d7" variableName="urlPath" />
+								<set-variable value="#['/api/v3/maven/' ++ p('matrix.exchange.orgId') ++ '/' ++ p('matrix.exchange.assetId') ++ '/maven-metadata.xml']" doc:name="Set urlPath" doc:id="89888bd3-623a-4617-bb24-1cd11cc472d7" variableName="urlPath" />
 								<flow-ref doc:name="Flow Ref sf-exchange-http-get | Get Exchange Version" doc:id="50c8f7b3-1b39-4995-b740-26c21d0b1464" name="sf-exchange-http-get"/>
 								<ee:transform doc:name="DW extract release/latest version"
                                               doc:id="pflm0001-0001-0001-0001-000000000019"
@@ -127,11 +130,21 @@
                                         <ee:set-variable variableName="matrixVersion"><![CDATA[%dw 2.0
 output text/plain
 var meta = read(payload, "application/xml")
+// Pick the HIGHEST published version (semver) from the versions list, NOT <release>.
+// On Anypoint Exchange the <release>/<latest> tags can lag behind the newest custom-asset
+// upload, which silently serves an OLDER matrix (e.g. one missing the connectors block or
+// with a munit rule lacking dependency coordinates) → connector pinning is quietly skipped.
+var vers = (meta.metadata.versioning.versions.*version default []) map ((v) -> (v as String))
+fun vnum(v) = do {
+    var p = (v splitBy ".") map ((s) -> ((s as Number) default 0))
+    --- ((p[0] default 0) * 1000000) + ((p[1] default 0) * 1000) + (p[2] default 0)
+}
 ---
-(meta.metadata.versioning.release default meta.metadata.versioning.latest) as String]]></ee:set-variable>
+if (!isEmpty(vers)) ((vers orderBy vnum($))[-1] as String)
+else ((meta.metadata.versioning.latest default meta.metadata.versioning.release) as String)]]></ee:set-variable>
                                     </ee:variables>
                                 </ee:transform>
-								<logger level="ERROR" doc:name="LOG INFO resolved matrix version" doc:id="pflm0001-0001-0001-0001-000000000022" message="#[output application/java --- 'matrix.source NOT EQUALS exchange-latest | resolved matrix version=' ++ p('matrix.exchange.version')]" />
+								<logger level="INFO" doc:name="LOG INFO resolved matrix version" doc:id="pflm0001-0001-0001-0001-000000000022" message="#[output application/java --- 'matrix.source=exchange-latest | resolved matrix version=' ++ (vars.matrixVersion default 'unknown')]" />
                             </when>
                             <otherwise doc:name="source = exchange (pinned)"
                                        doc:id="pflm0001-0001-0001-0001-000000000020">
@@ -144,7 +157,7 @@ var meta = read(payload, "application/xml")
                         </choice>
 
                         <!-- Step 2 — download the resolved asset version -->
-						<set-variable value="#['/api/v3/maven/' ++ p('matrix.exchange.orgId') ++ '/' ++ p('matrix.exchange.assetId') ++ '/' ++ vars.matrixVersion ++ '/' ++ p('matrix.exchange.assetId') ++ '-' ++ vars.matrixVersion ++ (if ((p('matrix.exchange.classifier') default '') != '') ('-' ++ p('matrix.exchange.classifier')) else '') ++ '.' ++ p('matrix.exchange.packaging')]" doc:name="Set urlPath" doc:id="e6696581-c198-4b15-b0d8-d9f73e076ea5" variableName="urlPath" />
+						<set-variable value="#[output application/java --- '/api/v3/maven/' ++ p('matrix.exchange.orgId') ++ '/' ++ p('matrix.exchange.assetId') ++ '/' ++ (vars.matrixVersion as String) ++ '/' ++ p('matrix.exchange.assetId') ++ '-' ++ (vars.matrixVersion as String) ++ (if ((p('matrix.exchange.classifier') default '') != '') ('-' ++ p('matrix.exchange.classifier')) else '') ++ '.' ++ p('matrix.exchange.packaging')]" doc:name="Set urlPath" doc:id="e6696581-c198-4b15-b0d8-d9f73e076ea5" variableName="urlPath" />
 						<flow-ref doc:name="Flow Ref sf-exchange-http-get | Get Exchange matrix asset" doc:id="b40a6592-6bb3-484a-a70d-19d9cc173d92" name="sf-exchange-http-get" />
 						<ee:transform doc:name="DW parse Exchange YAML"
                                       doc:id="pflm0001-0001-0001-0001-000000000011"
@@ -156,6 +169,28 @@ output application/java
 read(payload, "application/yaml")]]></ee:set-payload>
                             </ee:message>
                         </ee:transform>
+                        <!--
+                            SAFETY NET — an Exchange matrix with NO connectors is never valid: it
+                            would pin runtime/java/munit but silently leave every connector on its
+                            (Java-8-era) BOM version, producing a broken PR that fails MUnit on
+                            Java 17. If the resolved Exchange matrix has an empty connectors block,
+                            prefer the bundled classpath copy (shipped in-sync with this code
+                            version) rather than emit a half-done upgrade.
+                        -->
+                        <choice doc:name="CHOICE Exchange matrix has connectors?" doc:id="pflm0001-0001-0001-0001-000000000030">
+                            <when expression="#[isEmpty((payload.connectors default []))]" doc:id="pflm0001-0001-0001-0001-000000000031">
+                                <logger level="WARN" doc:name="LOG WARN Exchange matrix connectorless" doc:id="pflm0001-0001-0001-0001-000000000032"
+                                        message="#[output application/java --- 'Exchange matrix (version=' ++ (vars.matrixVersion default '?') ++ ') has an EMPTY connectors block — using the bundled classpath matrix instead so connector pinning is not silently skipped. Republish the Exchange matrix to fix the central copy.']" />
+                                <ee:transform doc:name="DW readUrl classpath (connectorless fallback)" doc:id="pflm0001-0001-0001-0001-000000000033">
+                                    <ee:message>
+                                        <ee:set-payload><![CDATA[%dw 2.0
+output application/java
+---
+readUrl("classpath://matrix/compatibility-matrix.yaml", "application/yaml")]]></ee:set-payload>
+                                    </ee:message>
+                                </ee:transform>
+                            </when>
+                        </choice>
 						<error-handler>
                             <on-error-continue type="ANY"
                                                doc:name="On Error - classpath fallback"
@@ -201,10 +236,172 @@ readUrl("classpath://matrix/compatibility-matrix.yaml", "application/yaml")]]></
                       doc:id="pflm0001-0001-0001-0001-000000000005"
                       doc:description="Store parsed matrix object in vars.matrix for downstream use" />
 
+        <!-- Validate the freshly-loaded matrix (connector coverage / staleness guard). -->
+        <flow-ref name="pf-validate-matrix" doc:name="Flow Ref pf-validate-matrix" doc:id="pflm0001-0001-0001-0001-000000000006" />
+
+    </sub-flow>
+
+    <!-- ==========================================================================
+         pf-validate-matrix
+         ──────────────────────────────────────────────────────────────────────────
+         Post-load health check on vars.matrix. The single biggest silent failure is
+         an Exchange-published matrix that is BEHIND the bundled copy (e.g. missing the
+         connectors block) — gating still pins runtime/java/munit while connectors are
+         quietly left un-pinned, which breaks MUnit on Java 17. This surfaces that as a
+         loud WARN so the operator republishes the Exchange matrix.
+
+         Reads:  vars.matrix
+         Emits:  INFO (healthy) or WARN (empty/stale connectors) — never throws.
+         ========================================================================== -->
+    <sub-flow name="pf-validate-matrix"
+              doc:id="pfvm0001-0001-0001-0001-000000000001"
+              doc:name="pf-validate-matrix"
+              doc:description="Log matrix version + connector coverage; WARN if the loaded matrix looks stale/empty">
+        <choice doc:name="CHOICE connectors present?" doc:id="pfvm0001-0001-0001-0001-000000000002">
+            <when expression="#[isEmpty(vars.matrix.connectors default [])]"
+                  doc:name="connectors list empty" doc:id="pfvm0001-0001-0001-0001-000000000003">
+                <logger level="WARN"
+                        doc:name="LOG WARN matrix has no connectors"
+                        doc:id="pfvm0001-0001-0001-0001-000000000004"
+                        message="#[output application/java --- 'MATRIX VALIDATION - connectors list is EMPTY | schemaVersion=' ++ (vars.matrix.schemaVersion default 'unknown') ++ ' | source=' ++ (p('matrix.source') default 'classpath') ++ ' | version=' ++ (vars.matrixVersion default 'n/a') ++ ' - connector pinning will be SKIPPED. The Exchange matrix is likely behind the bundled copy; republish it.']" />
+            </when>
+            <otherwise doc:name="matrix healthy" doc:id="pfvm0001-0001-0001-0001-000000000005">
+                <logger level="INFO"
+                        doc:name="LOG INFO matrix validated"
+                        doc:id="pfvm0001-0001-0001-0001-000000000006"
+                        message="#[output application/java --- 'MATRIX VALIDATION - ok | schemaVersion=' ++ (vars.matrix.schemaVersion default 'unknown') ++ ' | source=' ++ (p('matrix.source') default 'classpath') ++ ' | version=' ++ (vars.matrixVersion default 'n/a') ++ ' | connectors=' ++ (sizeOf(vars.matrix.connectors default []) as String) ++ ' | targetRuntime=' ++ (vars.matrix.target.runtime default 'unknown')]" />
+            </otherwise>
+        </choice>
+    </sub-flow>
+
+    <!-- ==========================================================================
+         pf-load-registry
+         ──────────────────────────────────────────────────────────────────────────
+         Registry twin of pf-load-matrix. Loads the app-registry (appName → repo
+         coordinates) into vars.registry from one of three sources (registry.source):
+
+           • exchange        — fetch the pinned registry.exchange.version asset from the
+             Anypoint Exchange Maven facade; fall back to the bundled classpath copy on
+             ANY failure. Cached for registry.refreshSeconds.
+           • exchange-latest — resolve the newest published version via maven-metadata.xml,
+             then download it. New app on-boarding propagates within one refresh window,
+             no redeploy. Falls back to classpath on any failure.
+           • classpath       — read the bundled classpath://registry/app-registry.yaml only.
+
+         Sets:   vars.registry (parsed YAML object)
+         Caches: registryCachingStrategy (bucketed for exchange; constant for classpath)
+         Callers: pf-resolve-coordinates.
+         ========================================================================== -->
+    <sub-flow name="pf-load-registry"
+              doc:id="pflr0001-0001-0001-0001-000000000001"
+              doc:name="pf-load-registry"
+              doc:description="Load and cache the app-registry (Exchange with classpath fallback) into vars.registry">
+
         <logger level="INFO"
-                doc:name="LOG INFO END pf-load-matrix done"
-                doc:id="pflm0001-0001-0001-0001-000000000006"
-                message="#[output application/java --- 'matrix loaded | schemaVersion=' ++ (vars.matrix.schemaVersion default 'unknown') ++ ' | targetRuntime=' ++ (vars.matrix.target.runtime default 'unknown')]" />
+                doc:name="LOG INFO START pf-load-registry enter"
+                doc:id="pflr0001-0001-0001-0001-000000000002"
+                message="#[output application/java --- 'START - pf-load-registry - loading app registry | source=' ++ (p('registry.source') default 'classpath')]" />
+
+        <ee:cache cachingStrategy-ref="registryCachingStrategy"
+                  doc:name="CACHE Resolve App Registry"
+                  doc:id="pflr0001-0001-0001-0001-000000000003">
+            <choice doc:name="CHOICE registry.source == exchange*?"
+                    doc:id="pflr0001-0001-0001-0001-000000000004">
+                <when expression="#[(p('registry.source') default 'classpath') startsWith 'exchange']"
+                      doc:name="source = exchange / exchange-latest"
+                      doc:id="pflr0001-0001-0001-0001-000000000005">
+                    <try doc:name="TRY fetch registry from Exchange (fallback to classpath)"
+                         doc:id="pflr0001-0001-0001-0001-000000000006">
+                        <choice doc:name="CHOICE resolve latest version?"
+                                doc:id="pflr0001-0001-0001-0001-000000000007">
+                            <when expression="#[p('registry.source') == 'exchange-latest']"
+                                  doc:name="source = exchange-latest"
+                                  doc:id="pflr0001-0001-0001-0001-000000000008">
+                                <set-variable value="#['/api/v3/maven/' ++ p('registry.exchange.orgId') ++ '/' ++ p('registry.exchange.assetId') ++ '/maven-metadata.xml']" doc:name="Set urlPath" doc:id="pflr0001-0001-0001-0001-000000000009" variableName="urlPath" />
+                                <flow-ref doc:name="Flow Ref sf-exchange-http-get | Get Registry Version" doc:id="pflr0001-0001-0001-0001-000000000010" name="sf-exchange-http-get" />
+                                <ee:transform doc:name="DW extract release/latest version" doc:id="pflr0001-0001-0001-0001-000000000011">
+                                    <ee:variables>
+                                        <ee:set-variable variableName="registryVersion"><![CDATA[%dw 2.0
+output text/plain
+var meta = read(payload, "application/xml")
+// Pick the HIGHEST published version (semver), NOT <release> — Exchange's <release>/<latest>
+// tags can lag behind the newest custom-asset upload, silently serving an older registry.
+var vers = (meta.metadata.versioning.versions.*version default []) map ((v) -> (v as String))
+fun vnum(v) = do {
+    var p = (v splitBy ".") map ((s) -> ((s as Number) default 0))
+    --- ((p[0] default 0) * 1000000) + ((p[1] default 0) * 1000) + (p[2] default 0)
+}
+---
+if (!isEmpty(vers)) ((vers orderBy vnum($))[-1] as String)
+else ((meta.metadata.versioning.latest default meta.metadata.versioning.release) as String)]]></ee:set-variable>
+                                    </ee:variables>
+                                </ee:transform>
+                                <logger level="INFO" doc:name="LOG INFO resolved registry version" doc:id="pflr0001-0001-0001-0001-000000000012" message="#[output application/java --- 'registry.source=exchange-latest | resolved registry version=' ++ (vars.registryVersion default 'unknown')]" />
+                            </when>
+                            <otherwise doc:name="source = exchange (pinned)"
+                                       doc:id="pflr0001-0001-0001-0001-000000000013">
+                                <set-variable variableName="registryVersion"
+                                              value="#[p('registry.exchange.version')]"
+                                              doc:name="PV SET vars.registryVersion (pinned)"
+                                              doc:id="pflr0001-0001-0001-0001-000000000014" />
+                            </otherwise>
+                        </choice>
+
+                        <set-variable value="#[output application/java --- '/api/v3/maven/' ++ p('registry.exchange.orgId') ++ '/' ++ p('registry.exchange.assetId') ++ '/' ++ (vars.registryVersion as String) ++ '/' ++ p('registry.exchange.assetId') ++ '-' ++ (vars.registryVersion as String) ++ (if ((p('registry.exchange.classifier') default '') != '') ('-' ++ p('registry.exchange.classifier')) else '') ++ '.' ++ p('registry.exchange.packaging')]" doc:name="Set urlPath" doc:id="pflr0001-0001-0001-0001-000000000015" variableName="urlPath" />
+                        <flow-ref doc:name="Flow Ref sf-exchange-http-get | Get Registry asset" doc:id="pflr0001-0001-0001-0001-000000000016" name="sf-exchange-http-get" />
+                        <ee:transform doc:name="DW parse Exchange YAML" doc:id="pflr0001-0001-0001-0001-000000000017">
+                            <ee:message>
+                                <ee:set-payload><![CDATA[%dw 2.0
+output application/java
+---
+read(payload, "application/yaml")]]></ee:set-payload>
+                            </ee:message>
+                        </ee:transform>
+                        <error-handler>
+                            <on-error-continue type="ANY"
+                                               doc:name="On Error - classpath fallback"
+                                               doc:id="pflr0001-0001-0001-0001-000000000018">
+                                <logger level="ERROR"
+                                        doc:name="LOG ERROR Exchange registry fetch failed"
+                                        doc:id="pflr0001-0001-0001-0001-000000000019"
+                                        message="#[output application/java --- 'Exchange registry fetch failed (' ++ (error.description default 'unknown error') ++ ') - falling back to bundled classpath registry']" />
+                                <ee:transform doc:name="DW readUrl classpath fallback" doc:id="pflr0001-0001-0001-0001-000000000020">
+                                    <ee:message>
+                                        <ee:set-payload><![CDATA[%dw 2.0
+output application/java
+---
+readUrl("classpath://registry/app-registry.yaml", "application/yaml")]]></ee:set-payload>
+                                    </ee:message>
+                                </ee:transform>
+                            </on-error-continue>
+                        </error-handler>
+                    </try>
+                </when>
+                <otherwise doc:name="source = classpath"
+                           doc:id="pflr0001-0001-0001-0001-000000000021">
+                    <logger level="INFO" doc:name="LOG INFO registry from classpath" doc:id="pflr0001-0001-0001-0001-000000000022" message="#[output application/java --- 'Config to get registry from Exchange is FALSE, falling back to bundled classpath registry']" />
+                    <ee:transform doc:name="DW readUrl app-registry.yaml" doc:id="pflr0001-0001-0001-0001-000000000023">
+                        <ee:message>
+                            <ee:set-payload><![CDATA[%dw 2.0
+output application/java
+---
+readUrl("classpath://registry/app-registry.yaml", "application/yaml")]]></ee:set-payload>
+                        </ee:message>
+                    </ee:transform>
+                </otherwise>
+            </choice>
+        </ee:cache>
+
+        <set-variable variableName="registry"
+                      value="#[payload]"
+                      doc:name="PV SET vars.registry"
+                      doc:id="pflr0001-0001-0001-0001-000000000024"
+                      doc:description="Store parsed registry object in vars.registry for downstream use" />
+
+        <logger level="INFO"
+                doc:name="LOG INFO END pf-load-registry done"
+                doc:id="pflr0001-0001-0001-0001-000000000025"
+                message="#[output application/java --- 'registry loaded | source=' ++ (p('registry.source') default 'classpath') ++ ' | apps=' ++ (sizeOf(keysOf(vars.registry.apps default {})) as String)]" />
 
     </sub-flow>
 
@@ -260,36 +457,14 @@ readUrl("classpath://matrix/compatibility-matrix.yaml", "application/yaml")]]></
                 message="#[output application/java --- 'START - pf-resolve-coordinates -  app=' ++ (vars.appName default 'unknown')]" />
 
         <!--
-            Cache scope — key 'app-registry-static' is constant.
-            First call: reads and parses app-registry.yaml; caches the resulting event.
-            Subsequent calls: returns the cached event, skipping the transform.
-            Payload after this scope = parsed registry object.
+            Load the registry into vars.registry via pf-load-registry (Exchange-sourced with
+            classpath fallback, TTL-bucketed cache). Replaces the previous inline classpath-only
+            read so newly on-boarded apps published to the Exchange registry are picked up within
+            one refresh window (registry.refreshSeconds) without a redeploy.
         -->
-        <ee:cache cachingStrategy-ref="registryCachingStrategy"
-                  doc:name="CACHE Read App Registry YAML"
-                  doc:id="pfrc0001-0001-0001-0001-000000000004"
-                  doc:description="Cache the app-registry.yaml read; constant key means one I/O per JVM lifetime">
-            <ee:transform doc:name="DW readUrl app-registry.yaml"
-                          doc:id="pfrc0001-0001-0001-0001-000000000005"
-                          doc:description="Read and parse app-registry.yaml from the classpath using DataWeave readUrl">
-                <ee:message>
-                    <ee:set-payload><![CDATA[%dw 2.0
-output application/java
----
-readUrl("classpath://registry/app-registry.yaml", "application/yaml")]]></ee:set-payload>
-                </ee:message>
-            </ee:transform>
-        </ee:cache>
-
-        <!--
-            Capture parsed registry as vars.registry so it is available throughout the rest
-            of the sub-flow regardless of any further payload changes.
-        -->
-        <set-variable variableName="registry"
-                      value="#[payload]"
-                      doc:name="PV SET vars.registry"
-                      doc:id="pfrc0001-0001-0001-0001-000000000006"
-                      doc:description="Store parsed registry object in vars.registry for precedence resolution" />
+        <flow-ref name="pf-load-registry"
+                  doc:name="Flow Ref pf-load-registry"
+                  doc:id="pfrc0001-0001-0001-0001-000000000004" />
 
         <!--
             GOVERNANCE — enforceAllowList check (rule a).
@@ -453,7 +628,7 @@ var resolvedBranch =
                     <ee:cache cachingStrategy-ref="repoBranchCachingStrategy"
                               doc:name="CACHE GitHub default_branch"
                               doc:id="pfbr0001-0001-0001-0001-000000000004">
-                        <logger level="DEBUG" doc:name="LOG DEBUG Send Request" doc:id="81137330-c2bb-4d14-b8eb-28bd43567841" message="#[output application/java --- 'Sending Request to URL: '/repos/' ' ++ vars.coords.owner ++ '/' ++ vars.coords.repo]" />
+                        <logger level="DEBUG" doc:name="LOG DEBUG Send Request" doc:id="81137330-c2bb-4d14-b8eb-28bd43567841" message="#[output application/java --- 'Sending Request to URL: /repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo]" />
 						<http:request method="GET"
                                       config-ref="GitHub_Request"
                                       path="#['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo]"

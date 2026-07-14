@@ -1,0 +1,271 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:os="http://www.mulesoft.org/schema/mule/os"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+        http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd">
+
+    <!-- ==========================================================================
+         pf-handle-pr-abandoned  (self-heal — PR closed WITHOUT merge)
+         ──────────────────────────────────────────────────────────────────────────
+         Called from the /webhook handler when a pull_request 'closed' event arrives
+         with merged=false (a human closed the upgrade PR without merging it). Left
+         alone, the app's single-flight lock stays held forever and the job sits in
+         PR_OPEN, blocking every future upgrade attempt. This releases the lock and
+         parks the job in CLOSED so the app is immediately re-runnable / reappliable.
+
+         Inputs:  vars.closedBranch (PR head ref), vars.prUrl (optional)
+         Effects: job → CLOSED, branch index cleared, app lock released, Slack + Jira note.
+         Idempotent + NON-FATAL: never throws; already-terminal / untracked branches are no-ops.
+         ========================================================================== -->
+    <sub-flow name="pf-handle-pr-abandoned"
+              doc:id="pfab0001-0001-0001-0001-000000000001"
+              doc:description="PR closed unmerged → release lock, mark job CLOSED, clear branch index. Self-healing + non-fatal.">
+        <logger level="INFO" doc:name="LOG INFO START pf-handle-pr-abandoned"
+                doc:id="pfab0001-0001-0001-0001-000000000002"
+                message="#[output application/java --- 'START - pf-handle-pr-abandoned | branch=' ++ (vars.closedBranch default '?')]" />
+
+        <!-- Map the closed branch back to its job (untracked branch → "" → no-op). -->
+        <os:retrieve key="#['branch::' ++ (vars.closedBranch default '')]"
+                     objectStore="indexStore"
+                     target="jobIdFromBranch"
+                     doc:name="OS Retrieve jobId by Branch"
+                     doc:id="pfab0001-0001-0001-0001-000000000003">
+            <os:default-value>#[""]</os:default-value>
+        </os:retrieve>
+
+        <choice doc:name="CHOICE branch mapped to a job?" doc:id="pfab0001-0001-0001-0001-000000000004">
+            <when expression="#[vars.jobIdFromBranch != null and vars.jobIdFromBranch != '']"
+                  doc:name="branch mapped" doc:id="pfab0001-0001-0001-0001-000000000005">
+
+                <os:retrieve key="#[vars.jobIdFromBranch]" objectStore="jobStore"
+                             target="abandonJob"
+                             doc:name="OS Retrieve Job Record"
+                             doc:id="pfab0001-0001-0001-0001-000000000006">
+                    <os:default-value>#[{}]</os:default-value>
+                </os:retrieve>
+
+                <set-variable variableName="jobId" value="#[vars.jobIdFromBranch]"
+                              doc:name="PV SET jobId" doc:id="pfab0001-0001-0001-0001-000000000007" />
+                <set-variable variableName="appName" value="#[vars.abandonJob.appName default '-']"
+                              doc:name="PV SET appName" doc:id="pfab0001-0001-0001-0001-000000000008" />
+                <flow-ref name="pf-mdc-stamp" doc:name="pf-mdc-stamp" doc:id="pfab0001-0001-0001-0001-000000000009" />
+
+                <choice doc:name="CHOICE job open (not terminal)?" doc:id="pfab0001-0001-0001-0001-00000000000a"
+                        doc:description="Only self-heal jobs that are still in flight; leave terminal/closed jobs untouched">
+                    <when expression="#[not (['DEPLOYED','FAILED_DEPLOY','CLOSED'] contains (vars.abandonJob.status default ''))]"
+                          doc:name="job in flight → close it" doc:id="pfab0001-0001-0001-0001-00000000000b">
+
+                        <!-- Park the job in CLOSED (rolling 30d TTL refreshed on store). -->
+                        <ee:transform doc:name="DW Update Job to CLOSED" doc:id="pfab0001-0001-0001-0001-00000000000c">
+                            <ee:message>
+                                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+import mergeWith from dw::core::Objects
+import nowUtc from dwl::dates
+---
+vars.abandonJob mergeWith {
+    status:      "CLOSED",
+    error:       "Pull request was closed without merging",
+    prUrl:       (vars.prUrl default vars.abandonJob.prUrl default null),
+    completedAt: nowUtc(),
+    updatedAt:   nowUtc()
+}]]></ee:set-payload>
+                            </ee:message>
+                        </ee:transform>
+                        <os:store key="#[vars.jobId]" objectStore="jobStore"
+                                  doc:name="OS Store CLOSED job" doc:id="pfab0001-0001-0001-0001-00000000000d">
+                            <os:value>#[payload]</os:value>
+                        </os:store>
+
+                        <!-- Clear the branch→job index so a re-run gets a clean slate — non-fatal. -->
+                        <try doc:name="TRY clear branch index (non-fatal)" doc:id="pfab0001-0001-0001-0001-00000000000e">
+                            <os:remove key="#['branch::' ++ (vars.closedBranch default '')]" objectStore="indexStore"
+                                       doc:name="OS Remove branch index" doc:id="pfab0001-0001-0001-0001-00000000000f" />
+                            <error-handler>
+                                <on-error-continue type="ANY" doc:id="pfab0001-0001-0001-0001-000000000010">
+                                    <logger level="INFO" doc:name="LOG INFO branch index absent"
+                                            doc:id="pfab0001-0001-0001-0001-000000000011"
+                                            message="#[output application/java --- 'branch index already absent | branch=' ++ (vars.closedBranch default '?')]" />
+                                </on-error-continue>
+                            </error-handler>
+                        </try>
+
+                        <!-- Release the single-flight lock so the app is re-runnable. -->
+                        <set-variable variableName="lockApp" value="#[vars.appName default '']"
+                                      doc:name="PV lockApp" doc:id="pfab0001-0001-0001-0001-000000000012" />
+                        <flow-ref name="pf-release-lock" doc:name="pf-release-lock (PR abandoned)"
+                                  doc:id="pfab0001-0001-0001-0001-000000000013" />
+
+                        <!-- Slack note — non-fatal. -->
+                        <try doc:name="TRY Slack PR-closed (non-fatal)" doc:id="pfab0001-0001-0001-0001-000000000014">
+                            <ee:transform doc:name="DW Build Slack PR-closed message" doc:id="pfab0001-0001-0001-0001-000000000015">
+                                <ee:message>
+                                    <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    channel: p('slack.channel'),
+    text: (":wastebasket: *Java 17 upgrade PR closed without merging* — " ++ (vars.appName default "unknown")
+           ++ "\nJob " ++ (vars.jobId default "?") ++ " parked (CLOSED); the lock is released so the app can be re-run or reapplied."
+           ++ (if ((vars.prUrl default vars.abandonJob.prUrl default null) != null) ("\n" ++ ((vars.prUrl default vars.abandonJob.prUrl) as String)) else ""))
+}]]></ee:set-payload>
+                                </ee:message>
+                            </ee:transform>
+                            <set-variable variableName="slackPath"
+                                          value="#[p('secure::slack.webhookUrl') replace 'https://hooks.slack.com' with '']"
+                                          doc:name="PV SET slackPath" doc:id="pfab0001-0001-0001-0001-000000000016" />
+                            <http:request method="POST" config-ref="Slack_Request" path="#[vars.slackPath]"
+                                          doc:name="POST Slack PR-closed" doc:id="pfab0001-0001-0001-0001-000000000017" />
+                            <error-handler>
+                                <on-error-continue type="ANY" doc:id="pfab0001-0001-0001-0001-000000000018">
+                                    <logger level="WARN" doc:name="LOG WARN Slack PR-closed failed"
+                                            doc:id="pfab0001-0001-0001-0001-000000000019"
+                                            message="#[output application/java --- 'Slack PR-closed notification error swallowed: ' ++ (error.description default 'unknown')]" />
+                                </on-error-continue>
+                            </error-handler>
+                        </try>
+
+                        <!-- Jira note — non-fatal (pf-jira-comment skips when no ticket). -->
+                        <set-variable variableName="jiraTicketId" value="#[vars.abandonJob.jiraTicketId default null]"
+                                      doc:name="PV SET jiraTicketId" doc:id="pfab0001-0001-0001-0001-00000000001a" />
+                        <set-variable variableName="jiraCommentText"
+                                      value="#[output text/plain --- ('The Java 17 upgrade PR for ' ++ (vars.appName as String) ++ ' (job ' ++ (vars.jobId as String) ++ ') was closed without merging. The job is parked (CLOSED) and the upgrade lock has been released, so the app can be re-run or reapplied.')]"
+                                      doc:name="PV SET jiraCommentText (PR closed)" doc:id="pfab0001-0001-0001-0001-00000000001b" />
+                        <set-variable variableName="jiraCommentUrl" value="#[vars.prUrl default vars.abandonJob.prUrl default null]"
+                                      doc:name="PV SET jiraCommentUrl (PR closed)" doc:id="pfab0001-0001-0001-0001-00000000001c" />
+                        <flow-ref name="pf-jira-comment" doc:name="pf-jira-comment (PR closed)"
+                                  doc:id="pfab0001-0001-0001-0001-00000000001d" />
+
+                        <logger level="INFO" doc:name="LOG INFO Job CLOSED"
+                                doc:id="pfab0001-0001-0001-0001-00000000001e"
+                                message="#[output application/java --- 'job CLOSED + lock released (PR closed unmerged) | branch=' ++ (vars.closedBranch default '?')]" />
+                    </when>
+                    <otherwise doc:name="already terminal/closed — no-op" doc:id="pfab0001-0001-0001-0001-00000000001f">
+                        <logger level="INFO" doc:name="LOG INFO abandon no-op"
+                                doc:id="pfab0001-0001-0001-0001-000000000020"
+                                message="#[output application/java --- 'PR closed but job already ' ++ (vars.abandonJob.status default 'missing') ++ ' — nothing to do']" />
+                    </otherwise>
+                </choice>
+            </when>
+            <otherwise doc:name="branch not tracked — ignore" doc:id="pfab0001-0001-0001-0001-000000000021">
+                <logger level="DEBUG" doc:name="LOG DEBUG branch not tracked"
+                        doc:id="pfab0001-0001-0001-0001-000000000022"
+                        message="#[output application/java --- 'closed-PR branch not tracked, ignoring | branch=' ++ (vars.closedBranch default '?')]" />
+            </otherwise>
+        </choice>
+
+        <logger level="INFO" doc:name="LOG INFO END pf-handle-pr-abandoned"
+                doc:id="pfab0001-0001-0001-0001-000000000023"
+                message="#[output application/java --- 'END - pf-handle-pr-abandoned']" />
+    </sub-flow>
+
+    <!-- ==========================================================================
+         pf-reapply-job  (POST /jobs/{jobId}/reapply)
+         ──────────────────────────────────────────────────────────────────────────
+         Re-launches an upgrade for the SAME app using a previous job's stored inputs,
+         re-assessed against the CURRENT compatibility matrix. Primary use: after the
+         matrix was republished to cover a connector that was previously un-pinned, or
+         to retry a MUNIT_FAILED / FAILED_* / CLOSED job without re-typing coordinates.
+
+         Steps: load previous job → seed vars from it (appName, environment, jiraTicketId,
+         coordinate overrides) → release its lock → delegate to pf-start-upgrade (which
+         mints a NEW jobId, re-assesses, and opens a fresh PR).
+
+         Input:  vars.jobId (the PREVIOUS jobId, from the URI)
+         Output: payload = { reapplied, previousJobId, jobId, status, message }
+         404:    OS:KEY_NOT_FOUND (unknown jobId) → mapped by the global error handler.
+         ========================================================================== -->
+    <sub-flow name="pf-reapply-job"
+              doc:id="pfra0001-0001-0001-0001-000000000001"
+              doc:description="Re-launch an upgrade from a previous job's inputs, re-assessed against the current matrix.">
+        <logger level="INFO" doc:name="LOG INFO START pf-reapply-job"
+                doc:id="pfra0001-0001-0001-0001-000000000002"
+                message="#[output application/java --- 'START - pf-reapply-job | previousJobId=' ++ (vars.jobId default '?')]" />
+
+        <!-- Load the previous job (missing → OS:KEY_NOT_FOUND → 404). -->
+        <os:retrieve key="#[vars.jobId]" objectStore="jobStore"
+                     doc:name="OS Retrieve previous Job Record"
+                     doc:id="pfra0001-0001-0001-0001-000000000003" />
+
+        <!-- Seed the inputs pf-start-upgrade expects. requestBody carries the resolved
+             coordinates so re-resolution reuses owner/repo/appPath/orgId/branch. -->
+        <ee:transform doc:name="PV SET reapply inputs" doc:id="pfra0001-0001-0001-0001-000000000004">
+            <ee:message />
+            <ee:variables>
+                <ee:set-variable variableName="previousJobId"><![CDATA[vars.jobId]]></ee:set-variable>
+                <ee:set-variable variableName="appName"><![CDATA[payload.appName]]></ee:set-variable>
+                <ee:set-variable variableName="environment"><![CDATA[payload.environment]]></ee:set-variable>
+                <ee:set-variable variableName="jiraTicketId"><![CDATA[payload.jiraTicketId default null]]></ee:set-variable>
+                <ee:set-variable variableName="approvedChangePlan"><![CDATA[null]]></ee:set-variable>
+                <ee:set-variable variableName="requestBody"><![CDATA[payload.coords default {}]]></ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+        <flow-ref name="pf-mdc-stamp" doc:name="pf-mdc-stamp" doc:id="pfra0001-0001-0001-0001-000000000005" />
+
+        <!-- Release the previous job's app lock (idempotent) so pf-start-upgrade can re-acquire. -->
+        <set-variable variableName="lockApp" value="#[vars.appName default '']"
+                      doc:name="PV lockApp" doc:id="pfra0001-0001-0001-0001-000000000006" />
+        <flow-ref name="pf-release-lock" doc:name="pf-release-lock (reapply)"
+                  doc:id="pfra0001-0001-0001-0001-000000000007" />
+
+        <logger level="INFO" doc:name="LOG INFO reapply relaunch"
+                doc:id="pfra0001-0001-0001-0001-000000000008"
+                message="#[output application/java --- 'reapply relaunching upgrade | app=' ++ (vars.appName default '?') ++ ' | env=' ++ (vars.environment default '?')]" />
+
+        <!-- Delegate to the shared start-upgrade pipeline (mints a NEW jobId, re-assesses). -->
+        <flow-ref name="pf-start-upgrade" doc:name="pf-start-upgrade (reapply)"
+                  doc:id="pfra0001-0001-0001-0001-000000000009" />
+
+        <!-- Build the reapply response from pf-start-upgrade's result. -->
+        <ee:transform doc:name="DW Build reapply response" doc:id="pfra0001-0001-0001-0001-00000000000a">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    reapplied:     true,
+    previousJobId: vars.previousJobId,
+    jobId:         (payload.jobId default vars.jobId),
+    appName:       vars.appName,
+    environment:   vars.environment,
+    status:        (payload.status default "PROCESSING"),
+    message:       ("Re-assessed '" ++ (vars.appName default "?") ++ "' against the current compatibility matrix and re-launched the upgrade.")
+}]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+
+        <logger level="INFO" doc:name="LOG INFO END pf-reapply-job"
+                doc:id="pfra0001-0001-0001-0001-00000000000b"
+                message="#[output application/java --- 'END - pf-reapply-job | previousJobId=' ++ (vars.previousJobId default '?') ++ ' | newJobId=' ++ (payload.jobId default '?')]" />
+    </sub-flow>
+
+    <!-- REST entry for POST /jobs/{jobId}/reapply: bind the URI jobId, delegate to the
+         shared pf-reapply-job sub-flow, then set the HTTP status (200 when the app was
+         already upgraded / nothing to do, else 202 Accepted for the relaunched pipeline). -->
+    <flow name="mf-impl-reapply-job"
+          doc:id="pfra0001-0001-0001-0001-00000000000c"
+          doc:description="REST entry: bind URI jobId, call pf-reapply-job, set 200/202.">
+        <set-variable variableName="jobId" value="#[attributes.uriParams.'jobId']"
+                      doc:name="PV SET jobId (from URI)" doc:id="pfra0001-0001-0001-0001-00000000000d" />
+        <flow-ref name="pf-reapply-job" doc:name="pf-reapply-job" doc:id="pfra0001-0001-0001-0001-00000000000e" />
+        <ee:transform doc:name="DW Set HTTP Status (200/202)" doc:id="pfra0001-0001-0001-0001-00000000000f">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+payload]]></ee:set-payload>
+            </ee:message>
+            <ee:variables>
+                <ee:set-variable variableName="httpStatus"><![CDATA[if ((payload.status default '') == 'ALREADY_UPGRADED') 200 else 202]]></ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+    </flow>
+
+</mule>

@@ -277,6 +277,203 @@
 
     </flow>
 
+    <!-- ===== Tool 4: reapply_job ===== -->
+    <flow name="reapply_job-mcp-tool"
+          doc:id="mc4d0004-0004-0004-0004-000000000001"
+          doc:name="MCP Tool: reapply_job"
+          doc:description="MCP tool entry point for re-launching an upgrade from a previous job's inputs">
+
+        <mcp:tool-listener
+            config-ref="MCP_Config"
+            name="reapply_job"
+            doc:name="MCP Tool Listener: reapply_job"
+            doc:id="mc4d0004-0004-0004-0004-000000000002">
+            <mcp:description>
+                Re-launch a Java 17 upgrade for the SAME application using a previous job's stored
+                inputs, re-assessed against the CURRENT compatibility matrix. Use this after the matrix
+                was republished to cover a connector that was previously un-pinned, or to retry a
+                MUNIT_FAILED / FAILED_* / CLOSED job without re-typing coordinates. Mints a NEW jobId
+                (poll it with get_job_status) and opens a fresh pull request. The previous job's lock
+                is released automatically before the relaunch.
+            </mcp:description>
+            <mcp:parameters-schema><![CDATA[{
+  "type": "object",
+  "required": ["jobId"],
+  "properties": {
+    "jobId": {
+      "type": "string",
+      "description": "The PREVIOUS jobId to re-apply (the job whose inputs are reused). Format: job-{uuid}."
+    }
+  }
+}]]></mcp:parameters-schema>
+            <mcp:responses>
+                <mcp:text-tool-response-content text="#[write(payload, 'application/json')]" />
+            </mcp:responses>
+        </mcp:tool-listener>
+
+        <ee:transform doc:name="PV SET vars" doc:id="mc4d0004-0004-0004-0004-000000000003">
+			<ee:message />
+			<ee:variables>
+				<ee:set-variable variableName="jobId"><![CDATA[payload.jobId]]></ee:set-variable>
+				<ee:set-variable variableName="flowName"><![CDATA[flow.name]]></ee:set-variable>
+				<ee:set-variable variableName="externalTranId"><![CDATA[correlationId]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+        <flow-ref name="pf-mdc-stamp" doc:name="pf-mdc-stamp" doc:id="mc4d0004-0004-0004-0004-00000000000a" />
+
+        <logger level="INFO" doc:name="LOG INFO Request Received" doc:id="mc4d0004-0004-0004-0004-000000000005" message="#[output application/java --- 'REQUEST RECEIVED | transport=mcp | tool=reapply_job']" />
+
+        <flow-ref name="pf-reapply-job"
+                  doc:name="pf-reapply-job"
+                  doc:id="mc4d0004-0004-0004-0004-000000000006" />
+
+        <logger level="INFO" doc:name="LOG INFO Response Sent" doc:id="mc4d0004-0004-0004-0004-000000000007" message="#[output application/java --- 'RESPONSE SENT | status=' ++ ((vars.httpStatus default 200) as String)]" />
+
+        <error-handler ref="mcp-error-handler" doc:name="MCP Error Handler" doc:id="mc4d0004-0004-0004-0004-000000000008" />
+
+    </flow>
+
+    <!-- ===== Tool 5: delete_job ===== -->
+    <flow name="delete_job-mcp-tool"
+          doc:id="mc5e0005-0005-0005-0005-000000000001"
+          doc:name="MCP Tool: delete_job"
+          doc:description="MCP tool entry point for deleting a job record and releasing its lock/index">
+
+        <mcp:tool-listener
+            config-ref="MCP_Config"
+            name="delete_job"
+            doc:name="MCP Tool Listener: delete_job"
+            doc:id="mc5e0005-0005-0005-0005-000000000002">
+            <mcp:description>
+                Admin / maintenance tool: permanently delete a migration job record, clear its
+                branch-to-job index entry, and release the app's single-flight upgrade lock so the app
+                can be upgraded again immediately. Use for test teardown or to unblock an app stuck
+                behind a leftover lock. Returns { deleted, jobId, branchIndexCleared, lockReleased }.
+                Deleting an unknown jobId returns an error. The upgrade lifecycle never deletes jobs on
+                its own (they age out via the 30-day TTL); this is an explicit manual action.
+            </mcp:description>
+            <mcp:parameters-schema><![CDATA[{
+  "type": "object",
+  "required": ["jobId"],
+  "properties": {
+    "jobId": {
+      "type": "string",
+      "description": "The jobId to delete. Format: job-{uuid}."
+    }
+  }
+}]]></mcp:parameters-schema>
+            <mcp:responses>
+                <mcp:text-tool-response-content text="#[write(payload, 'application/json')]" />
+            </mcp:responses>
+        </mcp:tool-listener>
+
+        <ee:transform doc:name="PV SET vars" doc:id="mc5e0005-0005-0005-0005-000000000003">
+			<ee:message />
+			<ee:variables>
+				<ee:set-variable variableName="jobId"><![CDATA[payload.jobId]]></ee:set-variable>
+				<ee:set-variable variableName="flowName"><![CDATA[flow.name]]></ee:set-variable>
+				<ee:set-variable variableName="externalTranId"><![CDATA[correlationId]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+        <flow-ref name="pf-mdc-stamp" doc:name="pf-mdc-stamp" doc:id="mc5e0005-0005-0005-0005-00000000000a" />
+
+        <logger level="INFO" doc:name="LOG INFO Request Received" doc:id="mc5e0005-0005-0005-0005-000000000005" message="#[output application/java --- 'REQUEST RECEIVED | transport=mcp | tool=delete_job']" />
+
+        <flow-ref name="pf-delete-job"
+                  doc:name="pf-delete-job"
+                  doc:id="mc5e0005-0005-0005-0005-000000000006" />
+
+        <logger level="INFO" doc:name="LOG INFO Response Sent" doc:id="mc5e0005-0005-0005-0005-000000000007" message="#[output application/java --- 'RESPONSE SENT | status=' ++ ((vars.httpStatus default 200) as String)]" />
+
+        <error-handler ref="mcp-error-handler" doc:name="MCP Error Handler" doc:id="mc5e0005-0005-0005-0005-000000000008" />
+
+    </flow>
+
+    <!-- ===== Tool 6: upgrade_parent_pom ===== -->
+    <flow name="upgrade_parent_pom-mcp-tool"
+          doc:id="mc6f0006-0006-0006-0006-000000000001"
+          doc:name="MCP Tool: upgrade_parent_pom"
+          doc:description="MCP tool entry point for upgrading a shared parent/BOM pom's connector versions">
+
+        <mcp:tool-listener
+            config-ref="MCP_Config"
+            name="upgrade_parent_pom"
+            doc:name="MCP Tool Listener: upgrade_parent_pom"
+            doc:id="mc6f0006-0006-0006-0006-000000000002">
+            <mcp:description>
+                Upgrade a SHARED parent/BOM pom.xml so the connector versions it manages meet the Java 17
+                compatibility matrix, then open a pull request against the parent/BOM repository. Use this
+                to fix the connectorGaps reported by assess_app for apps that inherit connector versions
+                from a parent/BOM (assess only pins connectors already versioned in the app pom; the rest
+                must be fixed here at the source). Only connectors the parent already MANAGES are touched —
+                none are invented. Provide repoUrl OR owner+repo; pomPath defaults to "pom.xml" and branch
+                defaults to the repo's default branch. Returns { upgraded, prUrl, prNumber, branchName, edits }.
+            </mcp:description>
+            <mcp:parameters-schema><![CDATA[{
+  "type": "object",
+  "properties": {
+    "repoUrl": {
+      "type": "string",
+      "description": "OPTIONAL. Git URL of the parent/BOM repository (https://github.com/<owner>/<repo>[.git]). Provide this OR owner+repo."
+    },
+    "owner": {
+      "type": "string",
+      "description": "OPTIONAL. GitHub owner/org (used when repoUrl is not supplied)."
+    },
+    "repo": {
+      "type": "string",
+      "description": "OPTIONAL. GitHub repository name (used when repoUrl is not supplied)."
+    },
+    "pomPath": {
+      "type": "string",
+      "description": "OPTIONAL. Path to the parent/BOM pom.xml within the repo. Defaults to \"pom.xml\"."
+    },
+    "branch": {
+      "type": "string",
+      "description": "OPTIONAL. Base branch to read from and target the PR against. Defaults to the repo's default branch."
+    },
+    "environment": {
+      "type": "string",
+      "description": "OPTIONAL. Environment label for logging/traceability only; no deployment is performed."
+    },
+    "jiraTicketId": {
+      "type": "string",
+      "description": "OPTIONAL. Jira ticket to link; a comment with the PR link is posted when supplied."
+    }
+  }
+}]]></mcp:parameters-schema>
+            <mcp:responses>
+                <mcp:text-tool-response-content text="#[write(payload, 'application/json')]" />
+            </mcp:responses>
+        </mcp:tool-listener>
+
+        <ee:transform doc:name="PV SET vars" doc:id="mc6f0006-0006-0006-0006-000000000003">
+			<ee:message />
+			<ee:variables>
+				<ee:set-variable variableName="repoUrl"><![CDATA[payload.repoUrl default null]]></ee:set-variable>
+				<ee:set-variable variableName="owner"><![CDATA[payload.owner default null]]></ee:set-variable>
+				<ee:set-variable variableName="repo"><![CDATA[payload.repo default null]]></ee:set-variable>
+				<ee:set-variable variableName="pomPath"><![CDATA[payload.pomPath default null]]></ee:set-variable>
+				<ee:set-variable variableName="branch"><![CDATA[payload.branch default null]]></ee:set-variable>
+				<ee:set-variable variableName="environment"><![CDATA[payload.environment default null]]></ee:set-variable>
+				<ee:set-variable variableName="jiraTicketId"><![CDATA[payload.jiraTicketId default null]]></ee:set-variable>
+				<ee:set-variable variableName="flowName"><![CDATA[flow.name]]></ee:set-variable>
+				<ee:set-variable variableName="externalTranId"><![CDATA[correlationId]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+
+        <logger level="INFO" doc:name="LOG INFO Request Received" doc:id="mc6f0006-0006-0006-0006-000000000005" message="#[output application/java --- 'REQUEST RECEIVED | transport=mcp | tool=upgrade_parent_pom']" />
+
+        <flow-ref name="pf-upgrade-parent-pom"
+                  doc:name="pf-upgrade-parent-pom"
+                  doc:id="mc6f0006-0006-0006-0006-000000000006" />
+
+        <logger level="INFO" doc:name="LOG INFO Response Sent" doc:id="mc6f0006-0006-0006-0006-000000000007" message="#[output application/java --- 'RESPONSE SENT | status=' ++ ((vars.httpStatus default 200) as String)]" />
+
+        <error-handler ref="mcp-error-handler" doc:name="MCP Error Handler" doc:id="mc6f0006-0006-0006-0006-000000000008" />
+
+    </flow>
+
     <!--
         Shared error handler for all MCP tool flows. MCP tools do NOT route through the REST
         main flow, so they cannot reuse global-error-handler (which sets vars.httpStatus for the

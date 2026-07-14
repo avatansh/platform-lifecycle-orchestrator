@@ -44,7 +44,7 @@ http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/htt
     <!-- Returns:  payload = AssessmentResult JSON                           -->
 	<sub-flow name="sf-github-http-get" doc:id="599926fa-45b7-46b7-bd1b-0a7cd52d6bcc" >
 		<logger level="DEBUG" doc:name="LOG DEBUG Send Request" doc:id="54394170-d9d7-499f-9dd9-b348df067c95" message="#[output application/java --- 'Sending Request to URL: ' ++ vars.urlPath]" />
-		<http:request doc:name="HTTP GET GitHub" doc:id="2491ca98-0def-47b3-97ca-d88b13418de0" doc:description="Fetch HEAD commit on defaultBranch to pin all Contents API calls to a consistent tree SHA" config-ref="GitHub_Request" path="#[vars.urlPath]" >
+		<http:request doc:name="HTTP GET GitHub" doc:id="2491ca98-0def-47b3-97ca-d88b13418de0" doc:description="Fetch HEAD commit on defaultBranch to pin all Contents API calls to a consistent tree SHA" config-ref="GitHub_Request" path="#[vars.urlPath]" outputMimeType="application/json" >
 			<http:query-params ><![CDATA[#[output application/java
 ---
 vars.queryParams default {}]]]></http:query-params>
@@ -53,7 +53,7 @@ vars.queryParams default {}]]]></http:query-params>
 	</sub-flow>
 	<sub-flow name="sf-contents-api-http-get" doc:id="2b3ace74-1b19-4a5c-9998-95a1838c6af0" >
 		<logger level="DEBUG" doc:name="LOG DEBUG Send Request" doc:id="01e71f68-e4ed-4772-afa6-6cf479883a65" message="#[output application/java --- 'Sending Request to URL: ' ++ vars.urlPath]" />
-		<http:request doc:name="HTTP GET CONTENT API" doc:id="361c0cda-24ab-49fe-b2ba-4613ab0e766a" doc:description="Fetch app pom.xml via Contents API; response contains base64-encoded file content" config-ref="GitHub_Request" path="#[vars.urlPath]">
+		<http:request doc:name="HTTP GET CONTENT API" doc:id="361c0cda-24ab-49fe-b2ba-4613ab0e766a" doc:description="Fetch app pom.xml via Contents API; response contains base64-encoded file content" config-ref="GitHub_Request" path="#[vars.urlPath]" outputMimeType="application/json">
 			<http:query-params><![CDATA[#[output application/java
 ---
 vars.queryParams default {}]]]></http:query-params>
@@ -89,7 +89,10 @@ vars.queryParams default {}]]]></http:query-params>
 			</ee:message>
 			<ee:variables >
 				<ee:set-variable variableName="headSha" ><![CDATA[payload.sha]]></ee:set-variable>
-				<ee:set-variable variableName="urlPath" ><![CDATA['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/git/trees/' ++ vars.headSha]]></ee:set-variable>
+				<ee:set-variable variableName="urlPath" ><![CDATA[%dw 2.0
+output application/java
+---
+'/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/git/trees/' ++ ((payload.sha default '') as String)]]></ee:set-variable>
 				<ee:set-variable variableName="queryParams" ><![CDATA[%dw 2.0
 output application/java
 ---
@@ -116,7 +119,7 @@ analyzeTree(vars.tree, vars.coords.appPath, vars.matrix.gating, vars.matrix.conn
 				<ee:set-variable variableName="muleArtifactPath" ><![CDATA[#[vars.treeAnalysis.muleArtifactPath]]]></ee:set-variable>
 				<ee:set-variable variableName="ciWorkflowPath" ><![CDATA[#[vars.treeAnalysis.ciWorkflowPath]]]></ee:set-variable>
 				<ee:set-variable variableName="allProps" ><![CDATA[#[vars.treeAnalysis.allProps]]]></ee:set-variable>
-				<ee:set-variable variableName="urlPath" ><![CDATA['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/contents/' ++ vars.appPomPath]]></ee:set-variable>
+				<ee:set-variable variableName="urlPath" ><![CDATA['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/contents/' ++ (vars.treeAnalysis.appPomPath default '')]]></ee:set-variable>
 				<ee:set-variable variableName="queryParams" ><![CDATA[%dw 2.0
 output application/java
 ---
@@ -125,8 +128,19 @@ output application/java
 }]]></ee:set-variable>
 			</ee:variables>
 		</ee:transform>
-		<set-variable value="#[p('matrix.exchange.assetId') ++ '/maven-metadata.xml']" doc:name="Set urlPath" doc:id="cbf7e962-f293-45e6-9877-0ccf9bd0d68e" variableName="urlPath" />
+		<choice doc:name="CHOICE app pom.xml located?" doc:id="pf00pom01-0001-0001-0001-000000000001" doc:description="Fail with a clear 400 when no pom.xml exists at the resolved appPath (e.g. wrong appPath for a monorepo module)">
+			<when expression="#[vars.appPomPath == null]" doc:id="pf00pom01-0001-0001-0001-000000000002">
+				<logger level="ERROR" doc:name="LOG ERROR app pom not found" doc:id="pf00pom01-0001-0001-0001-000000000003" message="#[output application/java --- 'app pom.xml not found | app=' ++ (vars.appName default '?') ++ ' | appPath=' ++ (vars.coords.appPath default '.') ++ ' | repo=' ++ (vars.coords.owner default '?') ++ '/' ++ (vars.coords.repo default '?')]" />
+				<raise-error type="VALIDATION:APP_NOT_REGISTERED" doc:name="RAISE VALIDATION:APP_NOT_REGISTERED (pom not found)" doc:id="pf00pom01-0001-0001-0001-000000000004" description="#[output application/java --- 'Could not locate a pom.xml for app &quot;' ++ (vars.appName default '?') ++ '&quot; at path &quot;' ++ (vars.coords.appPath default '.') ++ '&quot; in ' ++ (vars.coords.owner default '?') ++ '/' ++ (vars.coords.repo default '?') ++ '. For a multi-module (monorepo) repository, set appPath to the module directory that contains the pom.xml via app-registry.yaml or the request body.']" />
+			</when>
+		</choice>
 		<flow-ref doc:name="Flow Ref sf-contents-api-http-get | app pom.xml" doc:id="6387693a-8cc6-48bd-b712-6a06afe38cd5" name="sf-contents-api-http-get"/>
+		<choice doc:name="CHOICE app pom content present?" doc:id="pf00pom02-0001-0001-0001-000000000001" doc:description="Fail clearly when the Contents API returned no readable file content for the app pom (null, directory listing, or oversized)">
+			<when expression="#[not (payload.content is String)]" doc:id="pf00pom02-0001-0001-0001-000000000002">
+				<logger level="ERROR" doc:name="LOG ERROR app pom content empty" doc:id="pf00pom02-0001-0001-0001-000000000003" message="#[output application/java --- 'app pom.xml returned no readable content | app=' ++ (vars.appName default '?') ++ ' | appPomPath=' ++ (vars.appPomPath default '?') ++ ' | repo=' ++ (vars.coords.owner default '?') ++ '/' ++ (vars.coords.repo default '?') ++ ' | url=' ++ (vars.urlPath default '?') ++ ' | rawResponse=' ++ (write(payload, 'application/json', {'indent': false}) default '(unreadable/stream)')]" />
+				<raise-error type="VALIDATION:APP_NOT_REGISTERED" doc:name="RAISE VALIDATION:APP_NOT_REGISTERED (empty app pom)" doc:id="pf00pom02-0001-0001-0001-000000000004" description="#[output application/java --- 'The app pom.xml at &quot;' ++ (vars.appPomPath default '?') ++ '&quot; in ' ++ (vars.coords.owner default '?') ++ '/' ++ (vars.coords.repo default '?') ++ ' could not be read: the Contents API returned no inline file content (the path may be a directory, empty, or the file exceeds the inline size limit). Verify appPath points to the module directory that directly contains the pom.xml.']" />
+			</when>
+		</choice>
 		<ee:transform doc:name="DW Parse App Pom — init chain" doc:id="ff4046fa-820f-487b-901b-7f422f2a73eb" doc:description="Base64-decode app pom content, parse XML, initialise vars.chain, compute next parent path" >
 			<ee:variables >
 				<ee:set-variable variableName="appPomParsed" ><![CDATA[%dw 2.0
@@ -147,7 +161,7 @@ output application/java
 {
 	ref: vars.headSha
 }]]></ee:set-variable>
-				<ee:set-variable variableName="urlPath" ><![CDATA['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/contents/' ++ vars.nextParentPath]]></ee:set-variable>
+				<ee:set-variable variableName="urlPath" ><![CDATA['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/contents/' ++ (vars.appPomParsed.nextParentPath default '')]]></ee:set-variable>
 			</ee:variables>
 		</ee:transform>
 		<choice doc:name="CHOICE fetch parent pom (level 1)?" doc:id="b59c8d0d-4978-47b2-ade7-e74be0b68c22" doc:description="Fetch direct parent pom when app pom declares a resolvable relativePath" >
@@ -283,9 +297,16 @@ buildAssessmentResult(
     vars.matrix, vars.chain, vars.appPomText, vars.muleArtifactCurrent, vars.muleArtifactPath,
     vars.ciWorkflowText, vars.ciWorkflowPath, vars.appName, vars.topology, vars.headSha,
     vars.hasApiPolicies, vars.customJavaFound, vars.lookupFound, vars.warnings,
-    (p('upgrade.pomEditStrategy') default 'appOverride'))]]></ee:set-payload>
+    (p('upgrade.pomEditStrategy') default 'appOverride'),
+    (((p('matrix.missing.excludeArtifacts') default '') splitBy ',') map trim($) filter ($ != '')))]]></ee:set-payload>
 			</ee:message>
 		</ee:transform>
+		<!-- Matrix coverage gap → Slack alert (non-blocking). Capture the list from the result,
+		     then fire-and-forget so the assessment response is never delayed or mutated. -->
+		<set-variable variableName="missingConnectors" value="#[payload.changePlan.missingFromMatrix default []]" doc:name="PV SET vars.missingConnectors" doc:id="a8f8c1c7-66e2-441e-af4d-59e690ae9001" />
+		<async doc:name="ASYNC notify missing connectors" doc:id="a8f8c1c7-66e2-441e-af4d-59e690ae9002">
+			<flow-ref name="pf-notify-missing-connectors" doc:name="Flow Ref pf-notify-missing-connectors" doc:id="a8f8c1c7-66e2-441e-af4d-59e690ae9003" />
+		</async>
 		<logger level="TRACE" doc:name="LOG INFO END pf-assess-app done" doc:id="4e74d6e1-36c1-4409-a36d-2a6db4b1a704" message="#[output application/java --- 'pf-assess-app done | topology=' ++ (vars.topology default 'unknown') ++ ' | fileEdits=' ++ sizeOf(payload.changePlan.fileEdits default []) ++ ' | warnings=' ++ sizeOf(payload.warnings default [])]" />
 	</sub-flow>
 

@@ -22,19 +22,24 @@ http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/cu
 				<ee:message >
 					<ee:set-payload ><![CDATA[%dw 2.0
 output application/json
+// Surface the assessment warnings (parent/BOM connector gaps, shared-file impact, matrix
+// coverage gaps, custom Java, etc.) on the PR-opened Slack message so reviewers see the
+// caveats — especially the "update the parent/BOM first" action — without opening the PR.
+var warns = (vars.assessment.warnings default [])
 ---
 {
     channel: p('slack.channel'),
     text: (":rocket: *Java 17 upgrade PR ready* — " ++ vars.appName
            ++ "\n" ++ (vars.prUrl default "(no url)")
            ++ "\nJob " ++ vars.jobId ++ " • status PR_OPEN"
-           ++ (if (vars.jiraTicketId != null) ("\nJira: <" ++ (p('jira.baseUrl') default '') ++ "/browse/" ++ (vars.jiraTicketId as String) ++ "|" ++ (vars.jiraTicketId as String) ++ ">") else ""))
+           ++ (if (vars.jiraTicketId != null) ("\nJira: <" ++ (p('jira.baseUrl') default '') ++ "/browse/" ++ (vars.jiraTicketId as String) ++ "|" ++ (vars.jiraTicketId as String) ++ ">") else "")
+           ++ (if (!isEmpty(warns)) ("\n\n:warning: *Warnings*\n" ++ (warns map ((w) -> "• " ++ (w as String)) joinBy "\n")) else ""))
 }]]></ee:set-payload>
 				</ee:message>
 			</ee:transform>
 			<set-variable value="#[p('secure::slack.webhookUrl') replace 'https://hooks.slack.com' with '']" doc:name="PV SET slackPath" doc:id="9e69ffdd-a8dc-46cb-8a97-79bffcfd009d" variableName="slackPath" />
 			<http:request doc:name="POST Slack success notification" doc:id="c99f84cb-8984-4f59-9e05-5bdd3e089687" doc:description="Send PR-opened message to the configured Slack channel" config-ref="Slack_Request" method="POST" path="#[vars.slackPath]" />
-			<set-variable value="#[('Java 17 upgrade PR opened for ' ++ (vars.appName as String) ++ ' — status PR_OPEN.')]" doc:name="PV SET vars.jiraCommentText (PR opened)" doc:id="5f397dce-2e11-42ed-8e13-f3271ff1084a" variableName="jiraCommentText" />
+			<set-variable value="#[output application/java --- 'Java 17 upgrade PR opened for ' ++ (vars.appName as String) ++ ' — status PR_OPEN.']" doc:name="PV SET vars.jiraCommentText (PR opened)" doc:id="5f397dce-2e11-42ed-8e13-f3271ff1084a" variableName="jiraCommentText" />
 			<set-variable value="#[vars.prUrl default null]" doc:name="PV SET vars.jiraCommentUrl (PR opened)" doc:id="72c8d87b-4882-4ab9-bdf0-8d51201c48d1" variableName="jiraCommentUrl" />
 			<flow-ref doc:name="pf-jira-comment (PR opened)" doc:id="fc12f80d-2d77-4d0e-b45e-1e4668bef3a3" name="pf-jira-comment" />
 			<error-handler >
@@ -211,5 +216,70 @@ output application/json
 			</error-handler>
 		</try>
 		<logger level="INFO" doc:name="LOG INFO END pf-notify-failure1" doc:id="843cebb0-9be1-485b-a28f-e7ef49a9d4bf" message="#[output application/java --- 'END pf-notify-failure']" />
+	</sub-flow>
+
+    <!-- ==========================================================================
+         pf-notify-missing-connectors  (governance — matrix coverage gap)
+         Slack ONLY. Fired when an assessment finds connector(s) the app declares that
+         the compatibility matrix does NOT cover (vars.missingConnectors). These cannot
+         be auto-pinned for Java 17, so ops is alerted to extend + republish the matrix.
+         Self-guarding (no-op when the list is empty or matrix.notifyMissing != true) and
+         NON-FATAL: any failure is logged at WARN and swallowed so assessment continues.
+         Inputs: vars.appName, vars.jobId, vars.missingConnectors [{groupId, artifactId}]
+         ========================================================================== -->
+	<sub-flow name="pf-notify-missing-connectors" doc:id="pfnm0001-0001-0001-0001-000000000001" doc:description="Slack-alert connectors declared by the app but absent from the matrix. Self-guarding + non-fatal.">
+		<choice doc:name="CHOICE missing connectors AND notifyMissing?" doc:id="pfnm0001-0001-0001-0001-000000000002">
+			<when expression="#[!isEmpty(vars.missingConnectors default []) and (p('matrix.notifyMissing') default 'true') == 'true']" doc:id="pfnm0001-0001-0001-0001-000000000003">
+				<logger level="WARN" doc:name="LOG WARN missing connectors detected" doc:id="pfnm0001-0001-0001-0001-000000000005" message="#[output application/java --- 'MATRIX COVERAGE GAP - app=' ++ (vars.appName default '?') ++ ' declares connectors missing from the matrix: ' ++ (write((vars.missingConnectors default []), 'application/json', {'indent': false}) as String)]" />
+				<!-- De-dup: assessment runs twice per upgrade (pre-flight + standalone), and the same
+				     coverage gap persists across re-polls. Key on app + the sorted missing set so we
+				     alert once per gap per idempotency window (idempotencyStore TTL) instead of spamming. -->
+				<set-variable variableName="missingNotifyKey"
+				              value="#[output text/plain --- 'missingnotify::' ++ (vars.appName default '?') ++ '::' ++ (((vars.missingConnectors default []) map ((c) -> (c.groupId default '') ++ ':' ++ (c.artifactId default ''))) orderBy $ joinBy ',')]"
+				              doc:name="PV SET missingNotifyKey" doc:id="pfnm0001-0001-0001-0001-000000000030" />
+				<os:retrieve key="#[vars.missingNotifyKey]" objectStore="idempotencyStore" target="missingNotified"
+				             doc:name="OS Retrieve missing-notify key" doc:id="pfnm0001-0001-0001-0001-000000000031">
+					<os:default-value>#[false]</os:default-value>
+				</os:retrieve>
+				<choice doc:name="CHOICE already notified?" doc:id="pfnm0001-0001-0001-0001-000000000032">
+					<when expression="#[vars.missingNotified == true]" doc:name="already alerted — skip" doc:id="pfnm0001-0001-0001-0001-000000000033">
+						<logger level="INFO" doc:name="LOG INFO missing-notify deduped" doc:id="pfnm0001-0001-0001-0001-000000000034" message="#[output application/java --- 'missing-connector alert already sent for this gap, skipping | key=' ++ (vars.missingNotifyKey default '?')]" />
+					</when>
+					<otherwise doc:name="first alert for this gap" doc:id="pfnm0001-0001-0001-0001-000000000035">
+						<os:store key="#[vars.missingNotifyKey]" objectStore="idempotencyStore" doc:name="OS Store missing-notify key" doc:id="pfnm0001-0001-0001-0001-000000000036">
+							<os:value>#[true]</os:value>
+						</os:store>
+						<try doc:name="TRY missing-connector Slack (non-fatal)" doc:id="pfnm0001-0001-0001-0001-000000000004">
+							<ee:transform doc:name="DW Build Slack missing-connector message" doc:id="pfnm0001-0001-0001-0001-000000000006">
+						<ee:message>
+							<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+var list = (vars.missingConnectors default []) map ((c) -> "• " ++ (c.groupId default "?") ++ ":" ++ (c.artifactId default "?"))
+---
+{
+    channel: p('slack.channel'),
+    text: (":warning: *Java 17 matrix coverage gap* — " ++ (vars.appName default "unknown")
+           ++ "\nJob " ++ (vars.jobId default "?")
+           ++ "\nThe app declares connector(s) NOT in the compatibility matrix, so they were *not* pinned for Java 17:\n"
+           ++ (list joinBy "\n")
+           ++ "\nAction: add these to the matrix (connectors:) and republish, then reapply the job.")
+}]]></ee:set-payload>
+						</ee:message>
+					</ee:transform>
+					<set-variable value="#[p('secure::slack.webhookUrl') replace 'https://hooks.slack.com' with '']" doc:name="PV SET slackPath" doc:id="pfnm0001-0001-0001-0001-000000000007" variableName="slackPath" />
+					<http:request doc:name="POST Slack missing-connector alert" doc:id="pfnm0001-0001-0001-0001-000000000008" doc:description="Send matrix-coverage-gap message to the configured Slack channel" config-ref="Slack_Request" method="POST" path="#[vars.slackPath]" />
+					<error-handler>
+						<on-error-continue enableNotifications="true" logException="true" doc:name="swallow missing-connector notify error" doc:id="pfnm0001-0001-0001-0001-000000000009" type="ANY">
+							<logger level="WARN" doc:name="LOG WARN missing-connector notify failed" doc:id="pfnm0001-0001-0001-0001-000000000010" message="#[output application/java --- 'missing-connector notification error swallowed: ' ++ (error.description default 'unknown')]" />
+						</on-error-continue>
+					</error-handler>
+						</try>
+					</otherwise>
+				</choice>
+			</when>
+			<otherwise doc:id="pfnm0001-0001-0001-0001-000000000011">
+				<logger level="DEBUG" doc:name="LOG DEBUG no missing connectors" doc:id="pfnm0001-0001-0001-0001-000000000012" message="#[output application/java --- 'no missing connectors to notify (or notifyMissing disabled)']" />
+			</otherwise>
+		</choice>
 	</sub-flow>
 </mule>

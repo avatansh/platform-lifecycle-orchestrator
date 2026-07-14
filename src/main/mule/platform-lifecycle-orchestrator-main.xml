@@ -1,14 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<mule xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+<mule xmlns:sap="http://www.mulesoft.org/schema/mule/sap"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
       xmlns:apikit="http://www.mulesoft.org/schema/mule/mule-apikit"
       xmlns:http="http://www.mulesoft.org/schema/mule/http"
       xmlns="http://www.mulesoft.org/schema/mule/core"
-      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
-      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="
         http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
         http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
         http://www.mulesoft.org/schema/mule/mule-apikit http://www.mulesoft.org/schema/mule/mule-apikit/current/mule-apikit.xsd
-http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+http://www.mulesoft.org/schema/mule/sap http://www.mulesoft.org/schema/mule/sap/current/mule-sap.xsd">
 
     <!--
         Main entry-point flow for the Platform Lifecycle Orchestrator API.
@@ -62,7 +63,7 @@ http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/
 
         <!-- Stamp the logging MDC (externalTranId here; jobId/appName refined downstream)
              so every log line for this request carries the correlation ids automatically. -->
-        <flow-ref name="pf-mdc-stamp" doc:name="pf-mdc-stamp" doc:id="d4e5f6a7-0004-0004-0004-00000000000a" />
+		<flow-ref name="pf-mdc-stamp" doc:name="pf-mdc-stamp" doc:id="d4e5f6a7-0004-0004-0004-00000000000a" />
 
         <logger
             level="INFO"
@@ -117,6 +118,30 @@ http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/
         <flow-ref name="mf-impl-get-job-status"
                   doc:name="mf-impl-get-job-status"
                   doc:id="d4e5f6a7-0004-0004-0004-000000000014" />
+    </flow>
+
+    <!-- DELETE /jobs/{jobId} (admin/maintenance) -->
+    <flow name="delete:\jobs\(jobId):platform-lifecycle-orchestrator-config"
+          doc:id="d4e5f6a7-0004-0004-0004-000000000019">
+        <flow-ref name="mf-impl-delete-job"
+                  doc:name="mf-impl-delete-job"
+                  doc:id="d4e5f6a7-0004-0004-0004-00000000001a" />
+    </flow>
+
+    <!-- POST /jobs/{jobId}/reapply (no request body declared in RAML) -->
+    <flow name="post:\jobs\(jobId)\reapply:platform-lifecycle-orchestrator-config"
+          doc:id="d4e5f6a7-0004-0004-0004-00000000001d">
+        <flow-ref name="mf-impl-reapply-job"
+                  doc:name="mf-impl-reapply-job"
+                  doc:id="d4e5f6a7-0004-0004-0004-00000000001e" />
+    </flow>
+
+    <!-- POST /parent-pom/upgrade -->
+    <flow name="post:\parent-pom\upgrade:application\json:platform-lifecycle-orchestrator-config"
+          doc:id="d4e5f6a7-0004-0004-0004-000000000021">
+        <flow-ref name="mf-impl-post-parent-pom-upgrade"
+                  doc:name="mf-impl-post-parent-pom-upgrade"
+                  doc:id="d4e5f6a7-0004-0004-0004-000000000022" />
     </flow>
 
     <!-- POST /webhook -->

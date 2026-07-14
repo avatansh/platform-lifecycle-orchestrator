@@ -46,7 +46,7 @@ gating:
 connectors:
   - { property: "apikit.version",                   set: "1.11.8", groupId: "org.mule.modules",    artifactId: "mule-apikit-module" }
   - { property: "http.connector.version",           set: "1.11.3", groupId: "org.mule.connectors", artifactId: "mule-http-connector" }
-  - { property: "sockets.connector.version",        set: "1.2.5",  groupId: "org.mule.connectors", artifactId: "mule-sockets-connector" }
+  - { property: "sockets.connector.version",        set: "1.2.8",  groupId: "org.mule.connectors", artifactId: "mule-sockets-connector" }
   - { property: "objectstore.connector.version",    set: "1.3.0",  groupId: "org.mule.connectors", artifactId: "mule-objectstore-connector" }
   - { property: "secure.conf.prop.module.version",  set: "1.2.7",  groupId: "com.mulesoft.modules", artifactId: "mule-secure-configuration-property-module" }
   - { property: "db.connector.version",             set: "1.14.6", groupId: "org.mule.connectors", artifactId: "mule-db-connector" }

@@ -77,7 +77,13 @@ fun initChain(base64Content, appPomPath: String, treePaths) = do {
     ---
     {
         appPomText:     rawContent,
-        chain:          [{ path: appPomPath, pom: parsedPom }],
+        // Carry the RAW pom text alongside the parsed object. Once this chain is stored in a
+        // Mule (application/java) variable, the parsed XML materialises to a java.util.Map,
+        // which cannot hold duplicate keys — repeated <dependency>/<plugin> elements collapse
+        // to the LAST one, so later findDep/appDeclaredExtensions silently see nothing. Keeping
+        // pomText (a String survives untouched) lets consumers re-read it in-script and rebuild
+        // a native DW object with all repeated keys intact.
+        chain:          [{ path: appPomPath, pom: parsedPom, pomText: rawContent }],
         nextParentPath: nextParentPath(parsedPom, appPomPath, treePaths)
     }
 }
@@ -95,7 +101,8 @@ fun appendParent(base64Content, parentPath: String, chain, treePaths) = do {
     var parsedPom  = read(rawContent, "application/xml")
     ---
     {
-        chain:          chain ++ [{ path: parentPath, pom: parsedPom }],
+        // pomText carried for the same duplicate-key-collapse reason documented in initChain.
+        chain:          chain ++ [{ path: parentPath, pom: parsedPom, pomText: rawContent }],
         nextParentPath: nextParentPath(parsedPom, parentPath, treePaths)
     }
 }

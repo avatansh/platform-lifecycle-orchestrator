@@ -9,6 +9,19 @@
 import propOf from dwl::pomChain
 import * from dw::core::Strings
 
+// rehydrate(chain): rebuild each entry's parsed pom FROM ITS RAW TEXT, in-script.
+// Why this is required: the chain is assembled in one flow step and stored in a Mule
+// (application/java) variable, then consumed here in a later step. Materialising a
+// DataWeave-parsed XML object to java.util.Map drops duplicate keys, so repeated
+// <dependency>/<plugin> elements collapse to the LAST occurrence — findDep and
+// appDeclaredExtensions then see (at most) one dependency and every connector pin +
+// missing-from-matrix detection silently disappears. Re-reading pomText here (a String,
+// which round-trips through the java var untouched) rebuilds a native DW object with all
+// repeated keys intact. Falls back to the pre-parsed .pom when pomText is absent (unit tests).
+fun rehydrate(chain) =
+    (chain default []) map ((c) ->
+        { path: c.path, pom: (if (c.pomText?) read((c.pomText as String), "application/xml") else c.pom) })
+
 // ── semver helpers: simple "a < b" comparison over major.minor.patch ──────────────
 fun toNums(v) = (v splitBy ".") map (trim($) replace /[^0-9].*/ with "") map (($ default "0") as Number)
 fun lt(a, b) = do {
@@ -125,7 +138,12 @@ fun computePropEdits(chain, matrix) =
 //     property in the app pom (one edit covers every artifact that references it, e.g.
 //     all munit-* referencing ${munit.version}),
 //   · a literal inline <version> → replace it with the pinned literal,
-//   · a declared coordinate with NO <version> (BOM-managed) → add a <version>.
+//   · a declared coordinate with NO <version>:
+//        – GATING rules (runtime/java/munit/mule-maven-plugin) → ADD a <version> (MUnit and the
+//          runtime upgrade must apply regardless of topology),
+//        – matrix CONNECTORS → SKIP. A version-less connector is inherited from the parent/BOM;
+//          we only pin a connector when a version is ALREADY present in the app pom. The gap is
+//          reported as an actionable warning (connectorGaps) so the parent/BOM is fixed instead.
 // A connector the app pom does NOT declare is skipped — we never add a dependency the app
 // didn't already declare. Pure-property GATES (runtime/java) are added/overridden in the
 // app pom even when only inherited, because they are the Java-17 upgrade targets.
@@ -144,7 +162,15 @@ fun appPropEdit(appPath, property, from, to) =
     { property: property, kind: "pomProperty", file: appPath, from: from, to: to, change: true, addIfAbsent: true }
 
 // Pin one declared occurrence (dependency or plugin) inside the app pom.
-fun pinOccurrence(chain, appPath, r, ver, kind, coords) =
+// addIfAbsent controls the "declared but no <version>" (BOM/parent-managed) case:
+//   · true  (GATING rules — runtime/java/munit/plugins): ADD a <version> into the app pom, because
+//            these are the Java-17 upgrade targets and MUnit must be runnable regardless of topology.
+//   · false (matrix CONNECTORS): SKIP — a version-less connector is inherited from the parent/BOM,
+//            so we never inject a version the app did not already declare. The gap is instead
+//            surfaced as an actionable warning (see connectorGaps/connectorGapWarning) so the
+//            parent/BOM is updated. This honours "pin the connector only if a version is already
+//            present in the app pom".
+fun pinOccurrence(chain, appPath, r, ver, kind, coords, addIfAbsent) =
     if (isRef(ver)) do {                     // ${property} ref → override the property in the app pom
         var p = refName(ver)
         ---
@@ -154,8 +180,9 @@ fun pinOccurrence(chain, appPath, r, ver, kind, coords) =
         (if (needsBump(ver as String, r))
             [ ({ kind: kind, file: appPath, from: (ver as String), to: r.set, change: true, property: r.property } ++ coords) ]
          else [])
-    else                                     // declared but no <version> (BOM-managed) → add one
+    else if (addIfAbsent)                    // declared but no <version> (BOM-managed) → add one (gating only)
         [ ({ kind: kind, file: appPath, from: null, to: r.set, change: true, property: r.property } ++ coords) ]
+    else []                                  // connector version-less in app pom → skip, surface as warning
 
 // Edits for a single rule under appOverride. isGating ⇒ a pure-property rule (runtime/java)
 // may be ADDED to the app pom even when only inherited.
@@ -173,10 +200,10 @@ fun overrideEditsForRule(chain, r, isGating) = do {
          else [])   // undeclared connector/plugin → never add
     else
         ( (if (depInApp != null) pinOccurrence(chain, appPath, r, (depInApp.dep.version default null), "depVersion",
-                                               { groupId: r.groupId, artifactId: r.artifactId }) else [])
+                                               { groupId: r.groupId, artifactId: r.artifactId }, isGating) else [])
           ++
           (if (plgInApp != null) pinOccurrence(chain, appPath, r, (plgInApp.plugin.version default null), "pluginVersion",
-                                               { pluginGroupId: (r.pluginGroupId default null), pluginArtifactId: r.pluginArtifactId }) else []) )
+                                               { pluginGroupId: (r.pluginGroupId default null), pluginArtifactId: r.pluginArtifactId }, isGating) else []) )
 }
 
 /**
@@ -228,6 +255,101 @@ fun computeMunitArgLineEdits(chain, matrix) = do {
             distinctBy ((e) -> e.file)
 }
 
+// ── Missing-from-matrix detection ────────────────────────────────────────────────────
+// Connectors/modules the app DECLARES (classifier=mule-plugin, in a Mule extension group)
+// that the compatibility matrix does NOT cover. These cannot be auto-pinned for Java 17, so
+// they are surfaced as a warning AND a Slack notification (see pf-notify-missing-connectors)
+// so the matrix can be extended — the assessment/upgrade still continues.
+fun muleExtensionGroups() =
+    ["org.mule.connectors", "org.mule.modules", "com.mulesoft.connectors", "com.mulesoft.modules"]
+
+// App-declared mule-plugin dependencies (connectors/modules) from the app's OWN pom, as {groupId, artifactId}.
+fun appDeclaredExtensions(chain) = do {
+    var deps = ((chain[0].pom.project.dependencies default {}).*dependency) default []
+    --- deps
+        filter ((d) -> ((d.classifier default "") as String) == "mule-plugin")
+        map    ((d) -> { groupId: ((d.groupId default "") as String), artifactId: ((d.artifactId default "") as String) })
+}
+
+// Every "g:a" the matrix covers (connectors + any gating rule carrying explicit coordinates).
+fun matrixArtifactKeys(matrix) =
+    (((matrix.connectors default []) ++ valuesOf(matrix.gating default {}))
+        filter ((r) -> (r.groupId?) and (r.artifactId?))
+        map    ((r) -> (((r.groupId) as String) ++ ":" ++ ((r.artifactId) as String))))
+
+// Connectors declared in the app pom but absent from the matrix (Mule groups only, minus excludes).
+fun missingFromMatrix(chain, matrix, excludeArtifacts) = do {
+    var covered = matrixArtifactKeys(matrix)
+    var exclude = (excludeArtifacts default [])
+    --- appDeclaredExtensions(chain)
+          filter ((e) -> muleExtensionGroups() contains e.groupId)
+          filter ((e) -> !(covered contains (e.groupId ++ ":" ++ e.artifactId)))
+          filter ((e) -> !(exclude contains e.artifactId))
+          distinctBy ((e) -> e.groupId ++ ":" ++ e.artifactId)
+}
+
+// ── Actionable connector-gap warning (parent/BOM-managed connectors) ──────────────────
+// A matrix connector is a "gap" when it is NOT pinned in the app pom (no literal/${ref}
+// <version> on the app's own <dependency>) yet its EFFECTIVE version across the resolved
+// chain (app version-less, or a version managed higher in the parent/BOM) is below the
+// Java-17 target. These cannot be fixed by editing only the app pom (that is the whole
+// point of the "pin only if a version is already present in the app pom" rule), so they are
+// surfaced to the PR body + Slack so the parent/BOM (or the parent-pom upgrade endpoint)
+// is updated before merge. This also catches transitively-managed connectors (e.g.
+// mule-sockets-connector pulled by HTTP but version-locked low in the BOM).
+
+// True when the APP's own pom declares g:a WITH a <version> (literal or ${ref}) → it will be
+// pinned in the app PR, so it is NOT a gap.
+fun appDeclaresVersion(chain, g, a) = do {
+    var d = findDep([chain[0]], g, a)
+    --- (d != null) and ((d.dep.version default null) != null)
+}
+
+// Effective version of a connector across the chain: the NEAREST occurrence (in <dependencies>
+// or <dependencyManagement>, app-first) that actually declares a <version> — resolving a ${ref}
+// via properties — else the referenced property value, else null when not present anywhere.
+// Scanning for the first WITH a version (not just the first occurrence) matters because the app
+// may declare the connector version-less while a parent/BOM manages the real version inline.
+fun effectiveVersion(chain, r) = do {
+    var occ = (flatten(chain map ((c) -> do {
+                    var deps = ((c.pom.project.dependencies default {}).*dependency) default []
+                    var mgmt = ((c.pom.project.dependencyManagement.dependencies default {}).*dependency) default []
+                    --- (deps ++ mgmt)
+                }))
+                filter ((d) ->
+                    (((d.groupId default "") as String) == (r.groupId as String)) and
+                    (((d.artifactId default "") as String) == (r.artifactId as String)) and
+                    ((d.version default null) != null)))[0] default null
+    var raw = if (occ != null) (occ.version default null) else null
+    ---
+    if (raw == null) resolveProp(chain, r.property)
+    else if (isRef(raw)) resolveProp(chain, refName(raw))
+    else (raw as String)
+}
+
+// List of {groupId, artifactId, from, to} connectors present in the chain, below target and
+// NOT pinned in the app pom.
+fun connectorGaps(chain, matrix) =
+    ((matrix.connectors default [])
+        filter ((r) -> (r.groupId?) and (r.artifactId?))
+        filter ((r) -> !appDeclaresVersion(chain, (r.groupId as String), (r.artifactId as String)))
+        map ((r) -> { groupId: (r.groupId as String), artifactId: (r.artifactId as String),
+                      from: effectiveVersion(chain, r), to: (r.set as String) })
+        filter ((g) -> g.from != null)                        // actually present in app/parent/BOM
+        filter ((g) -> needsBump((g.from as String), { set: g.to }))
+        distinctBy ((g) -> g.groupId ++ ":" ++ g.artifactId))
+
+// Human-readable, actionable warning string(s) for the connector gaps (empty when none).
+fun connectorGapWarning(chain, matrix, appName) = do {
+    var gaps = connectorGaps(chain, matrix)
+    ---
+    if (isEmpty(gaps)) []
+    else [ ("WARNING: " ++ (appName default "this app")
+            ++ " inherits connector version(s) from a parent/BOM that are below the Java 17 target and were NOT changed by this app PR (only connectors already versioned in the app pom are pinned). Update the parent/BOM — or run the parent-pom upgrade — so these are bumped, otherwise MUnit/CI will fail on Java 17: "
+            ++ (gaps map ((g) -> (g.artifactId ++ " " ++ ((g.from default "unknown") as String) ++ " -> " ++ (g.to as String))) joinBy "; ")
+            ++ ".") ]
+}
+
 /**
  * Scans the repo tree + app pom text for custom Java, lookup() usage and builds warnings.
  * tree       : recursive tree object
@@ -263,10 +385,14 @@ fun scanFlags(tree, appPomText) = do {
  * CI workflow) diff-aware edits are added.
  */
 fun buildAssessmentResult(
-        matrix, chain, appPomText0, muleArtifactCurrent, muleArtifactPath,
+        matrix, chain0, appPomText0, muleArtifactCurrent, muleArtifactPath,
         ciWorkflowText, ciWorkflowPath, appName, topology, headSha,
-        hasApiPolicies, customJavaFound, lookupFound, warnings, pomEditStrategy = "appOverride") = do {
+        hasApiPolicies, customJavaFound, lookupFound, warnings,
+        pomEditStrategy = "appOverride", excludeArtifacts = []) = do {
     var m = matrix
+    // Re-read every pom from its raw text so repeated <dependency>/<plugin> keys are intact
+    // (see rehydrate) — otherwise connector pins and missing-from-matrix detection vanish.
+    var chain = rehydrate(chain0)
     // pomEditStrategy: "appOverride" (default) writes every edit into the app's own pom;
     // "inPlace" (legacy) edits the declaring parent/BOM and surfaces a shared-file Warning.
     var propEdits = if (pomEditStrategy == "inPlace") computePropEdits(chain, matrix)
@@ -315,6 +441,16 @@ fun buildAssessmentResult(
                 ++ "] that are inherited by other modules in the repository. Approving it upgrades EVERY module that inherits from these files, not just "
                 ++ (appName default "this app")
                 ++ " — every inheriting module's build and MUnit tests must pass in CI. Review the wider impact before approving.") ]
+    // Connectors the app declares but the matrix does not cover — cannot be pinned for Java 17.
+    var missingConns    = missingFromMatrix(chain, m, excludeArtifacts)
+    var missingKeys     = missingConns map ((c) -> c.groupId ++ ":" ++ c.artifactId)
+    var missingWarnings = if (isEmpty(missingConns)) []
+        else [ ("WARNING: " ++ (appName default "this app") ++ " declares connector(s) not covered by the compatibility matrix ["
+                ++ (missingKeys joinBy ", ")
+                ++ "]. They were NOT pinned for Java 17 — extend the matrix and re-run/reapply. A Slack alert has been raised.") ]
+    // Connectors inherited from a parent/BOM below target that could NOT be pinned in the app pom
+    // (only app-versioned connectors are pinned) — actionable report for the PR body + Slack.
+    var gapWarnings     = connectorGapWarning(chain, m, appName)
     ---
     {
       appName: appName,
@@ -329,8 +465,10 @@ fun buildAssessmentResult(
         filesToChange:     (all map $.file) distinctBy $,
         hasApiPolicies:    hasApiPolicies default false,
         hasCustomJavaCode: customJavaFound default false,
-        hasLookupFunction: lookupFound default false
+        hasLookupFunction: lookupFound default false,
+        missingFromMatrix: missingConns,
+        connectorGaps:     connectorGaps(chain, m)
       },
-      warnings: (warnings default []) ++ sharedFileWarnings
+      warnings: (warnings default []) ++ sharedFileWarnings ++ missingWarnings ++ gapWarnings
     }
 }

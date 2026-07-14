@@ -26,6 +26,38 @@ types:
         type: boolean
       hasLookupFunction:
         type: boolean
+      missingFromMatrix:
+        type: array
+        required: false
+        description: |
+          Connectors/modules the app declares in its pom that the compatibility matrix does
+          NOT cover, so they could not be auto-pinned for Java 17. Each entry is a
+          { groupId, artifactId } pair. Non-empty results also raise a Slack alert and a
+          warning in the AssessmentResult; extend the matrix and reapply to pin them.
+        items:
+          type: object
+          properties:
+            groupId: string
+            artifactId: string
+      connectorGaps:
+        type: array
+        required: false
+        description: |
+          Matrix connectors inherited from a parent/BOM (or transitively version-locked, e.g.
+          mule-sockets-connector pulled by HTTP) that are BELOW the Java 17 target and were NOT
+          pinned in the app pom — only connectors already carrying a <version> in the app pom are
+          pinned. Each entry is { groupId, artifactId, from, to }. These are also surfaced in
+          `warnings`; resolve them by updating the parent/BOM (see POST /parent-pom/upgrade) before
+          the app's MUnit/CI will pass on Java 17.
+        items:
+          type: object
+          properties:
+            groupId: string
+            artifactId: string
+            from:
+              type: string
+              required: false
+            to: string
       headSha:
         type: string
         required: false
@@ -58,13 +90,15 @@ types:
           be a shared parent/BOM pom inherited by other modules (see the warnings array).
       kind:
         type: string
-        enum: [pomProperty, depVersion, pluginVersion, munitRuntimeVersion, muleArtifactJson, ciWorkflow]
+        enum: [pomProperty, depVersion, pluginVersion, munitRuntimeVersion, muleArtifactJson, ciWorkflow, munitArgLines]
         description: |
           Category of edit, which tells the worker how to apply it:
           pomProperty (a <properties> value), depVersion / pluginVersion (an inline
           dependency/plugin version), munitRuntimeVersion (MUnit plugin runtime),
           muleArtifactJson (minMuleVersion + javaSpecificationVersions), ciWorkflow
-          (target Java version in the CI workflow).
+          (target Java version in the CI workflow), munitArgLines (Tier-0 hygiene:
+          strip JPMS --add-opens/--add-exports/--add-modules argLines from MUnit
+          plugin blocks that break the embedded MUnit container on Mule 4.9 / Java 17).
       property:
         type: string
         required: false
@@ -122,13 +156,15 @@ types:
         type: string
       status:
         type: string
-        enum: [PROCESSING, ASSESSING, COMMITTING, COMMITTED, PR_OPEN, MUNIT_FAILED, DEPLOYING, DEPLOYED, ROLLED_BACK, FAILED_ASSESS, FAILED_COMMIT, FAILED_CI, FAILED_DEPLOY, FAILED_INTERRUPTED]
+        enum: [PROCESSING, ASSESSING, COMMITTING, COMMITTED, PR_OPEN, MUNIT_FAILED, DEPLOYING, DEPLOYED, ROLLED_BACK, CLOSED, FAILED_ASSESS, FAILED_COMMIT, FAILED_CI, FAILED_DEPLOY, FAILED_INTERRUPTED]
         description: |
           Job lifecycle state. Most values are terminal or auto-advancing. MUNIT_FAILED is
           a NON-terminal, human-needed PAUSE: the app's MUnit suite failed in CI. The job
           waits (retained for 30 days) until a human fixes the tests and CI reports a test
           success (via POST /webhook/cd-result with stage=test, result=success), which
           resumes it. While MUNIT_FAILED, nextPollSeconds is large or omitted.
+          CLOSED is a terminal state set when the upgrade PR is closed WITHOUT merging
+          (the app's lock is released so it can be re-run or reapplied).
       message:
         type: string
         required: false
@@ -254,6 +290,93 @@ types:
           the actual edits from its freshly-computed fileEdits — this value is NOT trusted for
           the edits themselves, so omitting it does not change the upgrade outcome.
 
+  ParentPomUpgradeRequest:
+    type: object
+    description: |
+      Request to upgrade a SHARED parent/BOM pom.xml (not an app) so that the connector versions
+      it manages meet the Java 17 compatibility matrix. Complements the app upgrade: apps that
+      inherit versions from a parent/BOM only receive gating (runtime/java/munit) edits plus a
+      connectorGaps warning; this endpoint fixes the connectors at the source. Reads the pom via
+      the GitHub Contents API, pins every matrix connector it declares/manages, opens a PR on a
+      new branch, and notifies Slack/Jira. Provide `repoUrl` OR `owner`+`repo`.
+    properties:
+      repoUrl:
+        type: string
+        required: false
+        description: Git URL of the parent/BOM repository (https://github.com/<owner>/<repo>[.git]). Provide this OR owner+repo.
+      owner:
+        type: string
+        required: false
+        description: GitHub owner/org (used when repoUrl is not supplied).
+      repo:
+        type: string
+        required: false
+        description: GitHub repository name (used when repoUrl is not supplied).
+      pomPath:
+        type: string
+        required: false
+        description: Path to the parent/BOM pom.xml within the repo. Defaults to "pom.xml".
+      branch:
+        type: string
+        required: false
+        description: Base branch to read from and target the PR against. Defaults to the repo's default branch.
+      environment:
+        type: string
+        required: false
+        description: Optional environment label for logging/traceability only — no deployment is performed.
+      jiraTicketId:
+        type: string
+        required: false
+        description: Optional Jira ticket to link; a comment with the PR link is posted when supplied.
+
+  ParentPomUpgradeResult:
+    type: object
+    properties:
+      upgraded:
+        type: boolean
+        description: True when connector version edits were applied and a PR was opened.
+      pomPath:
+        type: string
+        required: false
+      branchName:
+        type: string
+        required: false
+      prUrl:
+        type: string
+        required: false
+      prNumber:
+        type: integer
+        required: false
+      edits:
+        type: FileEdit[]
+        required: false
+        description: The connector/property version edits applied to the parent/BOM pom.
+      message:
+        type: string
+        required: false
+
+/parent-pom:
+  /upgrade:
+    post:
+      description: |
+        Upgrade a shared parent/BOM pom.xml so the connector versions it manages meet the Java 17
+        compatibility matrix, then open a PR. Use this to fix the connectorGaps reported by
+        assess for apps that inherit versions from a parent/BOM.
+      body:
+        application/json:
+          type: ParentPomUpgradeRequest
+      responses:
+        200:
+          description: The parent/BOM already meets the matrix; nothing to change.
+          body:
+            application/json:
+              type: ParentPomUpgradeResult
+        202:
+          description: Connector versions upgraded and a PR was opened against the parent/BOM repo.
+          body:
+            application/json:
+              type: ParentPomUpgradeResult
+
 /jobs:
   /assess:
     post:
@@ -294,6 +417,70 @@ types:
               type: JobStatus
         404:
           description: No job with the specified jobId exists.
+    delete:
+      description: |
+        Admin / maintenance: permanently delete a job record from the Object Store and
+        clear its branch->jobId index entry. Intended for test teardown and manual
+        cleanup only — the upgrade lifecycle itself never deletes jobs (they age out via
+        the 30-day jobStore TTL). Governed at deploy time (API Manager / gateway policy);
+        not part of the normal orchestration surface.
+      responses:
+        200:
+          body:
+            application/json:
+              type: object
+              properties:
+                deleted: boolean
+                jobId: string
+                branchIndexCleared: boolean
+                branch:
+                  type: string
+                  required: false
+                lockReleased: boolean
+                appName:
+                  type: string
+                  required: false
+        404:
+          description: No job with the specified jobId exists.
+
+    /reapply:
+      post:
+        description: |
+          Re-launch an upgrade for the same app using this job's stored inputs (appName,
+          environment, jiraTicketId, resolved coordinates), re-assessed against the CURRENT
+          compatibility matrix. Primary use: after the matrix was republished to cover a
+          connector that was previously left un-pinned, or to retry a MUNIT_FAILED /
+          FAILED_* / CLOSED job without re-supplying coordinates. Releases this job's app
+          lock and mints a NEW jobId for the relaunched run.
+        responses:
+          200:
+            description: The app was already in the desired state; nothing to reapply.
+            body:
+              application/json:
+                type: object
+          202:
+            description: Upgrade re-assessed and relaunched under a new jobId.
+            body:
+              application/json:
+                type: object
+                properties:
+                  reapplied: boolean
+                  previousJobId: string
+                  jobId: string
+                  appName:
+                    type: string
+                    required: false
+                  environment:
+                    type: string
+                    required: false
+                  status:
+                    type: string
+                    required: false
+                  message:
+                    type: string
+                    required: false
+          404:
+            description: No job with the specified jobId exists.
 
 /webhook:
   post:

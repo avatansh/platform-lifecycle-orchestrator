@@ -17,6 +17,7 @@ var statusMeta = {
     MUNIT_FAILED:  { message: "MUnit tests failed in CI. Paused for human action — fix the tests; the job resumes automatically when CI reports a test success.", nextPollSeconds: 300 },
     DEPLOYING:     { message: "PR merged; CI/CD is building and deploying.",                nextPollSeconds: 10 },
     DEPLOYED:      { message: "Upgrade deployed successfully.",                             nextPollSeconds: 0  },
+    CLOSED:        { message: "The upgrade pull request was closed without merging. The job is closed and the app lock released — re-run or reapply to try again.", nextPollSeconds: 0 },
     FAILED_ASSESS: { message: "Assessment failed. See error for details.",                  nextPollSeconds: 0  },
     FAILED_COMMIT: { message: "Commit/transform stage failed. See error for details.",      nextPollSeconds: 0  },
     FAILED_CI:     { message: "CI build/tests failed after merge. See error for details.",  nextPollSeconds: 0  },

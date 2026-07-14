@@ -31,11 +31,16 @@ jira:
   projectKey: "J1U"                                  # Jira project the auto-created ticket lands in
 
 matrix:
+  refreshSeconds: "30"                                # dev/demo: pick up a republished matrix within 30s
   exchange:
     orgId: "2e14f8c6-4d60-481b-bfb6-798695efc8f4"   # Exchange org that hosts the compatibility-matrix asset
 
 registry:
   enforceAllowList: "false"                  # true = ONLY registered apps may be upgraded (governance)
+  source: "exchange-latest"                  # dev/demo: source coordinates from the Exchange-published registry
+  refreshSeconds: "30"                       # dev/demo: pick up a republished registry within 30s
+  exchange:
+    orgId: "2e14f8c6-4d60-481b-bfb6-798695efc8f4"   # Exchange org that hosts the app-registry asset
 
 # Local-only: tighter self-healing so crash recovery is observable in minutes
 # instead of the production 5-min sweep / 15-min stale window. Do NOT copy to prod.

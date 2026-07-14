@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="UTF-8"?>
+﻿<?xml version="1.0" encoding="UTF-8"?>
 <mule xmlns:http="http://www.mulesoft.org/schema/mule/http"
       xmlns:os="http://www.mulesoft.org/schema/mule/os"
       xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
@@ -221,6 +221,27 @@ payload mergeWith {
 
                                 </choice>
 
+                            </when>
+
+                            <!-- PR closed WITHOUT merge → self-heal: release the lock + park CLOSED,
+                                 so a manually-abandoned upgrade PR never blocks future runs. -->
+                            <when expression="#[payload.action == 'closed' and (payload.pull_request.merged default false) != true]"
+                                  doc:name="PR closed (unmerged)">
+                                <set-variable variableName="closedBranch"
+                                              value="#[(payload.pull_request.head.ref default '') as String]"
+                                              doc:name="PV SET closedBranch"
+                                              doc:id="b8c9d0e1-0008-0008-0008-000000000060" />
+                                <set-variable variableName="prUrl"
+                                              value="#[(payload.pull_request.html_url default '') as String]"
+                                              doc:name="PV SET prUrl"
+                                              doc:id="b8c9d0e1-0008-0008-0008-000000000061" />
+                                <logger level="INFO"
+                                        doc:name="LOG INFO PR closed unmerged"
+                                        doc:id="b8c9d0e1-0008-0008-0008-000000000062"
+                                        message="#[output application/java --- 'PR closed without merge | branch=' ++ vars.closedBranch ++ ' | prUrl=' ++ vars.prUrl]" />
+                                <flow-ref name="pf-handle-pr-abandoned"
+                                          doc:name="pf-handle-pr-abandoned"
+                                          doc:id="b8c9d0e1-0008-0008-0008-000000000063" />
                             </when>
 
                             <otherwise>

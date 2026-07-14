@@ -1,0 +1,11 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["jobId"],
+  "properties": {
+    "jobId": {
+      "type": "string",
+      "description": "The PREVIOUS jobId to re-apply (the job whose inputs are reused). Format: job-{uuid}."
+    }
+  }
+}

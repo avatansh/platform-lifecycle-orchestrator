@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="UTF-8"?>
+﻿<?xml version="1.0" encoding="UTF-8"?>
 
 <mule xmlns:os="http://www.mulesoft.org/schema/mule/os" xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
 	xmlns:http="http://www.mulesoft.org/schema/mule/http"
@@ -132,7 +132,12 @@ output application/json
            ++ "- Target Java: " ++ vars.changePlan.targetJavaVersion ++ "\n"
            ++ "- Commit: " ++ vars.commitSha ++ "\n"
            ++ "- Job: " ++ vars.jobId
-           ++ (if (vars.jiraTicketId != null) ("\n- Jira: [" ++ (vars.jiraTicketId as String) ++ "](" ++ (p('jira.baseUrl') default '') ++ "/browse/" ++ (vars.jiraTicketId as String) ++ ")") else "")),
+           ++ (if (vars.jiraTicketId != null) ("\n- Jira: [" ++ (vars.jiraTicketId as String) ++ "](" ++ (p('jira.baseUrl') default '') ++ "/browse/" ++ (vars.jiraTicketId as String) ++ ")") else "")
+           // Surface assessment warnings (shared-file impact, matrix coverage gaps, custom Java, etc.)
+           // directly in the PR so a reviewer sees the caveats without opening the orchestrator.
+           ++ (if (!isEmpty(vars.assessment.warnings default []))
+                 ("\n\n**:warning: Warnings**\n" ++ ((vars.assessment.warnings default []) map ((w) -> "- " ++ (w as String)) joinBy "\n"))
+               else "")),
     maintainer_can_modify: true,
     draft: false
 }]]></ee:set-payload>
@@ -186,7 +191,7 @@ payload mergeWith {
 				<logger level="INFO" doc:name="LOG INFO stale-plan check passed" doc:id="6fd587a7-9eff-4d5c-beee-ab70e8dd6bd8" message="#[output application/java --- 'stale-plan check passed | headSha matches plan']" />
 			</otherwise>
 		</choice>
-		<set-variable value="#['migrate/' ++ vars.appName ++ '-' ++ vars.changePlan.targetRuntime ++ '-java' ++ vars.changePlan.targetJavaVersion]" doc:name="PV SET branchBase" doc:id="f9eb31a3-2f9b-47a5-a03e-81c29eebff6e" doc:description="Deterministic base branch name before collision handling" variableName="branchBase" />
+		<set-variable value="#[output application/java --- 'migrate/' ++ (vars.appName as String) ++ '-' ++ (vars.changePlan.targetRuntime as String) ++ '-java' ++ (vars.changePlan.targetJavaVersion as String)]" doc:name="PV SET branchBase" doc:id="f9eb31a3-2f9b-47a5-a03e-81c29eebff6e" doc:description="Deterministic base branch name before collision handling" variableName="branchBase" />
 		<http:request doc:name="GET matching branch refs" doc:id="faf4e4d1-0350-4831-a9d2-41d5377c82ad" doc:description="List existing branches sharing the base name so a free suffix can be chosen" config-ref="GitHub_Request" path="#['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/git/matching-refs/heads/' ++ vars.branchBase]" target="existingRefs" />
 		<ee:transform doc:name="DW Pick free branch name" doc:id="f6117859-274f-40cd-897c-3320c8fe573f" >
 			<ee:variables >

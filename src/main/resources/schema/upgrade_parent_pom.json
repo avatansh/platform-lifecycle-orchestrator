@@ -1,0 +1,34 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "repoUrl": {
+      "type": "string",
+      "description": "OPTIONAL. Git URL of the parent/BOM repository (https://github.com/<owner>/<repo>[.git]). Provide this OR owner+repo."
+    },
+    "owner": {
+      "type": "string",
+      "description": "OPTIONAL. GitHub owner/org (used when repoUrl is not supplied)."
+    },
+    "repo": {
+      "type": "string",
+      "description": "OPTIONAL. GitHub repository name (used when repoUrl is not supplied)."
+    },
+    "pomPath": {
+      "type": "string",
+      "description": "OPTIONAL. Path to the parent/BOM pom.xml within the repo. Defaults to \"pom.xml\"."
+    },
+    "branch": {
+      "type": "string",
+      "description": "OPTIONAL. Base branch to read from and target the PR against. Defaults to the repo's default branch."
+    },
+    "environment": {
+      "type": "string",
+      "description": "OPTIONAL. Environment label for logging/traceability only; no deployment is performed."
+    },
+    "jiraTicketId": {
+      "type": "string",
+      "description": "OPTIONAL. Jira ticket to link; a comment with the PR link is posted when supplied."
+    }
+  }
+}

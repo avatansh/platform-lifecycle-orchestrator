@@ -1,0 +1,217 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:os="http://www.mulesoft.org/schema/mule/os"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd">
+
+    <!--
+        REST entry point for POST /parent-pom/upgrade.
+        Maps the HTTP request body to variables, then delegates to the shared sub-flow
+        pf-upgrade-parent-pom (also called by the MCP upgrade_parent_pom tool), so REST and
+        MCP behave identically.
+    -->
+    <flow name="mf-impl-post-parent-pom-upgrade"
+          doc:id="b1c2d3e4-0009-0009-0009-000000000001"
+          doc:name="mf-impl-post-parent-pom-upgrade"
+          doc:description="REST entry: map body to vars, delegate to shared pf-upgrade-parent-pom.">
+        <ee:transform doc:name="PV SET vars from body" doc:id="b1c2d3e4-0009-0009-0009-000000000002">
+            <ee:variables>
+                <ee:set-variable variableName="repoUrl"><![CDATA[payload.repoUrl default null]]></ee:set-variable>
+                <ee:set-variable variableName="owner"><![CDATA[payload.owner default null]]></ee:set-variable>
+                <ee:set-variable variableName="repo"><![CDATA[payload.repo default null]]></ee:set-variable>
+                <ee:set-variable variableName="pomPath"><![CDATA[payload.pomPath default null]]></ee:set-variable>
+                <ee:set-variable variableName="branch"><![CDATA[payload.branch default null]]></ee:set-variable>
+                <ee:set-variable variableName="environment"><![CDATA[payload.environment default null]]></ee:set-variable>
+                <ee:set-variable variableName="jiraTicketId"><![CDATA[payload.jiraTicketId default null]]></ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+        <flow-ref name="pf-upgrade-parent-pom" doc:name="pf-upgrade-parent-pom" doc:id="b1c2d3e4-0009-0009-0009-000000000003" />
+    </flow>
+
+    <!-- ==========================================================================
+         pf-upgrade-parent-pom  (shared, transport-agnostic)
+         Upgrades a SHARED parent/BOM pom.xml so the connector versions it manages meet
+         the Java 17 compatibility matrix, then opens a PR (reusing pf-atomic-commit +
+         pf-open-pr) and notifies Slack/Jira (pf-notify). Reads:
+           vars.repoUrl OR vars.owner+vars.repo, vars.pomPath(opt, default pom.xml),
+           vars.branch(opt), vars.environment(opt, log-only), vars.jiraTicketId(opt).
+         Returns: ParentPomUpgradeResult JSON payload.
+         Called by the REST /parent-pom/upgrade flow and the MCP upgrade_parent_pom tool.
+         ========================================================================== -->
+    <sub-flow name="pf-upgrade-parent-pom"
+              doc:id="b1c2d3e4-0009-0009-0009-000000000010"
+              doc:description="Shared: pin matrix connectors in a parent/BOM pom, open PR, notify.">
+        <set-variable variableName="jobId" value="#['parentpom-' ++ uuid()]" doc:name="PV SET jobId" doc:id="b1c2d3e4-0009-0009-0009-000000000011" />
+        <flow-ref name="pf-mdc-stamp" doc:name="pf-mdc-stamp" doc:id="b1c2d3e4-0009-0009-0009-000000000012" />
+        <logger level="INFO" doc:name="LOG INFO START pf-upgrade-parent-pom" doc:id="b1c2d3e4-0009-0009-0009-000000000013" message="#[output application/java --- 'START - pf-upgrade-parent-pom | repoUrl=' ++ (vars.repoUrl default '(none)') ++ ' | owner=' ++ (vars.owner default '(none)') ++ ' | repo=' ++ (vars.repo default '(none)') ++ ' | env=' ++ (vars.environment default '(none)')]" />
+
+        <!-- Resolve owner/repo from explicit fields or by parsing repoUrl. -->
+        <ee:transform doc:name="DW Resolve owner/repo" doc:id="b1c2d3e4-0009-0009-0009-000000000014">
+            <ee:variables>
+                <ee:set-variable variableName="repoCoords"><![CDATA[%dw 2.0
+output application/java
+---
+if ((vars.owner default '') != '' and (vars.repo default '') != '')
+    { owner: (vars.owner as String), repo: (vars.repo as String), urlBranch: null, urlPomPath: null }
+else do {
+    // Normalise: drop .git suffix, query/fragment, trailing slashes, then the scheme.
+    var clean   = (((vars.repoUrl default '') replace /\.git\/?$/ with "") replace /[?#].*$/ with "") replace /\/+$/ with ""
+    var noProto = clean replace /^[A-Za-z]+:\/\// with ""
+    var segs0   = (noProto splitBy "/") filter ((s) -> s != "")
+    // If the first segment looks like a host (contains a dot, e.g. github.com), drop it.
+    var segs    = if ((segs0[0] default '') contains ".") (segs0[1 to -1] default []) else segs0
+    var owner   = segs[0] default ''
+    var repo    = segs[1] default ''
+    // A GitHub web URL may embed the branch + sub-path: /<owner>/<repo>/tree|blob/<branch>/<sub-path...>
+    var marker    = segs[2] default ''
+    var isTree    = marker == "tree" or marker == "blob"
+    var urlBranch = if (isTree) (segs[3] default null) else null
+    var rest      = if (isTree and sizeOf(segs) > 4) (segs[4 to -1]) else []
+    var restStr   = rest joinBy "/"
+    var lastSeg   = rest[-1] default ''
+    // A trailing file (has a dot) is the pom path itself; a directory implies <dir>/pom.xml.
+    var urlPomPath =
+        if (restStr == '') null
+        else if (lastSeg contains ".") restStr
+        else (restStr ++ "/pom.xml")
+    --- { owner: owner, repo: repo, urlBranch: urlBranch, urlPomPath: urlPomPath }
+}]]></ee:set-variable>
+                <ee:set-variable variableName="pomPath"><![CDATA[%dw 2.0
+output application/java
+---
+(vars.pomPath default (vars.repoCoords.urlPomPath default 'pom.xml')) as String]]></ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+        <choice doc:name="CHOICE owner/repo resolved?" doc:id="b1c2d3e4-0009-0009-0009-000000000015">
+            <when expression="#[(vars.repoCoords.owner default '') == '' or (vars.repoCoords.repo default '') == '']">
+                <logger level="ERROR" doc:name="LOG ERROR repo unresolved" doc:id="b1c2d3e4-0009-0009-0009-000000000016" message="#[output application/java --- 'parent-pom: could not resolve owner/repo | repoUrl=' ++ (vars.repoUrl default '?')]" />
+                <raise-error type="VALIDATION:APP_NOT_REGISTERED" doc:name="RAISE VALIDATION (repo unresolved)" doc:id="b1c2d3e4-0009-0009-0009-000000000017" description="Provide a valid repoUrl (https://github.com/&lt;owner&gt;/&lt;repo&gt;) or owner+repo for the parent/BOM repository." />
+            </when>
+        </choice>
+
+        <flow-ref name="pf-load-matrix" doc:name="pf-load-matrix" doc:id="b1c2d3e4-0009-0009-0009-000000000018" />
+
+        <!-- Resolve base branch: explicit vars.branch, else a branch parsed from the URL, else the repo's default branch. -->
+        <choice doc:name="CHOICE branch supplied?" doc:id="b1c2d3e4-0009-0009-0009-000000000019">
+            <when expression="#[(vars.branch default '') != '' or (vars.repoCoords.urlBranch default '') != '']">
+                <set-variable variableName="defaultBranch" value="#[(if ((vars.branch default '') != '') vars.branch else vars.repoCoords.urlBranch) as String]" doc:name="PV SET defaultBranch (explicit/url)" doc:id="b1c2d3e4-0009-0009-0009-00000000001a" />
+            </when>
+            <otherwise>
+                <http:request doc:name="GET repo (default_branch)" doc:id="b1c2d3e4-0009-0009-0009-00000000001b" config-ref="GitHub_Request" path="#['/repos/' ++ vars.repoCoords.owner ++ '/' ++ vars.repoCoords.repo]" outputMimeType="application/json" target="repoInfo" />
+                <set-variable variableName="defaultBranch" value="#[(vars.repoInfo.default_branch default 'main') as String]" doc:name="PV SET defaultBranch (repo)" doc:id="b1c2d3e4-0009-0009-0009-00000000001c" />
+            </otherwise>
+        </choice>
+
+        <!-- Pin the plan to the current HEAD of the base branch (pf-atomic-commit stale-plan check). -->
+        <http:request doc:name="GET base branch HEAD commit" doc:id="b1c2d3e4-0009-0009-0009-00000000001d" config-ref="GitHub_Request" path="#['/repos/' ++ vars.repoCoords.owner ++ '/' ++ vars.repoCoords.repo ++ '/commits/' ++ vars.defaultBranch]" outputMimeType="application/json" target="headCommit" />
+        <set-variable variableName="headSha" value="#[(vars.headCommit.sha as String)]" doc:name="PV SET headSha" doc:id="b1c2d3e4-0009-0009-0009-00000000001e" />
+
+        <!-- Fetch the parent/BOM pom via the Contents API. -->
+        <http:request doc:name="GET parent/BOM pom.xml" doc:id="b1c2d3e4-0009-0009-0009-00000000001f" config-ref="GitHub_Request" path="#['/repos/' ++ vars.repoCoords.owner ++ '/' ++ vars.repoCoords.repo ++ '/contents/' ++ vars.pomPath]" outputMimeType="application/json" target="pomResp">
+            <http:query-params><![CDATA[#[output application/java --- { ref: vars.defaultBranch }]]]></http:query-params>
+        </http:request>
+        <choice doc:name="CHOICE pom content present?" doc:id="b1c2d3e4-0009-0009-0009-000000000020">
+            <when expression="#[not (vars.pomResp.content is String)]">
+                <logger level="ERROR" doc:name="LOG ERROR pom content empty" doc:id="b1c2d3e4-0009-0009-0009-000000000021" message="#[output application/java --- 'parent-pom: no readable content at ' ++ (vars.pomPath default '?') ++ ' in ' ++ (vars.repoCoords.owner default '?') ++ '/' ++ (vars.repoCoords.repo default '?')]" />
+                <raise-error type="VALIDATION:APP_NOT_REGISTERED" doc:name="RAISE VALIDATION (pom empty)" doc:id="b1c2d3e4-0009-0009-0009-000000000022" description="#[output application/java --- 'The pom.xml at &quot;' ++ (vars.pomPath default '?') ++ '&quot; in ' ++ (vars.repoCoords.owner default '?') ++ '/' ++ (vars.repoCoords.repo default '?') ++ ' could not be read (path may be a directory, empty, or too large). Verify pomPath.']" />
+            </when>
+        </choice>
+        <ee:transform doc:name="DW Decode + rewrite parent pom" doc:id="b1c2d3e4-0009-0009-0009-000000000023">
+            <ee:variables>
+                <ee:set-variable variableName="pomText"><![CDATA[%dw 2.0
+output application/java
+import fromBase64 from dw::core::Binaries
+---
+(fromBase64((vars.pomResp.content default "") replace /[\r\n\t ]/ with "")) as String {encoding: "UTF-8"}]]></ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+        <ee:transform doc:name="DW rewriteParentPom" doc:id="b1c2d3e4-0009-0009-0009-000000000024">
+            <ee:variables>
+                <ee:set-variable variableName="rewrite"><![CDATA[%dw 2.0
+output application/java
+import rewriteParentPom from dwl::parentPomRewrite
+---
+rewriteParentPom((vars.pomText as String), vars.matrix, (vars.pomPath as String))]]></ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+
+        <choice doc:name="CHOICE any edits?" doc:id="b1c2d3e4-0009-0009-0009-000000000025">
+            <when expression="#[isEmpty(vars.rewrite.edits default [])]">
+                <logger level="INFO" doc:name="LOG INFO already compliant" doc:id="b1c2d3e4-0009-0009-0009-000000000026" message="#[output application/java --- 'parent-pom already meets matrix | ' ++ (vars.repoCoords.owner default '?') ++ '/' ++ (vars.repoCoords.repo default '?') ++ ':' ++ (vars.pomPath default '?')]" />
+                <ee:transform doc:name="DW Build 200 result (no change)" doc:id="b1c2d3e4-0009-0009-0009-000000000027">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    upgraded: false,
+    pomPath:  vars.pomPath,
+    edits:    [],
+    message:  ("Parent/BOM already meets the Java 17 matrix; nothing to change in " ++ (vars.pomPath as String))
+}]]></ee:set-payload>
+                    </ee:message>
+                    <ee:variables>
+                        <ee:set-variable variableName="httpStatus"><![CDATA[200]]></ee:set-variable>
+                    </ee:variables>
+                </ee:transform>
+            </when>
+            <otherwise>
+                <!-- Stage the single rewritten pom + set up the vars pf-atomic-commit/pf-open-pr expect. -->
+                <ee:transform doc:name="DW Stage commit vars" doc:id="b1c2d3e4-0009-0009-0009-000000000028">
+                    <ee:variables>
+                        <ee:set-variable variableName="coords"><![CDATA[%dw 2.0
+output application/java
+---
+{ owner: vars.repoCoords.owner, repo: vars.repoCoords.repo, defaultBranch: vars.defaultBranch }]]></ee:set-variable>
+                        <ee:set-variable variableName="changePlan"><![CDATA[%dw 2.0
+output application/java
+---
+{ headSha: vars.headSha, targetRuntime: vars.matrix.target.runtime, targetJavaVersion: vars.matrix.target.javaVersion }]]></ee:set-variable>
+                        <ee:set-variable variableName="appName"><![CDATA[%dw 2.0
+output application/java
+---
+(vars.repoCoords.repo as String)]]></ee:set-variable>
+                        <ee:set-variable variableName="stagedFiles"><![CDATA[%dw 2.0
+output application/java
+---
+[ { path: (vars.pomPath as String), content: (vars.rewrite.text as String) } ]]]></ee:set-variable>
+                        <ee:set-variable variableName="assessment"><![CDATA[%dw 2.0
+output application/java
+---
+{ warnings: [ ("Parent/BOM connector version upgrade pinning " ++ sizeOf(vars.rewrite.edits default []) ++ " connector(s): "
+              ++ ((vars.rewrite.edits default []) map ((e) -> ((e.artifactId default '?') as String) ++ " " ++ ((e.from default 'unknown') as String) ++ " -> " ++ ((e.to default '?') as String)) joinBy "; ")) ] }]]></ee:set-variable>
+                    </ee:variables>
+                </ee:transform>
+                <flow-ref name="pf-atomic-commit" doc:name="pf-atomic-commit" doc:id="b1c2d3e4-0009-0009-0009-000000000029" />
+                <flow-ref name="pf-open-pr" doc:name="pf-open-pr" doc:id="b1c2d3e4-0009-0009-0009-00000000002a" />
+                <flow-ref name="pf-notify" doc:name="pf-notify" doc:id="b1c2d3e4-0009-0009-0009-00000000002b" />
+                <ee:transform doc:name="DW Build 202 result" doc:id="b1c2d3e4-0009-0009-0009-00000000002c">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    upgraded:   true,
+    pomPath:    vars.pomPath,
+    branchName: vars.branchName,
+    prUrl:      vars.prUrl,
+    prNumber:   vars.prNumber,
+    edits:      (vars.rewrite.edits default []),
+    message:    ("Opened PR pinning " ++ sizeOf(vars.rewrite.edits default []) ++ " connector(s) in " ++ (vars.pomPath as String))
+}]]></ee:set-payload>
+                    </ee:message>
+                    <ee:variables>
+                        <ee:set-variable variableName="httpStatus"><![CDATA[202]]></ee:set-variable>
+                    </ee:variables>
+                </ee:transform>
+            </otherwise>
+        </choice>
+        <logger level="INFO" doc:name="LOG INFO END pf-upgrade-parent-pom" doc:id="b1c2d3e4-0009-0009-0009-00000000002d" message="#[output application/java --- 'END - pf-upgrade-parent-pom | upgraded=' ++ (payload.upgraded default false) ++ ' | prUrl=' ++ (vars.prUrl default '(none)')]" />
+    </sub-flow>
+
+</mule>

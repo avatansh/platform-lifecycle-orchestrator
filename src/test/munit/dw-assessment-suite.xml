@@ -196,7 +196,7 @@ buildAssessmentResult(matrix, chain, childText, null, null, null, null, "myapp",
          assessment :: computePropEditsOverride pins declared connectors into the app pom
          ══════════════════════════════════════════════════════════════════════════ -->
     <munit:test name="assessment-computePropEditsOverride-connectors" doc:id="dwa-test-0009"
-                description="appOverride pins a declared connector (ref→property, literal→replace, absent→add) and skips undeclared connectors">
+                description="appOverride pins a declared connector (ref→property, literal→replace) and SKIPS version-less + undeclared connectors">
         <munit:execution>
             <ee:transform doc:name="DW computePropEditsOverride" doc:id="dwa-test-0009-exec">
                 <ee:variables>
@@ -228,11 +228,11 @@ computePropEditsOverride(chain, matrix)]]></ee:set-variable>
             </ee:transform>
         </munit:execution>
         <munit:validation>
-            <munit-tools:assert-that doc:name="3 edits (undeclared db skipped)" expression="#[sizeOf(vars.result)]" is="#[MunitTools::equalTo(3)]" />
+            <munit-tools:assert-that doc:name="2 edits (version-less sockets + undeclared db skipped)" expression="#[sizeOf(vars.result)]" is="#[MunitTools::equalTo(2)]" />
             <munit-tools:assert-that doc:name="http ref becomes a property override" expression="#[sizeOf(vars.result filter ((e) -> e.kind == 'pomProperty' and e.property == 'http.connector.version' and e.to == '1.11.3' and e.addIfAbsent == true))]" is="#[MunitTools::equalTo(1)]" />
             <munit-tools:assert-that doc:name="apikit literal becomes a depVersion replace" expression="#[sizeOf(vars.result filter ((e) -> e.kind == 'depVersion' and e.artifactId == 'mule-apikit-module' and e.to == '1.11.8'))]" is="#[MunitTools::equalTo(1)]" />
-            <munit-tools:assert-that doc:name="sockets (no version) becomes a depVersion add" expression="#[sizeOf(vars.result filter ((e) -> e.kind == 'depVersion' and e.artifactId == 'mule-sockets-connector' and e.from == null and e.to == '1.2.4'))]" is="#[MunitTools::equalTo(1)]" />
-            <munit-tools:assert-that doc:name="all target the app pom" expression="#[sizeOf(vars.result filter ((e) -> e.file == 'app/pom.xml'))]" is="#[MunitTools::equalTo(3)]" />
+            <munit-tools:assert-that doc:name="sockets (no version in app pom) is SKIPPED — never added" expression="#[sizeOf(vars.result filter ((e) -> (e.artifactId default '') == 'mule-sockets-connector'))]" is="#[MunitTools::equalTo(0)]" />
+            <munit-tools:assert-that doc:name="all target the app pom" expression="#[sizeOf(vars.result filter ((e) -> e.file == 'app/pom.xml'))]" is="#[MunitTools::equalTo(2)]" />
             <munit-tools:assert-that doc:name="undeclared db connector not added" expression="#[sizeOf(vars.result filter ((e) -> (e.artifactId default '') == 'mule-db-connector' or (e.property default '') == 'db.version'))]" is="#[MunitTools::equalTo(0)]" />
         </munit:validation>
     </munit:test>
@@ -328,6 +328,57 @@ scanFlags(tree, "<project>lookup(</project>")]]></ee:set-variable>
             <munit-tools:assert-that doc:name="no lookup in java case" expression="#[vars.withJava.lookupFound]" is="#[MunitTools::equalTo(false)]" />
             <munit-tools:assert-that doc:name="lookup detected" expression="#[vars.withLookup.lookupFound]" is="#[MunitTools::equalTo(true)]" />
             <munit-tools:assert-that doc:name="no java in lookup case" expression="#[vars.withLookup.customJavaFound]" is="#[MunitTools::equalTo(false)]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- ══════════════════════════════════════════════════════════════════════════
+         assessment :: buildAssessmentResult rehydrates poms from pomText
+         Guards the deployed-runtime bug where the chain's parsed .pom was materialised to a
+         java.util.Map (duplicate <dependency> keys collapsed to the LAST one), so connector
+         pins and missing-from-matrix detection silently vanished. Here the .pom is DELIBERATELY
+         collapsed (no dependencies) while pomText carries the real deps — the connector pin and
+         the missing-from-matrix entry must still be produced (proving rehydrate read pomText).
+         ══════════════════════════════════════════════════════════════════════════ -->
+    <munit:test name="assessment-buildAssessmentResult-rehydrates-from-pomText" doc:id="dwa-test-0010"
+                description="buildAssessmentResult re-reads pomText so connector pins survive a collapsed parsed .pom">
+        <munit:execution>
+            <ee:transform doc:name="DW buildAssessmentResult (collapsed .pom)" doc:id="dwa-test-0010-exec">
+                <ee:variables>
+                    <ee:set-variable variableName="result"><![CDATA[%dw 2.0
+import buildAssessmentResult from dwl::assessment
+output application/java
+var appText = "<project xmlns='http://maven.apache.org/POM/4.0.0'>" ++
+  "<properties/>" ++
+  "<build><plugins><plugin><groupId>com.mulesoft.munit.tools</groupId><artifactId>munit-maven-plugin</artifactId><version>\u0024{munit.version}</version></plugin></plugins></build>" ++
+  "<dependencies>" ++
+    "<dependency><groupId>com.mulesoft.munit</groupId><artifactId>munit-runner</artifactId><classifier>mule-plugin</classifier><scope>test</scope></dependency>" ++
+    "<dependency><groupId>org.mule.connectors</groupId><artifactId>mule-http-connector</artifactId><version>1.6.0</version><classifier>mule-plugin</classifier></dependency>" ++
+    "<dependency><groupId>org.mule.connectors</groupId><artifactId>mule-vm-connector</artifactId><classifier>mule-plugin</classifier></dependency>" ++
+  "</dependencies>" ++
+"</project>"
+// Deliberately collapsed parsed pom: it has NO dependencies (simulates java.util.Map key loss).
+var collapsedPom = read("<project xmlns='http://maven.apache.org/POM/4.0.0'><properties/></project>", "application/xml")
+var chain = [{ path: "pom.xml", pom: collapsedPom, pomText: appText }]
+var matrix = {
+    target:       { runtime: "4.9.18", javaVersion: "17" },
+    gating:       { munit: { property: "munit.version", min: "3.6.3", set: "3.6.3", groupId: "com.mulesoft.munit", artifactId: "munit-runner", pluginGroupId: "com.mulesoft.munit.tools", pluginArtifactId: "munit-maven-plugin" } },
+    connectors:   [ { property: "http.connector.version", set: "1.11.3", groupId: "org.mule.connectors", artifactId: "mule-http-connector" } ],
+    muleArtifact: { minMuleVersion: "4.9.0", javaSpecificationVersions: ["17"] }
+}
+---
+buildAssessmentResult(matrix, chain, appText, null, "mule-artifact.json", null, null,
+    "collapse-app", "APP_STANDALONE", "sha", false, false, false, [],
+    "appOverride", ["munit-runner","munit-tools"])]]></ee:set-variable>
+                </ee:variables>
+            </ee:transform>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="http connector pinned (from pomText, not collapsed .pom)"
+                expression="#[sizeOf((vars.result.changePlan.fileEdits default []) filter ((e) -> (e.kind default '') == 'depVersion' and (e.artifactId default '') == 'mule-http-connector' and e.to == '1.11.3'))]"
+                is="#[MunitTools::equalTo(1)]" />
+            <munit-tools:assert-that doc:name="uncovered mule connector surfaced as missing-from-matrix"
+                expression="#[sizeOf((vars.result.changePlan.missingFromMatrix default []) filter ((e) -> (e.artifactId default '') == 'mule-vm-connector'))]"
+                is="#[MunitTools::equalTo(1)]" />
         </munit:validation>
     </munit:test>
 
