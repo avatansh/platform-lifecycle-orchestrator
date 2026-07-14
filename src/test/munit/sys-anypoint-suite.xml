@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+      xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core        http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/munit        http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+        http://www.mulesoft.org/schema/mule/munit-tools  http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd
+        http://www.mulesoft.org/schema/mule/http         http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd">
+
+    <!--
+        sys-anypoint-suite.xml
+        Coverage for system/anypoint.xml: pf-get-anypoint-token, pf-verify-deployment.
+        All Anypoint HTTP calls are mocked. A single generic http:request mock satisfies the
+        token POST, environments GET and AMC deployments GET within a flow invocation.
+    -->
+    <munit:config name="sys-anypoint-suite" doc:id="sap-suite-0001" />
+
+    <!-- pf-get-anypoint-token — fetches + caches bearer token -->
+    <munit:test name="anypoint-get-token" doc:id="sap-test-0001"
+                description="pf-get-anypoint-token extracts access_token into vars.anypointToken">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="mock token POST" processor="http:request">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{ access_token: 'tok-123', expires_in: 3600 }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <flow-ref name="pf-get-anypoint-token" doc:name="invoke pf-get-anypoint-token" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="token set" expression="#[vars.anypointToken]" is="#[MunitTools::equalTo('tok-123')]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- pf-verify-deployment — healthy deployment found -->
+    <munit:test name="anypoint-verify-deployment-healthy" doc:id="sap-test-0002"
+                description="pf-verify-deployment resolves env + deployment and reports healthy">
+        <munit:behavior>
+            <!-- Single mock serves the token POST, env GET (payload) and AMC deployments GET
+                 (target=deployments). MUnit mocks do not route to the target attribute, so we
+                 also set vars.deployments explicitly via the variables block. -->
+            <munit-tools:mock-when doc:name="mock Anypoint HTTP" processor="http:request">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                                         value="#[{
+                                             access_token: 'tok-123',
+                                             data:  [ { name: 'Production', id: 'env-1' } ]
+                                         }]" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="deployments"
+                                              value="#[{ items: [ { name: 'verify-app', application: { status: 'RUNNING' } } ] }]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-variable variableName="vfyApp" value="verify-app" doc:name="PV vfyApp" />
+            <set-variable variableName="vfyEnv" value="Production" doc:name="PV vfyEnv" />
+            <set-variable variableName="vfyOrgId" value="org-happy" doc:name="PV vfyOrgId" />
+            <flow-ref name="pf-verify-deployment" doc:name="invoke pf-verify-deployment" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="verified" expression="#[vars.verify.verified]" is="#[MunitTools::equalTo(true)]" />
+            <munit-tools:assert-that doc:name="healthy" expression="#[vars.verify.healthy]" is="#[MunitTools::equalTo(true)]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- pf-verify-deployment — platform error → unverified fallback -->
+    <munit:test name="anypoint-verify-deployment-error" doc:id="sap-test-0003"
+                description="pf-verify-deployment falls back to unverified on any platform error">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="mock Anypoint HTTP error" processor="http:request">
+                <munit-tools:then-return>
+                    <munit-tools:error typeId="HTTP:CONNECTIVITY" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-variable variableName="vfyApp" value="verify-app-err" doc:name="PV vfyApp" />
+            <set-variable variableName="vfyEnv" value="Production" doc:name="PV vfyEnv" />
+            <set-variable variableName="vfyOrgId" value="org-err" doc:name="PV vfyOrgId" />
+            <flow-ref name="pf-verify-deployment" doc:name="invoke pf-verify-deployment" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="unverified" expression="#[vars.verify.verified]" is="#[MunitTools::equalTo(false)]" />
+            <munit-tools:assert-that doc:name="status UNKNOWN" expression="#[vars.verify.status]" is="#[MunitTools::equalTo('UNKNOWN')]" />
+        </munit:validation>
+    </munit:test>
+
+</mule>

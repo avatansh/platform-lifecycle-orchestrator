@@ -12,3 +12,7 @@ slack:
 jira:
   email: "test@example.com"
   apiToken: "test-jira-api-token-placeholder"
+
+anypoint:
+  clientId: "test-anypoint-client-id"
+  clientSecret: "test-anypoint-client-secret"

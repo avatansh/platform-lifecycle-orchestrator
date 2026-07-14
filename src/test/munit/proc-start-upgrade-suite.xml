@@ -1,0 +1,283 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+      xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:os="http://www.mulesoft.org/schema/mule/os"
+      xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core        http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/munit        http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+        http://www.mulesoft.org/schema/mule/munit-tools  http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd
+        http://www.mulesoft.org/schema/mule/http         http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/os           http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd">
+
+    <!--
+        proc-start-upgrade-suite.xml
+        Coverage for pf-start-upgrade (process/post-jobs.xml) plus the REST + MCP entry wrappers.
+        The synchronous pre-flight (pf-assess-app) is driven with the same path-matched GitHub
+        mocks as the assess suite; the app pom is below target so fileEdits is non-empty and the
+        flow takes the lock/persist/async branch (returns a jobId). The async pipeline runs on a
+        best-effort basis in the embedded container; only the synchronous jobId is asserted.
+    -->
+    <munit:config name="proc-start-upgrade-suite" doc:id="psu-suite-0001" />
+
+    <munit:test name="startup-pf-start-upgrade" doc:id="psu-test-0001"
+                description="pf-start-upgrade assesses, acquires the lock, persists the job and returns a jobId">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="mock GET commit" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/commits/main" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{ sha: 'COVSHA' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock GET tree" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/git/trees/COVSHA" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[{ sha: 'TREESHA', truncated: false, tree: [ { path: 'pom.xml', 'type': 'blob' } ] }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock GET app pom" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/contents/pom.xml" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[%dw 2.0
+import toBase64 from dw::core::Binaries
+output application/java
+var pom = &quot;&lt;project xmlns='http://maven.apache.org/POM/4.0.0'&gt;&lt;modelVersion&gt;4.0.0&lt;/modelVersion&gt;&lt;groupId&gt;c&lt;/groupId&gt;&lt;artifactId&gt;a&lt;/artifactId&gt;&lt;version&gt;1.0.0&lt;/version&gt;&lt;properties&gt;&lt;app.runtime&gt;4.6.0&lt;/app.runtime&gt;&lt;/properties&gt;&lt;/project&gt;&quot;
+---
+{ content: toBase64(pom as Binary), encoding: 'base64' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock OS retrieve (lock/job)" processor="os:retrieve">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{}]" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="existingLock" value="#[false]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock OS store" processor="os:store">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[null]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-variable variableName="appName" value="startup-cov-app" doc:name="PV appName" />
+            <set-variable variableName="environment" value="Sandbox" doc:name="PV environment" />
+            <set-variable variableName="requestBody"
+                          value="#[{ owner: 'covorg', repo: 'covrepo', branch: 'main', appPath: '.' }]"
+                          doc:name="PV requestBody" />
+            <flow-ref name="pf-start-upgrade" doc:name="invoke pf-start-upgrade" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="jobId returned" expression="#[payload.jobId]" is="#[MunitTools::notNullValue()]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- REST wrapper: mf-impl-post-jobs. -->
+    <munit:test name="startup-rest-wrapper" doc:id="psu-test-0002"
+                description="mf-impl-post-jobs maps the body, calls pf-start-upgrade and sets the HTTP status">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="mock GET commit" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/commits/main" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{ sha: 'COVSHA' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock GET tree" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/git/trees/COVSHA" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[{ sha: 'TREESHA', truncated: false, tree: [ { path: 'pom.xml', 'type': 'blob' } ] }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock GET app pom" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/contents/pom.xml" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[%dw 2.0
+import toBase64 from dw::core::Binaries
+output application/java
+var pom = &quot;&lt;project xmlns='http://maven.apache.org/POM/4.0.0'&gt;&lt;modelVersion&gt;4.0.0&lt;/modelVersion&gt;&lt;groupId&gt;c&lt;/groupId&gt;&lt;artifactId&gt;a&lt;/artifactId&gt;&lt;version&gt;1.0.0&lt;/version&gt;&lt;properties&gt;&lt;app.runtime&gt;4.6.0&lt;/app.runtime&gt;&lt;/properties&gt;&lt;/project&gt;&quot;
+---
+{ content: toBase64(pom as Binary), encoding: 'base64' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock OS retrieve (lock/job)" processor="os:retrieve">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{}]" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="existingLock" value="#[false]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock OS store" processor="os:store">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[null]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-payload value="#[{ appName: 'startup-cov-app2', environment: 'Sandbox', owner: 'covorg', repo: 'covrepo', branch: 'main', appPath: '.' }]" doc:name="PV payload (body)" />
+            <flow-ref name="mf-impl-post-jobs" doc:name="invoke mf-impl-post-jobs" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="jobId returned" expression="#[payload.jobId]" is="#[MunitTools::notNullValue()]" />
+            <munit-tools:assert-that doc:name="httpStatus 202" expression="#[vars.httpStatus]" is="#[MunitTools::equalTo(202)]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- MCP wrapper: start_upgrade-mcp-tool. -->
+    <munit:test name="startup-mcp-tool" doc:id="psu-test-0003"
+                description="start_upgrade-mcp-tool maps the tool params, calls pf-start-upgrade and returns a jobId">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="mock GET commit" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/commits/main" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{ sha: 'COVSHA' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock GET tree" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/git/trees/COVSHA" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[{ sha: 'TREESHA', truncated: false, tree: [ { path: 'pom.xml', 'type': 'blob' } ] }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock GET app pom" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/contents/pom.xml" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[%dw 2.0
+import toBase64 from dw::core::Binaries
+output application/java
+var pom = &quot;&lt;project xmlns='http://maven.apache.org/POM/4.0.0'&gt;&lt;modelVersion&gt;4.0.0&lt;/modelVersion&gt;&lt;groupId&gt;c&lt;/groupId&gt;&lt;artifactId&gt;a&lt;/artifactId&gt;&lt;version&gt;1.0.0&lt;/version&gt;&lt;properties&gt;&lt;app.runtime&gt;4.6.0&lt;/app.runtime&gt;&lt;/properties&gt;&lt;/project&gt;&quot;
+---
+{ content: toBase64(pom as Binary), encoding: 'base64' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock OS retrieve (lock/job)" processor="os:retrieve">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{}]" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="existingLock" value="#[false]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock OS store" processor="os:store">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[null]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-payload value="#[{ appName: 'startup-cov-app3', environment: 'Sandbox', owner: 'covorg', repo: 'covrepo', branch: 'main', appPath: '.' }]" doc:name="PV payload (tool params)" />
+            <flow-ref name="start_upgrade-mcp-tool" doc:name="invoke start_upgrade-mcp-tool" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="jobId returned" expression="#[payload.jobId]" is="#[MunitTools::notNullValue()]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- Lock already held → CONFLICT:UPGRADE_IN_PROGRESS (concurrent upgrade guard). -->
+    <munit:test name="startup-lock-held-conflict" doc:id="psu-test-0004"
+                description="pf-start-upgrade rejects a second upgrade when the app lock is already held"
+                expectedErrorType="CONFLICT:UPGRADE_IN_PROGRESS">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="mock GET commit" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/commits/main" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{ sha: 'COVSHA' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock GET tree" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/git/trees/COVSHA" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[{ sha: 'TREESHA', truncated: false, tree: [ { path: 'pom.xml', 'type': 'blob' } ] }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock GET app pom" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/contents/pom.xml" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[%dw 2.0
+import toBase64 from dw::core::Binaries
+output application/java
+var pom = &quot;&lt;project xmlns='http://maven.apache.org/POM/4.0.0'&gt;&lt;modelVersion&gt;4.0.0&lt;/modelVersion&gt;&lt;groupId&gt;c&lt;/groupId&gt;&lt;artifactId&gt;a&lt;/artifactId&gt;&lt;version&gt;1.0.0&lt;/version&gt;&lt;properties&gt;&lt;app.runtime&gt;4.6.0&lt;/app.runtime&gt;&lt;/properties&gt;&lt;/project&gt;&quot;
+---
+{ content: toBase64(pom as Binary), encoding: 'base64' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock OS retrieve (lock HELD)" processor="os:retrieve">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#['job-already-running']" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="existingLock" value="#['job-already-running']" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-variable variableName="appName" value="startup-locked-app" doc:name="PV appName" />
+            <set-variable variableName="environment" value="Sandbox" doc:name="PV environment" />
+            <set-variable variableName="requestBody"
+                          value="#[{ owner: 'covorg', repo: 'covrepo', branch: 'main', appPath: '.' }]"
+                          doc:name="PV requestBody" />
+            <flow-ref name="pf-start-upgrade" doc:name="invoke pf-start-upgrade" />
+        </munit:execution>
+    </munit:test>
+
+    <!-- Repo not found on GitHub during pre-flight → VALIDATION:APP_NOT_FOUND. -->
+    <munit:test name="startup-repo-not-found" doc:id="psu-test-0005"
+                description="pf-start-upgrade maps a pre-flight HTTP:NOT_FOUND to VALIDATION:APP_NOT_FOUND"
+                expectedErrorType="VALIDATION:APP_NOT_FOUND">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="mock GET commit -> 404" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/commits/main" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:error typeId="HTTP:NOT_FOUND" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-variable variableName="appName" value="startup-missing-app" doc:name="PV appName" />
+            <set-variable variableName="environment" value="Sandbox" doc:name="PV environment" />
+            <set-variable variableName="requestBody"
+                          value="#[{ owner: 'covorg', repo: 'covrepo', branch: 'main', appPath: '.' }]"
+                          doc:name="PV requestBody" />
+            <flow-ref name="pf-start-upgrade" doc:name="invoke pf-start-upgrade" />
+        </munit:execution>
+    </munit:test>
+
+</mule>

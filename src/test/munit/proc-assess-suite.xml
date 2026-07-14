@@ -1,0 +1,428 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+      xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core        http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/munit        http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+        http://www.mulesoft.org/schema/mule/munit-tools  http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd
+        http://www.mulesoft.org/schema/mule/http         http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd">
+
+    <!--
+        proc-assess-suite.xml
+        Coverage for the pf-assess-app pipeline (process/post-jobs-assess.xml) plus its REST and
+        MCP wrappers. A standalone (no parent) app is used so the parent/grandparent Contents API
+        calls never fire. Coordinates are supplied on the request body (owner/repo/branch/appPath)
+        so pf-resolve-coordinates resolves offline (no GitHub default-branch discovery).
+
+        Three GitHub calls are mocked by path:
+          1. GET /repos/{o}/{r}/commits/{branch}   -> HEAD commit sha
+          2. GET /repos/{o}/{r}/git/trees/{sha}    -> recursive tree (pom.xml only)
+          3. GET /repos/{o}/{r}/contents/pom.xml   -> base64 app pom (standalone)
+        The app pom declares no dependencies, so missingFromMatrix is empty and the async
+        pf-notify-missing-connectors short-circuits (no Slack HTTP).
+    -->
+    <munit:config name="proc-assess-suite" doc:id="pas-suite-0001" />
+
+    <!-- Shared behaviour: mock the three GitHub GETs by path. -->
+    <munit:test name="assess-pf-assess-app-standalone" doc:id="pas-test-0001"
+                description="pf-assess-app resolves a standalone app, fetches commit/tree/pom and returns an AssessmentResult">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="mock GET commit" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/commits/main" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{ sha: 'COVSHA' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock GET tree" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/git/trees/COVSHA" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[{ sha: 'TREESHA', truncated: false, tree: [ { path: 'pom.xml', 'type': 'blob' } ] }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock GET app pom" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/contents/pom.xml" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[%dw 2.0
+import toBase64 from dw::core::Binaries
+output application/java
+var pom = &quot;&lt;project xmlns='http://maven.apache.org/POM/4.0.0'&gt;&lt;modelVersion&gt;4.0.0&lt;/modelVersion&gt;&lt;groupId&gt;c&lt;/groupId&gt;&lt;artifactId&gt;a&lt;/artifactId&gt;&lt;version&gt;1.0.0&lt;/version&gt;&lt;properties&gt;&lt;app.runtime&gt;4.6.0&lt;/app.runtime&gt;&lt;java.version&gt;8&lt;/java.version&gt;&lt;/properties&gt;&lt;/project&gt;&quot;
+---
+{ content: toBase64(pom as Binary), encoding: 'base64' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-variable variableName="appName" value="assess-cov-app" doc:name="PV appName" />
+            <set-variable variableName="environment" value="Sandbox" doc:name="PV environment" />
+            <set-variable variableName="requestBody"
+                          value="#[{ owner: 'covorg', repo: 'covrepo', branch: 'main', appPath: '.' }]"
+                          doc:name="PV requestBody" />
+            <flow-ref name="pf-assess-app" doc:name="invoke pf-assess-app" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="appName echoed" expression="#[payload.appName]" is="#[MunitTools::equalTo('assess-cov-app')]" />
+            <munit-tools:assert-that doc:name="changePlan present" expression="#[payload.changePlan]" is="#[MunitTools::notNullValue()]" />
+            <munit-tools:assert-that doc:name="currentRuntime read from pom" expression="#[payload.currentRuntime]" is="#[MunitTools::equalTo('4.6.0')]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- REST wrapper: mf-impl-post-jobs-assess maps the body then delegates to pf-assess-app. -->
+    <munit:test name="assess-rest-wrapper" doc:id="pas-test-0002"
+                description="mf-impl-post-jobs-assess maps the HTTP body to vars and returns an AssessmentResult">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="mock GET commit" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/commits/main" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{ sha: 'COVSHA' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock GET tree" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/git/trees/COVSHA" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[{ sha: 'TREESHA', truncated: false, tree: [ { path: 'pom.xml', 'type': 'blob' } ] }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock GET app pom" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/contents/pom.xml" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[%dw 2.0
+import toBase64 from dw::core::Binaries
+output application/java
+var pom = &quot;&lt;project xmlns='http://maven.apache.org/POM/4.0.0'&gt;&lt;modelVersion&gt;4.0.0&lt;/modelVersion&gt;&lt;groupId&gt;c&lt;/groupId&gt;&lt;artifactId&gt;a&lt;/artifactId&gt;&lt;version&gt;1.0.0&lt;/version&gt;&lt;properties&gt;&lt;app.runtime&gt;4.6.0&lt;/app.runtime&gt;&lt;/properties&gt;&lt;/project&gt;&quot;
+---
+{ content: toBase64(pom as Binary), encoding: 'base64' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-variable variableName="httpStatus" value="#[200]" doc:name="PV httpStatus seed" />
+            <set-payload value="#[{ appName: 'assess-cov-app', environment: 'Sandbox', owner: 'covorg', repo: 'covrepo', branch: 'main', appPath: '.' }]" doc:name="PV payload (body)" />
+            <flow-ref name="mf-impl-post-jobs-assess" doc:name="invoke mf-impl-post-jobs-assess" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="appName echoed" expression="#[payload.appName]" is="#[MunitTools::equalTo('assess-cov-app')]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- MCP wrapper: assess_app-mcp-tool maps the tool params then delegates to pf-assess-app. -->
+    <munit:test name="assess-mcp-tool" doc:id="pas-test-0003"
+                description="assess_app-mcp-tool maps MCP tool params to vars and returns an AssessmentResult">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="mock GET commit" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/commits/main" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{ sha: 'COVSHA' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock GET tree" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/git/trees/COVSHA" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[{ sha: 'TREESHA', truncated: false, tree: [ { path: 'pom.xml', 'type': 'blob' } ] }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock GET app pom" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/contents/pom.xml" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[%dw 2.0
+import toBase64 from dw::core::Binaries
+output application/java
+var pom = &quot;&lt;project xmlns='http://maven.apache.org/POM/4.0.0'&gt;&lt;modelVersion&gt;4.0.0&lt;/modelVersion&gt;&lt;groupId&gt;c&lt;/groupId&gt;&lt;artifactId&gt;a&lt;/artifactId&gt;&lt;version&gt;1.0.0&lt;/version&gt;&lt;properties&gt;&lt;app.runtime&gt;4.6.0&lt;/app.runtime&gt;&lt;/properties&gt;&lt;/project&gt;&quot;
+---
+{ content: toBase64(pom as Binary), encoding: 'base64' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-payload value="#[{ appName: 'assess-cov-app', environment: 'Sandbox', owner: 'covorg', repo: 'covrepo', branch: 'main', appPath: '.' }]" doc:name="PV payload (tool params)" />
+            <flow-ref name="assess_app-mcp-tool" doc:name="invoke assess_app-mcp-tool" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="appName echoed" expression="#[payload.appName]" is="#[MunitTools::equalTo('assess-cov-app')]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- Standalone app WITH mule-artifact.json and a CI workflow present → exercises the
+         "fetch mule-artifact.json" and "fetch CI workflow" branches of pf-assess-app. -->
+    <munit:test name="assess-with-mule-artifact-and-ci" doc:id="pas-test-0004"
+                description="pf-assess-app fetches and decodes mule-artifact.json and the CI workflow when both exist in the tree">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="mock GET commit" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/commits/main" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{ sha: 'COVSHA' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock GET tree" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/git/trees/COVSHA" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[{ sha: 'TREESHA', truncated: false, tree: [
+                            { path: 'pom.xml', 'type': 'blob' },
+                            { path: 'mule-artifact.json', 'type': 'blob' },
+                            { path: '.github/workflows/build.yml', 'type': 'blob' }
+                        ] }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock GET app pom" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/contents/pom.xml" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[%dw 2.0
+import toBase64 from dw::core::Binaries
+output application/java
+var pom = &quot;&lt;project xmlns='http://maven.apache.org/POM/4.0.0'&gt;&lt;modelVersion&gt;4.0.0&lt;/modelVersion&gt;&lt;groupId&gt;c&lt;/groupId&gt;&lt;artifactId&gt;a&lt;/artifactId&gt;&lt;version&gt;1.0.0&lt;/version&gt;&lt;properties&gt;&lt;app.runtime&gt;4.6.0&lt;/app.runtime&gt;&lt;/properties&gt;&lt;/project&gt;&quot;
+---
+{ content: toBase64(pom as Binary), encoding: 'base64' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock GET mule-artifact.json" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/contents/mule-artifact.json" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[%dw 2.0
+import toBase64 from dw::core::Binaries
+output application/java
+var ma = '{&quot;minMuleVersion&quot;:&quot;4.6.0&quot;}'
+---
+{ content: toBase64(ma as Binary), encoding: 'base64' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock GET ci workflow" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/contents/.github/workflows/build.yml" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[%dw 2.0
+import toBase64 from dw::core::Binaries
+output application/java
+var ci = &quot;name: build&quot;
+---
+{ content: toBase64(ci as Binary), encoding: 'base64' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-variable variableName="appName" value="assess-cov-app" doc:name="PV appName" />
+            <set-variable variableName="environment" value="Sandbox" doc:name="PV environment" />
+            <set-variable variableName="requestBody"
+                          value="#[{ owner: 'covorg', repo: 'covrepo', branch: 'main', appPath: '.' }]"
+                          doc:name="PV requestBody" />
+            <flow-ref name="pf-assess-app" doc:name="invoke pf-assess-app" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="changePlan present" expression="#[payload.changePlan]" is="#[MunitTools::notNullValue()]" />
+            <munit-tools:assert-that doc:name="mule-artifact captured" expression="#[vars.muleArtifactCurrent]" is="#[MunitTools::notNullValue()]" />
+            <munit-tools:assert-that doc:name="ci workflow captured" expression="#[vars.ciWorkflowText]" is="#[MunitTools::notNullValue()]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- No pom.xml at the resolved appPath → pf-assess-app raises VALIDATION:APP_NOT_REGISTERED. -->
+    <munit:test name="assess-app-pom-not-found" doc:id="pas-test-0005"
+                description="pf-assess-app fails clearly when the tree has no pom.xml at the app path"
+                expectedErrorType="VALIDATION:APP_NOT_REGISTERED">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="mock GET commit" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/commits/main" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{ sha: 'COVSHA' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock GET tree (no pom)" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/git/trees/COVSHA" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[{ sha: 'TREESHA', truncated: false, tree: [ { path: 'README.md', 'type': 'blob' } ] }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-variable variableName="appName" value="assess-cov-app" doc:name="PV appName" />
+            <set-variable variableName="environment" value="Sandbox" doc:name="PV environment" />
+            <set-variable variableName="requestBody"
+                          value="#[{ owner: 'covorg', repo: 'covrepo', branch: 'main', appPath: '.' }]"
+                          doc:name="PV requestBody" />
+            <flow-ref name="pf-assess-app" doc:name="invoke pf-assess-app" />
+        </munit:execution>
+    </munit:test>
+
+    <!-- App WITH a parent pom (parent/pom.xml) that itself has a grandparent (bom/pom.xml)
+         → exercises the level-1 and level-2 parent-fetch branches of pf-assess-app. -->
+    <munit:test name="assess-with-parent-chain" doc:id="pas-test-0006"
+                description="pf-assess-app walks the app→parent→grandparent pom chain when relativePath links resolve inside the repo tree">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="mock GET commit" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/commits/main" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{ sha: 'COVSHA' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock GET tree (app+parent+bom)" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/git/trees/COVSHA" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[{ sha: 'TREESHA', truncated: false, tree: [
+                            { path: 'pom.xml', 'type': 'blob' },
+                            { path: 'parent/pom.xml', 'type': 'blob' },
+                            { path: 'bom/pom.xml', 'type': 'blob' }
+                        ] }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock GET app pom (has parent)" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/contents/pom.xml" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[%dw 2.0
+import toBase64 from dw::core::Binaries
+output application/java
+var pom = &quot;&lt;project xmlns='http://maven.apache.org/POM/4.0.0'&gt;&lt;modelVersion&gt;4.0.0&lt;/modelVersion&gt;&lt;groupId&gt;c&lt;/groupId&gt;&lt;artifactId&gt;a&lt;/artifactId&gt;&lt;version&gt;1.0.0&lt;/version&gt;&lt;parent&gt;&lt;groupId&gt;c&lt;/groupId&gt;&lt;artifactId&gt;p&lt;/artifactId&gt;&lt;version&gt;1.0.0&lt;/version&gt;&lt;relativePath&gt;parent/pom.xml&lt;/relativePath&gt;&lt;/parent&gt;&lt;properties&gt;&lt;app.runtime&gt;4.6.0&lt;/app.runtime&gt;&lt;/properties&gt;&lt;/project&gt;&quot;
+---
+{ content: toBase64(pom as Binary), encoding: 'base64' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock GET parent pom (has grandparent)" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/contents/parent/pom.xml" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[%dw 2.0
+import toBase64 from dw::core::Binaries
+output application/java
+var pom = &quot;&lt;project xmlns='http://maven.apache.org/POM/4.0.0'&gt;&lt;modelVersion&gt;4.0.0&lt;/modelVersion&gt;&lt;groupId&gt;c&lt;/groupId&gt;&lt;artifactId&gt;p&lt;/artifactId&gt;&lt;version&gt;1.0.0&lt;/version&gt;&lt;packaging&gt;pom&lt;/packaging&gt;&lt;parent&gt;&lt;groupId&gt;c&lt;/groupId&gt;&lt;artifactId&gt;bom&lt;/artifactId&gt;&lt;version&gt;1.0.0&lt;/version&gt;&lt;relativePath&gt;../bom/pom.xml&lt;/relativePath&gt;&lt;/parent&gt;&lt;/project&gt;&quot;
+---
+{ content: toBase64(pom as Binary), encoding: 'base64' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock GET bom pom (standalone)" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/contents/bom/pom.xml" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[%dw 2.0
+import toBase64 from dw::core::Binaries
+output application/java
+var pom = &quot;&lt;project xmlns='http://maven.apache.org/POM/4.0.0'&gt;&lt;modelVersion&gt;4.0.0&lt;/modelVersion&gt;&lt;groupId&gt;c&lt;/groupId&gt;&lt;artifactId&gt;bom&lt;/artifactId&gt;&lt;version&gt;1.0.0&lt;/version&gt;&lt;packaging&gt;pom&lt;/packaging&gt;&lt;/project&gt;&quot;
+---
+{ content: toBase64(pom as Binary), encoding: 'base64' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-variable variableName="appName" value="assess-chain-app" doc:name="PV appName" />
+            <set-variable variableName="environment" value="Sandbox" doc:name="PV environment" />
+            <set-variable variableName="requestBody"
+                          value="#[{ owner: 'covorg', repo: 'covrepo', branch: 'main', appPath: '.' }]"
+                          doc:name="PV requestBody" />
+            <flow-ref name="pf-assess-app" doc:name="invoke pf-assess-app" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="appName echoed" expression="#[payload.appName]" is="#[MunitTools::equalTo('assess-chain-app')]" />
+            <munit-tools:assert-that doc:name="changePlan present" expression="#[payload.changePlan]" is="#[MunitTools::notNullValue()]" />
+            <munit-tools:assert-that doc:name="chain has 3 levels" expression="#[sizeOf(vars.chain default [])]" is="#[MunitTools::equalTo(3)]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- Missing environment → VALIDATION:ENV_REQUIRED (checked before any GitHub call). -->
+    <munit:test name="assess-env-missing" doc:id="pas-test-0007"
+                description="pf-assess-app raises VALIDATION:ENV_REQUIRED when no environment is supplied"
+                expectedErrorType="VALIDATION:ENV_REQUIRED">
+        <munit:execution>
+            <set-variable variableName="appName" value="assess-noenv-app" doc:name="PV appName" />
+            <set-variable variableName="environment" value="#['']" doc:name="PV environment (empty)" />
+            <set-variable variableName="requestBody"
+                          value="#[{ owner: 'covorg', repo: 'covrepo', branch: 'main', appPath: '.' }]"
+                          doc:name="PV requestBody" />
+            <flow-ref name="pf-assess-app" doc:name="invoke pf-assess-app" />
+        </munit:execution>
+    </munit:test>
+
+    <!-- Contents API returns no readable content for the app pom → VALIDATION:APP_NOT_REGISTERED. -->
+    <munit:test name="assess-app-pom-content-empty" doc:id="pas-test-0008"
+                description="pf-assess-app fails when the Contents API returns no inline content for the app pom"
+                expectedErrorType="VALIDATION:APP_NOT_REGISTERED">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="mock GET commit" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/commits/main" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{ sha: 'COVSHA' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock GET tree" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/git/trees/COVSHA" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[{ sha: 'TREESHA', truncated: false, tree: [ { path: 'pom.xml', 'type': 'blob' } ] }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock GET app pom (no content)" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/contents/pom.xml" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{ content: null, encoding: 'base64' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-variable variableName="appName" value="assess-emptypom-app" doc:name="PV appName" />
+            <set-variable variableName="environment" value="Sandbox" doc:name="PV environment" />
+            <set-variable variableName="requestBody"
+                          value="#[{ owner: 'covorg', repo: 'covrepo', branch: 'main', appPath: '.' }]"
+                          doc:name="PV requestBody" />
+            <flow-ref name="pf-assess-app" doc:name="invoke pf-assess-app" />
+        </munit:execution>
+    </munit:test>
+
+</mule>

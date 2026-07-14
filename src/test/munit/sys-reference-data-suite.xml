@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+      xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core        http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/munit        http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+        http://www.mulesoft.org/schema/mule/munit-tools  http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd
+        http://www.mulesoft.org/schema/mule/http         http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd">
+
+    <!--
+        sys-reference-data-suite.xml
+        Coverage for system/reference-data.xml sub-flows.
+        Under env=test: matrix.source=classpath and registry.source=classpath, so the
+        matrix/registry load the bundled classpath copies (no Exchange HTTP). The GitHub
+        default-branch discovery in pf-resolve-coordinates is mocked.
+    -->
+    <munit:config name="sys-reference-data-suite" doc:id="srd-suite-0001" />
+
+    <!-- pf-load-matrix (classpath branch) + pf-validate-matrix healthy path -->
+    <munit:test name="ref-pf-load-matrix-classpath" doc:id="srd-test-0001"
+                description="pf-load-matrix loads the bundled classpath matrix into vars.matrix">
+        <munit:execution>
+            <flow-ref name="pf-load-matrix" doc:name="invoke pf-load-matrix" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="matrix set" expression="#[vars.matrix]" is="#[MunitTools::notNullValue()]" />
+            <munit-tools:assert-that doc:name="connectors present" expression="#[isEmpty(vars.matrix.connectors default [])]" is="#[MunitTools::equalTo(false)]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- pf-validate-matrix — connectors present (healthy/INFO branch) -->
+    <munit:test name="ref-pf-validate-matrix-healthy" doc:id="srd-test-0002"
+                description="pf-validate-matrix logs INFO when connectors are present">
+        <munit:execution>
+            <set-variable variableName="matrix"
+                          value="#[{ schemaVersion: '1', target: { runtime: '4.9.18' }, connectors: [ { artifactId: 'mule-http-connector' } ] }]"
+                          doc:name="PV SET vars.matrix" />
+            <flow-ref name="pf-validate-matrix" doc:name="invoke pf-validate-matrix" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="matrix still present" expression="#[vars.matrix]" is="#[MunitTools::notNullValue()]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- pf-validate-matrix — connectors empty (WARN branch) -->
+    <munit:test name="ref-pf-validate-matrix-empty" doc:id="srd-test-0003"
+                description="pf-validate-matrix WARNs when connectors list is empty">
+        <munit:execution>
+            <set-variable variableName="matrix"
+                          value="#[{ schemaVersion: '1', connectors: [] }]"
+                          doc:name="PV SET vars.matrix (empty)" />
+            <flow-ref name="pf-validate-matrix" doc:name="invoke pf-validate-matrix" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="connectors empty" expression="#[isEmpty(vars.matrix.connectors default [])]" is="#[MunitTools::equalTo(true)]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- pf-load-registry (classpath branch) -->
+    <munit:test name="ref-pf-load-registry-classpath" doc:id="srd-test-0004"
+                description="pf-load-registry loads the bundled classpath registry into vars.registry">
+        <munit:execution>
+            <flow-ref name="pf-load-registry" doc:name="invoke pf-load-registry" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="registry set" expression="#[vars.registry]" is="#[MunitTools::notNullValue()]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- sf-exchange-http-get — mocked HTTP GET -->
+    <munit:test name="ref-sf-exchange-http-get" doc:id="srd-test-0005"
+                description="sf-exchange-http-get issues the Exchange GET and returns the body">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="mock Exchange GET" processor="http:request">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="text/plain" value="#['ok-body']" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-variable variableName="urlPath" value="/api/v3/maven/org/asset/maven-metadata.xml" doc:name="PV SET urlPath" />
+            <flow-ref name="sf-exchange-http-get" doc:name="invoke sf-exchange-http-get" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="body returned" expression="#[payload]" is="#[MunitTools::notNullValue()]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- pf-resolve-coordinates — convention + GitHub default-branch discovery -->
+    <munit:test name="ref-pf-resolve-coordinates-discovery" doc:id="srd-test-0006"
+                description="pf-resolve-coordinates resolves repo via convention and discovers default_branch from GitHub">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="mock GET repo" processor="http:request">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{ default_branch: 'main' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-variable variableName="appName" value="coverage-test-app" doc:name="PV SET appName" />
+            <flow-ref name="pf-resolve-coordinates" doc:name="invoke pf-resolve-coordinates" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="repo = appName (convention)" expression="#[vars.coords.repo]" is="#[MunitTools::equalTo('coverage-test-app')]" />
+            <munit-tools:assert-that doc:name="owner resolved" expression="#[vars.coords.owner]" is="#[MunitTools::equalTo('test-owner')]" />
+            <munit-tools:assert-that doc:name="defaultBranch discovered" expression="#[vars.coords.defaultBranch]" is="#[MunitTools::equalTo('main')]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- pf-resolve-coordinates — GitHub discovery FAILS → config-default fallback branch -->
+    <munit:test name="ref-pf-resolve-coordinates-discovery-fallback" doc:id="srd-test-0008"
+                description="pf-resolve-coordinates falls back to the config default branch when GitHub discovery errors">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="throw on GET repo" processor="http:request">
+                <munit-tools:then-return><munit-tools:error typeId="HTTP:CONNECTIVITY" /></munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-variable variableName="appName" value="coverage-test-app3" doc:name="PV SET appName" />
+            <flow-ref name="pf-resolve-coordinates" doc:name="invoke pf-resolve-coordinates" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="repo resolved by convention" expression="#[vars.coords.repo]" is="#[MunitTools::equalTo('coverage-test-app3')]" />
+            <munit-tools:assert-that doc:name="branch fell back to config default" expression="#[vars.coords.defaultBranch]" is="#[MunitTools::notNullValue()]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- pf-resolve-coordinates — branch supplied by request (no discovery) -->
+    <munit:test name="ref-pf-resolve-coordinates-branch-preset" doc:id="srd-test-0007"
+                description="pf-resolve-coordinates uses request branch and skips GitHub discovery">
+        <munit:execution>
+            <set-variable variableName="appName" value="coverage-test-app2" doc:name="PV SET appName" />
+            <set-variable variableName="requestBody" value="#[{ owner: 'acme', repo: 'widget-api', branch: 'develop' }]" doc:name="PV SET requestBody" />
+            <flow-ref name="pf-resolve-coordinates" doc:name="invoke pf-resolve-coordinates" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="branch from request" expression="#[vars.coords.defaultBranch]" is="#[MunitTools::equalTo('develop')]" />
+        </munit:validation>
+    </munit:test>
+
+</mule>

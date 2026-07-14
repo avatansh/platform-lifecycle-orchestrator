@@ -1,0 +1,321 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+      xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+      xmlns:os="http://www.mulesoft.org/schema/mule/os"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core        http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/munit        http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+        http://www.mulesoft.org/schema/mule/munit-tools  http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd
+        http://www.mulesoft.org/schema/mule/os           http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd
+        http://www.mulesoft.org/schema/mule/http         http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd">
+
+    <!--
+        route-flows-suite.xml
+        Coverage for the APIkit route delegator flows in platform-lifecycle-orchestrator-main.xml.
+        Each route flow is a single flow-ref to the matching mf-impl-* flow; invoking the route
+        flow by name (with the same setup the impl needs) covers that delegator processor.
+    -->
+    <munit:config name="route-flows-suite" doc:id="rf-suite-0001" />
+
+    <!-- GET /jobs/{jobId} route -->
+    <munit:test name="route-get-job-status" doc:id="rf-test-0001"
+                description="get:\jobs\(jobId) route delegates to mf-impl-get-job-status">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="mock OS retrieve job" processor="os:retrieve">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{ jobId: 'job-rt-1', status: 'PROCESSING', appName: 'rt-app' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <munit:set-event doc:name="event with uriParams.jobId">
+                <munit:payload value="#[null]" />
+                <munit:attributes value="#[{ uriParams: { jobId: 'job-rt-1' } }]" mediaType="application/java" />
+            </munit:set-event>
+            <flow-ref name="get:\jobs\(jobId):platform-lifecycle-orchestrator-config" doc:name="invoke get route" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="status returned" expression="#[payload.status]" is="#[MunitTools::equalTo('PROCESSING')]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- DELETE /jobs/{jobId} route -->
+    <munit:test name="route-delete-job" doc:id="rf-test-0002"
+                description="delete:\jobs\(jobId) route delegates to mf-impl-delete-job">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="mock OS retrieve job" processor="os:retrieve">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{ jobId: 'job-rt-2', appName: 'rt-app-2' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock OS remove" processor="os:remove">
+                <munit-tools:then-return><munit-tools:payload mediaType="application/java" value="#[null]" /></munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock OS contains (no lock)" processor="os:contains">
+                <munit-tools:then-return><munit-tools:payload mediaType="application/java" value="#[false]" /></munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <munit:set-event doc:name="event with uriParams.jobId">
+                <munit:payload value="#[null]" />
+                <munit:attributes value="#[{ uriParams: { jobId: 'job-rt-2' } }]" mediaType="application/java" />
+            </munit:set-event>
+            <flow-ref name="delete:\jobs\(jobId):platform-lifecycle-orchestrator-config" doc:name="invoke delete route" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="deleted true" expression="#[payload.deleted]" is="#[MunitTools::equalTo(true)]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- POST /webhook route (invalid signature → 401) -->
+    <munit:test name="route-post-webhook" doc:id="rf-test-0003"
+                description="post:\webhook route delegates to mf-impl-post-webhook (invalid signature → 401)">
+        <munit:execution>
+            <set-variable variableName="rawBody" value="#['route-webhook-body' as Binary]" doc:name="PV rawBody" />
+            <set-variable variableName="ghSignature" value="sha256=wrong" doc:name="PV wrong signature" />
+            <set-variable variableName="ghDelivery" value="route-del-1" doc:name="PV ghDelivery" />
+            <set-variable variableName="ghEvent" value="pull_request" doc:name="PV ghEvent" />
+            <set-payload value="#[{ action: 'opened' }]" doc:name="SET body" />
+            <flow-ref name="post:\webhook:application\json:platform-lifecycle-orchestrator-config" doc:name="invoke webhook route" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="httpStatus 401" expression="#[vars.httpStatus]" is="#[MunitTools::equalTo('401')]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- POST /webhook/cd-result route (no X-CD-Token → 401) -->
+    <munit:test name="route-post-cd-result" doc:id="rf-test-0004"
+                description="post:\webhook\cd-result route delegates to mf-impl-post-cd-result (no token → 401)">
+        <munit:execution>
+            <set-payload value='#[{ jobId: "job-rt-cd", result: "success" }]' mimeType="application/json" doc:name="SET cd-result body" />
+            <flow-ref name="post:\webhook\cd-result:application\json:platform-lifecycle-orchestrator-config" doc:name="invoke cd-result route" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="httpStatus 401" expression="#[vars.httpStatus]" is="#[MunitTools::equalTo('401')]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- POST /parent-pom/upgrade route (parent already compliant → no edits) -->
+    <munit:test name="route-post-parent-pom" doc:id="rf-test-0005"
+                description="post:\parent-pom\upgrade route delegates to mf-impl-post-parent-pom-upgrade (no-change path)">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="mock GET HEAD commit" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/ro/rr/commits/main" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{ sha: 'RSHA' }]" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="headCommit" value="#[{ sha: 'RSHA' }]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock GET parent pom (compliant)" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/ro/rr/contents/pom.xml" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[%dw 2.0
+import toBase64 from dw::core::Binaries
+output application/java
+var pom = &quot;&lt;project xmlns='http://maven.apache.org/POM/4.0.0'&gt;&lt;modelVersion&gt;4.0.0&lt;/modelVersion&gt;&lt;groupId&gt;c&lt;/groupId&gt;&lt;artifactId&gt;parent&lt;/artifactId&gt;&lt;version&gt;1&lt;/version&gt;&lt;packaging&gt;pom&lt;/packaging&gt;&lt;/project&gt;&quot;
+---
+{ content: toBase64(pom as Binary), encoding: 'base64' }]" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="pomResp" value="#[%dw 2.0
+import toBase64 from dw::core::Binaries
+output application/java
+var pom = &quot;&lt;project xmlns='http://maven.apache.org/POM/4.0.0'&gt;&lt;modelVersion&gt;4.0.0&lt;/modelVersion&gt;&lt;groupId&gt;c&lt;/groupId&gt;&lt;artifactId&gt;parent&lt;/artifactId&gt;&lt;version&gt;1&lt;/version&gt;&lt;packaging&gt;pom&lt;/packaging&gt;&lt;/project&gt;&quot;
+---
+{ content: toBase64(pom as Binary), encoding: 'base64' }]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-payload value="#[{ owner: 'ro', repo: 'rr', branch: 'main' }]" doc:name="SET body" />
+            <flow-ref name="post:\parent-pom\upgrade:application\json:platform-lifecycle-orchestrator-config" doc:name="invoke parent-pom route" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="not upgraded" expression="#[payload.upgraded]" is="#[MunitTools::equalTo(false)]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- POST /jobs/assess route -->
+    <munit:test name="route-post-jobs-assess" doc:id="rf-test-0006"
+                description="post:\jobs\assess route delegates to mf-impl-post-jobs-assess">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="mock GET commit" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/commits/main" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{ sha: 'COVSHA' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock GET tree" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/git/trees/COVSHA" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[{ sha: 'TREESHA', truncated: false, tree: [ { path: 'pom.xml', 'type': 'blob' } ] }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock GET app pom" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/contents/pom.xml" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[%dw 2.0
+import toBase64 from dw::core::Binaries
+output application/java
+var pom = &quot;&lt;project xmlns='http://maven.apache.org/POM/4.0.0'&gt;&lt;modelVersion&gt;4.0.0&lt;/modelVersion&gt;&lt;groupId&gt;c&lt;/groupId&gt;&lt;artifactId&gt;a&lt;/artifactId&gt;&lt;version&gt;1.0.0&lt;/version&gt;&lt;properties&gt;&lt;app.runtime&gt;4.6.0&lt;/app.runtime&gt;&lt;/properties&gt;&lt;/project&gt;&quot;
+---
+{ content: toBase64(pom as Binary), encoding: 'base64' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-payload value="#[{ appName: 'route-assess-app', environment: 'Sandbox', owner: 'covorg', repo: 'covrepo', branch: 'main', appPath: '.' }]" doc:name="SET body" />
+            <flow-ref name="post:\jobs\assess:application\json:platform-lifecycle-orchestrator-config" doc:name="invoke assess route" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="appName echoed" expression="#[payload.appName]" is="#[MunitTools::equalTo('route-assess-app')]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- POST /jobs route -->
+    <munit:test name="route-post-jobs" doc:id="rf-test-0007"
+                description="post:\jobs route delegates to mf-impl-post-jobs">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="mock GET commit" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/commits/main" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{ sha: 'COVSHA' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock GET tree" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/git/trees/COVSHA" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[{ sha: 'TREESHA', truncated: false, tree: [ { path: 'pom.xml', 'type': 'blob' } ] }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock GET app pom" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/contents/pom.xml" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[%dw 2.0
+import toBase64 from dw::core::Binaries
+output application/java
+var pom = &quot;&lt;project xmlns='http://maven.apache.org/POM/4.0.0'&gt;&lt;modelVersion&gt;4.0.0&lt;/modelVersion&gt;&lt;groupId&gt;c&lt;/groupId&gt;&lt;artifactId&gt;a&lt;/artifactId&gt;&lt;version&gt;1.0.0&lt;/version&gt;&lt;properties&gt;&lt;app.runtime&gt;4.6.0&lt;/app.runtime&gt;&lt;/properties&gt;&lt;/project&gt;&quot;
+---
+{ content: toBase64(pom as Binary), encoding: 'base64' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock OS retrieve (lock/job)" processor="os:retrieve">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{}]" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="existingLock" value="#[false]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock OS store" processor="os:store">
+                <munit-tools:then-return><munit-tools:payload mediaType="application/java" value="#[null]" /></munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-payload value="#[{ appName: 'route-jobs-app', environment: 'Sandbox', owner: 'covorg', repo: 'covrepo', branch: 'main', appPath: '.' }]" doc:name="SET body" />
+            <flow-ref name="post:\jobs:application\json:platform-lifecycle-orchestrator-config" doc:name="invoke post jobs route" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="jobId returned" expression="#[payload.jobId]" is="#[MunitTools::notNullValue()]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- POST /jobs/{jobId}/reapply route -->
+    <munit:test name="route-post-reapply" doc:id="rf-test-0008"
+                description="post:\jobs\(jobId)\reapply route delegates to mf-impl-reapply-job">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="mock OS retrieve (prev job / lock / job)" processor="os:retrieve">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[{ appName: 'route-reapply-app', environment: 'Sandbox', jiraTicketId: null, coords: { owner: 'covorg', repo: 'covrepo', branch: 'main', appPath: '.' } }]" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="existingLock" value="#[false]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock OS store" processor="os:store">
+                <munit-tools:then-return><munit-tools:payload mediaType="application/java" value="#[null]" /></munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock OS remove" processor="os:remove">
+                <munit-tools:then-return><munit-tools:payload mediaType="application/java" value="#[null]" /></munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock OS contains (no lock)" processor="os:contains">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[false]" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="lockPresent" value="#[false]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock GET commit" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/commits/main" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{ sha: 'COVSHA' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock GET tree" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/git/trees/COVSHA" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[{ sha: 'TREESHA', truncated: false, tree: [ { path: 'pom.xml', 'type': 'blob' } ] }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock GET app pom" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/contents/pom.xml" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[%dw 2.0
+import toBase64 from dw::core::Binaries
+output application/java
+var pom = &quot;&lt;project xmlns='http://maven.apache.org/POM/4.0.0'&gt;&lt;modelVersion&gt;4.0.0&lt;/modelVersion&gt;&lt;groupId&gt;c&lt;/groupId&gt;&lt;artifactId&gt;a&lt;/artifactId&gt;&lt;version&gt;1.0.0&lt;/version&gt;&lt;properties&gt;&lt;app.runtime&gt;4.6.0&lt;/app.runtime&gt;&lt;/properties&gt;&lt;/project&gt;&quot;
+---
+{ content: toBase64(pom as Binary), encoding: 'base64' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <munit:set-event doc:name="event with uriParams.jobId">
+                <munit:payload value="#[null]" />
+                <munit:attributes value="#[{ uriParams: { jobId: 'job-prev-rt' } }]" mediaType="application/java" />
+            </munit:set-event>
+            <flow-ref name="post:\jobs\(jobId)\reapply:platform-lifecycle-orchestrator-config" doc:name="invoke reapply route" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="reapplied true" expression="#[payload.reapplied]" is="#[MunitTools::equalTo(true)]" />
+        </munit:validation>
+    </munit:test>
+
+</mule>

@@ -69,7 +69,10 @@
 						<argLine>-Dencrypt.key=test-encrypt-key-32-chars-1234!</argLine>
 					</argLines>
 					<coverage>
-						<runCoverage>false</runCoverage>
+						<runCoverage>true</runCoverage>
+						<formats>
+							<format>console</format>
+						</formats>
 						<failBuild>false</failBuild>
 					</coverage>
 				</configuration>

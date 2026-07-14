@@ -1,0 +1,245 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+      xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core        http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/munit        http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+        http://www.mulesoft.org/schema/mule/munit-tools  http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd
+        http://www.mulesoft.org/schema/mule/http         http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd">
+
+    <!--
+        proc-parent-pom-suite.xml
+        Coverage for pf-upgrade-parent-pom (process/parent-pom-upgrade.xml) plus its REST + MCP
+        wrappers, on the "already compliant" (no edits) path so no commit/PR/notify is required.
+        owner/repo/branch are supplied so the default-branch discovery HTTP never fires; the two
+        GitHub GETs (HEAD commit, parent pom) are mocked by path. The parent pom manages no
+        matrix connectors, so rewriteParentPom returns zero edits and a 200 no-change result.
+    -->
+    <munit:config name="proc-parent-pom-suite" doc:id="ppp-suite-0001" />
+
+    <munit:test name="parentpom-no-edits" doc:id="ppp-test-0001"
+                description="pf-upgrade-parent-pom returns upgraded=false when the parent pom already meets the matrix">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="mock GET HEAD commit" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/po/pr/commits/main" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{ sha: 'PSHA' }]" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="headCommit" value="#[{ sha: 'PSHA' }]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock GET parent pom" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/po/pr/contents/pom.xml" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[%dw 2.0
+import toBase64 from dw::core::Binaries
+output application/java
+var pom = &quot;&lt;project xmlns='http://maven.apache.org/POM/4.0.0'&gt;&lt;modelVersion&gt;4.0.0&lt;/modelVersion&gt;&lt;groupId&gt;c&lt;/groupId&gt;&lt;artifactId&gt;parent&lt;/artifactId&gt;&lt;version&gt;1&lt;/version&gt;&lt;packaging&gt;pom&lt;/packaging&gt;&lt;/project&gt;&quot;
+---
+{ content: toBase64(pom as Binary), encoding: 'base64' }]" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="pomResp" value="#[%dw 2.0
+import toBase64 from dw::core::Binaries
+output application/java
+var pom = &quot;&lt;project xmlns='http://maven.apache.org/POM/4.0.0'&gt;&lt;modelVersion&gt;4.0.0&lt;/modelVersion&gt;&lt;groupId&gt;c&lt;/groupId&gt;&lt;artifactId&gt;parent&lt;/artifactId&gt;&lt;version&gt;1&lt;/version&gt;&lt;packaging&gt;pom&lt;/packaging&gt;&lt;/project&gt;&quot;
+---
+{ content: toBase64(pom as Binary), encoding: 'base64' }]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-variable variableName="owner" value="po" doc:name="PV owner" />
+            <set-variable variableName="repo" value="pr" doc:name="PV repo" />
+            <set-variable variableName="branch" value="main" doc:name="PV branch" />
+            <flow-ref name="pf-upgrade-parent-pom" doc:name="invoke pf-upgrade-parent-pom" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="not upgraded" expression="#[payload.upgraded]" is="#[MunitTools::equalTo(false)]" />
+            <munit-tools:assert-that doc:name="no edits" expression="#[sizeOf(payload.edits default [])]" is="#[MunitTools::equalTo(0)]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- REST wrapper. -->
+    <munit:test name="parentpom-rest-wrapper" doc:id="ppp-test-0002"
+                description="mf-impl-post-parent-pom-upgrade maps the body and returns a no-change result">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="mock GET HEAD commit" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/po/pr/commits/main" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{ sha: 'PSHA' }]" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="headCommit" value="#[{ sha: 'PSHA' }]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock GET parent pom" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/po/pr/contents/pom.xml" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[%dw 2.0
+import toBase64 from dw::core::Binaries
+output application/java
+var pom = &quot;&lt;project xmlns='http://maven.apache.org/POM/4.0.0'&gt;&lt;modelVersion&gt;4.0.0&lt;/modelVersion&gt;&lt;groupId&gt;c&lt;/groupId&gt;&lt;artifactId&gt;parent&lt;/artifactId&gt;&lt;version&gt;1&lt;/version&gt;&lt;packaging&gt;pom&lt;/packaging&gt;&lt;/project&gt;&quot;
+---
+{ content: toBase64(pom as Binary), encoding: 'base64' }]" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="pomResp" value="#[%dw 2.0
+import toBase64 from dw::core::Binaries
+output application/java
+var pom = &quot;&lt;project xmlns='http://maven.apache.org/POM/4.0.0'&gt;&lt;modelVersion&gt;4.0.0&lt;/modelVersion&gt;&lt;groupId&gt;c&lt;/groupId&gt;&lt;artifactId&gt;parent&lt;/artifactId&gt;&lt;version&gt;1&lt;/version&gt;&lt;packaging&gt;pom&lt;/packaging&gt;&lt;/project&gt;&quot;
+---
+{ content: toBase64(pom as Binary), encoding: 'base64' }]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-payload value="#[{ owner: 'po', repo: 'pr', branch: 'main' }]" doc:name="PV payload (body)" />
+            <flow-ref name="mf-impl-post-parent-pom-upgrade" doc:name="invoke mf-impl-post-parent-pom-upgrade" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="not upgraded" expression="#[payload.upgraded]" is="#[MunitTools::equalTo(false)]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- MCP wrapper. -->
+    <munit:test name="parentpom-mcp-tool" doc:id="ppp-test-0003"
+                description="upgrade_parent_pom-mcp-tool maps the params and returns a no-change result">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="mock GET HEAD commit" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/po/pr/commits/main" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{ sha: 'PSHA' }]" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="headCommit" value="#[{ sha: 'PSHA' }]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock GET parent pom" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/po/pr/contents/pom.xml" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[%dw 2.0
+import toBase64 from dw::core::Binaries
+output application/java
+var pom = &quot;&lt;project xmlns='http://maven.apache.org/POM/4.0.0'&gt;&lt;modelVersion&gt;4.0.0&lt;/modelVersion&gt;&lt;groupId&gt;c&lt;/groupId&gt;&lt;artifactId&gt;parent&lt;/artifactId&gt;&lt;version&gt;1&lt;/version&gt;&lt;packaging&gt;pom&lt;/packaging&gt;&lt;/project&gt;&quot;
+---
+{ content: toBase64(pom as Binary), encoding: 'base64' }]" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="pomResp" value="#[%dw 2.0
+import toBase64 from dw::core::Binaries
+output application/java
+var pom = &quot;&lt;project xmlns='http://maven.apache.org/POM/4.0.0'&gt;&lt;modelVersion&gt;4.0.0&lt;/modelVersion&gt;&lt;groupId&gt;c&lt;/groupId&gt;&lt;artifactId&gt;parent&lt;/artifactId&gt;&lt;version&gt;1&lt;/version&gt;&lt;packaging&gt;pom&lt;/packaging&gt;&lt;/project&gt;&quot;
+---
+{ content: toBase64(pom as Binary), encoding: 'base64' }]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-payload value="#[{ owner: 'po', repo: 'pr', branch: 'main' }]" doc:name="PV payload (tool params)" />
+            <flow-ref name="upgrade_parent_pom-mcp-tool" doc:name="invoke upgrade_parent_pom-mcp-tool" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="not upgraded" expression="#[payload.upgraded]" is="#[MunitTools::equalTo(false)]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- Edits path: the parent pom manages http.connector.version below the matrix →
+         rewriteParentPom produces an edit, so the flow commits, opens a PR and notifies. -->
+    <munit:test name="parentpom-with-edits-opens-pr" doc:id="ppp-test-0004"
+                description="pf-upgrade-parent-pom pins a managed connector, commits, opens a PR and returns upgraded=true">
+        <munit:behavior>
+            <!-- Generic GitHub Git Data API mock for pf-atomic-commit + pf-open-pr + Slack.
+                 Declared FIRST: MUnit applies the LAST matching mock, so the specific
+                 commit/pom mocks below override this for their exact paths. -->
+            <munit-tools:mock-when doc:name="mock GitHub Git Data + Slack" processor="http:request">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{ sha: 'x' }]" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="headCheck"    value="#[{ sha: 'PSHA' }]" />
+                        <munit-tools:variable key="existingRefs" value="#[[]]" />
+                        <munit-tools:variable key="blobResp"     value="#[{ sha: 'blob1' }]" />
+                        <munit-tools:variable key="treeResp"     value="#[{ sha: 'tree1' }]" />
+                        <munit-tools:variable key="commitResp"   value="#[{ sha: 'commit1' }]" />
+                        <munit-tools:variable key="prResp"       value="#[{ number: 12, html_url: 'https://github.com/po/pr/pull/12' }]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock GET HEAD commit" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/po/pr/commits/main" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{ sha: 'PSHA' }]" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="headCommit" value="#[{ sha: 'PSHA' }]" />
+                        <!-- pf-atomic-commit's stale-plan check hits the SAME path with target=headCheck. -->
+                        <munit-tools:variable key="headCheck" value="#[{ sha: 'PSHA' }]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock GET parent pom (managed connector)" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/po/pr/contents/pom.xml" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[%dw 2.0
+import toBase64 from dw::core::Binaries
+output application/java
+var pom = &quot;&lt;project xmlns='http://maven.apache.org/POM/4.0.0'&gt;&lt;modelVersion&gt;4.0.0&lt;/modelVersion&gt;&lt;groupId&gt;c&lt;/groupId&gt;&lt;artifactId&gt;parent&lt;/artifactId&gt;&lt;version&gt;1&lt;/version&gt;&lt;packaging&gt;pom&lt;/packaging&gt;&lt;properties&gt;&lt;http.connector.version&gt;1.7.0&lt;/http.connector.version&gt;&lt;/properties&gt;&lt;/project&gt;&quot;
+---
+{ content: toBase64(pom as Binary), encoding: 'base64' }]" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="pomResp" value="#[%dw 2.0
+import toBase64 from dw::core::Binaries
+output application/java
+var pom = &quot;&lt;project xmlns='http://maven.apache.org/POM/4.0.0'&gt;&lt;modelVersion&gt;4.0.0&lt;/modelVersion&gt;&lt;groupId&gt;c&lt;/groupId&gt;&lt;artifactId&gt;parent&lt;/artifactId&gt;&lt;version&gt;1&lt;/version&gt;&lt;packaging&gt;pom&lt;/packaging&gt;&lt;properties&gt;&lt;http.connector.version&gt;1.7.0&lt;/http.connector.version&gt;&lt;/properties&gt;&lt;/project&gt;&quot;
+---
+{ content: toBase64(pom as Binary), encoding: 'base64' }]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock OS retrieve" processor="os:retrieve">
+                <munit-tools:then-return><munit-tools:payload mediaType="application/java" value="#[{}]" /></munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock OS store" processor="os:store">
+                <munit-tools:then-return><munit-tools:payload mediaType="application/java" value="#[null]" /></munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock OS contains" processor="os:contains">
+                <munit-tools:then-return><munit-tools:payload mediaType="application/java" value="#[false]" /></munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-variable variableName="owner" value="po" doc:name="PV owner" />
+            <set-variable variableName="repo" value="pr" doc:name="PV repo" />
+            <set-variable variableName="branch" value="main" doc:name="PV branch" />
+            <flow-ref name="pf-upgrade-parent-pom" doc:name="invoke pf-upgrade-parent-pom" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="upgraded true" expression="#[payload.upgraded]" is="#[MunitTools::equalTo(true)]" />
+            <munit-tools:assert-that doc:name="one edit" expression="#[sizeOf(payload.edits default [])]" is="#[MunitTools::greaterThan(0)]" />
+        </munit:validation>
+    </munit:test>
+
+</mule>

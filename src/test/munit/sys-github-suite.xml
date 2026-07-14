@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+      xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:os="http://www.mulesoft.org/schema/mule/os"
+      xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core        http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/munit        http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+        http://www.mulesoft.org/schema/mule/munit-tools  http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd
+        http://www.mulesoft.org/schema/mule/http         http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/os           http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd">
+
+    <!--
+        sys-github-suite.xml
+        Coverage for system/github.xml: pf-atomic-commit, pf-open-pr.
+        (pf-rollback is already exercised by post-cd-result-suite.)
+        A single generic http:request mock returns the target variables consumed by the
+        Git Data API sequence (headCheck, existingRefs, blobResp, treeResp, commitResp, prResp).
+    -->
+    <munit:config name="sys-github-suite" doc:id="sgh-suite-0001" />
+
+    <!-- pf-atomic-commit — happy path (plan not stale) -->
+    <munit:test name="github-atomic-commit-happy" doc:id="sgh-test-0001"
+                description="pf-atomic-commit creates branch, blobs, tree, commit and moves ref">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="mock GitHub Git Data API" processor="http:request">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{ sha: 'x' }]" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="headCheck"    value="#[{ sha: 'HEAD1' }]" />
+                        <munit-tools:variable key="existingRefs" value="#[[]]" />
+                        <munit-tools:variable key="blobResp"     value="#[{ sha: 'blob1' }]" />
+                        <munit-tools:variable key="treeResp"     value="#[{ sha: 'tree1' }]" />
+                        <munit-tools:variable key="commitResp"   value="#[{ sha: 'commit1' }]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock OS retrieve" processor="os:retrieve">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{ jobId: 'job-ac-1' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock OS store" processor="os:store">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[null]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-variable variableName="coords" value="#[{ owner: 'o', repo: 'r', defaultBranch: 'main' }]" doc:name="PV coords" />
+            <set-variable variableName="changePlan" value="#[{ headSha: 'HEAD1', targetRuntime: '4.9.18', targetJavaVersion: '17' }]" doc:name="PV changePlan" />
+            <set-variable variableName="stagedFiles" value="#[[ { path: 'pom.xml', content: '&lt;project/&gt;' } ]]" doc:name="PV stagedFiles" />
+            <set-variable variableName="appName" value="ac-app" doc:name="PV appName" />
+            <set-variable variableName="jobId" value="job-ac-1" doc:name="PV jobId" />
+            <flow-ref name="pf-atomic-commit" doc:name="invoke pf-atomic-commit" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="commitSha set" expression="#[vars.commitSha]" is="#[MunitTools::equalTo('commit1')]" />
+            <munit-tools:assert-that doc:name="branchName set" expression="#[vars.branchName]" is="#[MunitTools::notNullValue()]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- pf-atomic-commit — stale plan raises CONFLICT:STALE_PLAN -->
+    <munit:test name="github-atomic-commit-stale" doc:id="sgh-test-0002"
+                description="pf-atomic-commit raises CONFLICT:STALE_PLAN when repo HEAD moved"
+                expectedErrorType="CONFLICT:STALE_PLAN">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="mock GitHub HEAD moved" processor="http:request">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{ sha: 'x' }]" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="headCheck" value="#[{ sha: 'MOVED-SHA' }]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-variable variableName="coords" value="#[{ owner: 'o', repo: 'r', defaultBranch: 'main' }]" doc:name="PV coords" />
+            <set-variable variableName="changePlan" value="#[{ headSha: 'HEAD1', targetRuntime: '4.9.18', targetJavaVersion: '17' }]" doc:name="PV changePlan" />
+            <set-variable variableName="stagedFiles" value="#[[ { path: 'pom.xml', content: '&lt;project/&gt;' } ]]" doc:name="PV stagedFiles" />
+            <set-variable variableName="appName" value="ac-app2" doc:name="PV appName" />
+            <set-variable variableName="jobId" value="job-ac-2" doc:name="PV jobId" />
+            <flow-ref name="pf-atomic-commit" doc:name="invoke pf-atomic-commit (stale)" />
+        </munit:execution>
+    </munit:test>
+
+    <!-- pf-open-pr — opens PR and persists prNumber/prUrl -->
+    <munit:test name="github-open-pr" doc:id="sgh-test-0003"
+                description="pf-open-pr creates the PR and stores prNumber + prUrl">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="mock create PR" processor="http:request">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{ number: 7, html_url: 'https://github.com/o/r/pull/7' }]" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="prResp" value="#[{ number: 7, html_url: 'https://github.com/o/r/pull/7' }]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock OS retrieve" processor="os:retrieve">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{ jobId: 'job-pr-1' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock OS store" processor="os:store">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[null]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-variable variableName="coords" value="#[{ owner: 'o', repo: 'r', defaultBranch: 'main' }]" doc:name="PV coords" />
+            <set-variable variableName="changePlan" value="#[{ targetRuntime: '4.9.18', targetJavaVersion: '17' }]" doc:name="PV changePlan" />
+            <set-variable variableName="branchName" value="migrate/pr-app-4.9.18-java17" doc:name="PV branchName" />
+            <set-variable variableName="commitSha" value="commit1" doc:name="PV commitSha" />
+            <set-variable variableName="appName" value="pr-app" doc:name="PV appName" />
+            <set-variable variableName="jobId" value="job-pr-1" doc:name="PV jobId" />
+            <flow-ref name="pf-open-pr" doc:name="invoke pf-open-pr" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="prNumber set" expression="#[vars.prNumber]" is="#[MunitTools::equalTo(7)]" />
+            <munit-tools:assert-that doc:name="prUrl set" expression="#[vars.prUrl]" is="#[MunitTools::equalTo('https://github.com/o/r/pull/7')]" />
+        </munit:validation>
+    </munit:test>
+
+</mule>

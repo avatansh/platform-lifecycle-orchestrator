@@ -20,11 +20,13 @@ github:
 
 anypoint:
   defaultOrgId: "00000000-0000-0000-0000-000000000000"
-  # Platform post-deploy verification hits Anypoint (token + AMC deployments). Disabled in
-  # tests so the cd-result finalize path is deterministic (verify=DISABLED → trust CI signal)
-  # and we don't have to mock three separate Anypoint HTTP calls just to reach DEPLOYED.
+  # Platform post-deploy verification hits Anypoint (token + AMC deployments). ENABLED in
+  # tests so the verify-enabled branches in cd-result finalize and the reconcile DEPLOYING
+  # sweep are exercised. Suites that reach these paths mock the three Anypoint HTTP calls
+  # (token / environments / deployments) generically; an unmatched deployment name yields
+  # verified=false → the caller trusts the CI signal → DEPLOYED, keeping results deterministic.
   verify:
-    enabled: "false"
+    enabled: "true"
 
 slack:
   channel: "#test-java17-upgrades"
@@ -32,6 +34,8 @@ slack:
 jira:
   baseUrl: "https://test.atlassian.net"
   host: "test.atlassian.net"
+  autoCreate: "true"          # enable so pf-jira-create-issue's create branch is reachable in MUnit
+  projectKey: "TST"           # target project for auto-created tickets in tests
 
 # Tests must never call Exchange — always read the bundled classpath matrix.
 # (env-specific config is loaded before config.yaml, so this overrides matrix.source.)
@@ -42,3 +46,4 @@ matrix:
 
 registry:
   enforceAllowList: "false"
+  source: "classpath"         # tests read the bundled classpath registry (no Exchange HTTP)

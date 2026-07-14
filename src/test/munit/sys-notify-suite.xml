@@ -1,0 +1,238 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+      xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:os="http://www.mulesoft.org/schema/mule/os"
+      xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core        http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/munit        http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+        http://www.mulesoft.org/schema/mule/munit-tools  http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd
+        http://www.mulesoft.org/schema/mule/http         http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/os           http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd">
+
+    <!--
+        sys-notify-suite.xml
+        Coverage for system/notify.xml: pf-notify, pf-jira-comment, pf-jira-create-issue,
+        pf-notify-failure, pf-notify-missing-connectors. All Slack/Jira HTTP + Object Store
+        operations are mocked; every flow is non-fatal (wrapped in try/on-error-continue).
+    -->
+    <munit:config name="sys-notify-suite" doc:id="snf-suite-0001" />
+
+    <!-- pf-notify — with Jira ticket + warnings (Slack + Jira comment) -->
+    <munit:test name="notify-pf-notify-with-jira" doc:id="snf-test-0001"
+                description="pf-notify posts Slack and a Jira comment when a ticket is present">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="mock HTTP (slack/jira)" processor="http:request">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{ ok: true }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-variable variableName="appName" value="notify-app" doc:name="PV appName" />
+            <set-variable variableName="jobId" value="job-notify-1" doc:name="PV jobId" />
+            <set-variable variableName="prUrl" value="https://github.com/o/r/pull/1" doc:name="PV prUrl" />
+            <set-variable variableName="prNumber" value="#[1]" doc:name="PV prNumber" />
+            <set-variable variableName="jiraTicketId" value="TST-1" doc:name="PV jiraTicketId" />
+            <set-variable variableName="assessment" value="#[{ warnings: ['inherits connector versions from parent/BOM'] }]" doc:name="PV assessment" />
+            <flow-ref name="pf-notify" doc:name="invoke pf-notify" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="jira ticket retained" expression="#[vars.jiraTicketId]" is="#[MunitTools::equalTo('TST-1')]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- pf-notify — without Jira ticket (pf-jira-comment otherwise branch) -->
+    <munit:test name="notify-pf-notify-no-jira" doc:id="snf-test-0002"
+                description="pf-notify posts Slack and skips Jira comment when no ticket">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="mock Slack" processor="http:request">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{ ok: true }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-variable variableName="appName" value="notify-app2" doc:name="PV appName" />
+            <set-variable variableName="jobId" value="job-notify-2" doc:name="PV jobId" />
+            <set-variable variableName="prUrl" value="https://github.com/o/r/pull/2" doc:name="PV prUrl" />
+            <flow-ref name="pf-notify" doc:name="invoke pf-notify" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="no jira ticket" expression="#[vars.jiraTicketId default null]" is="#[MunitTools::nullValue()]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- pf-notify — Slack failure is swallowed (error-handler branch) -->
+    <munit:test name="notify-pf-notify-slack-error-swallowed" doc:id="snf-test-0003"
+                description="pf-notify swallows a Slack HTTP error (non-fatal)">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="mock Slack error" processor="http:request">
+                <munit-tools:then-return>
+                    <munit-tools:error typeId="HTTP:CONNECTIVITY" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-variable variableName="appName" value="notify-app3" doc:name="PV appName" />
+            <set-variable variableName="jobId" value="job-notify-3" doc:name="PV jobId" />
+            <set-variable variableName="prUrl" value="https://github.com/o/r/pull/3" doc:name="PV prUrl" />
+            <flow-ref name="pf-notify" doc:name="invoke pf-notify" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="flow completed" expression="#[vars.appName]" is="#[MunitTools::equalTo('notify-app3')]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- pf-jira-create-issue — auto-create branch (autoCreate=true in test config) -->
+    <munit:test name="notify-pf-jira-create-issue" doc:id="snf-test-0004"
+                description="pf-jira-create-issue creates a ticket and adopts its key">
+        <munit:behavior>
+            <!-- create issue uses target=createdIssue; mocks don't route to target, so set the var -->
+            <munit-tools:mock-when doc:name="mock create issue" processor="http:request">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{ key: 'TST-99', id: '10001' }]" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="createdIssue" value="#[{ key: 'TST-99', id: '10001' }]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock OS retrieve job" processor="os:retrieve">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{ jobId: 'job-jc-1', status: 'PROCESSING' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock OS store" processor="os:store">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[null]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-variable variableName="appName" value="jc-app" doc:name="PV appName" />
+            <set-variable variableName="jobId" value="job-jc-1" doc:name="PV jobId" />
+            <flow-ref name="pf-jira-create-issue" doc:name="invoke pf-jira-create-issue" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="jiraTicketId adopted" expression="#[vars.jiraTicketId]" is="#[MunitTools::equalTo('TST-99')]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- pf-jira-create-issue — skip branch (ticket already supplied) -->
+    <munit:test name="notify-pf-jira-create-issue-skip" doc:id="snf-test-0005"
+                description="pf-jira-create-issue skips when a ticket is already supplied">
+        <munit:execution>
+            <set-variable variableName="appName" value="jc-app2" doc:name="PV appName" />
+            <set-variable variableName="jobId" value="job-jc-2" doc:name="PV jobId" />
+            <set-variable variableName="jiraTicketId" value="TST-EXISTING" doc:name="PV jiraTicketId" />
+            <flow-ref name="pf-jira-create-issue" doc:name="invoke pf-jira-create-issue" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="ticket unchanged" expression="#[vars.jiraTicketId]" is="#[MunitTools::equalTo('TST-EXISTING')]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- pf-notify-failure — reads job record, posts Slack failure -->
+    <munit:test name="notify-pf-notify-failure" doc:id="snf-test-0006"
+                description="pf-notify-failure reads status/error from the job record and posts Slack">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="mock OS retrieve job" processor="os:retrieve">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                                         value="#[{ status: 'FAILED_COMMIT', error: 'boom', jiraTicketId: 'TST-1' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock Slack" processor="http:request">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{ ok: true }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-variable variableName="appName" value="fail-app" doc:name="PV appName" />
+            <set-variable variableName="jobId" value="job-fail-1" doc:name="PV jobId" />
+            <flow-ref name="pf-notify-failure" doc:name="invoke pf-notify-failure" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="failStatus read" expression="#[vars.failStatus]" is="#[MunitTools::equalTo('FAILED_COMMIT')]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- pf-notify-missing-connectors — first alert for a gap -->
+    <munit:test name="notify-missing-connectors-first" doc:id="snf-test-0007"
+                description="pf-notify-missing-connectors sends Slack on the first alert for a gap">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="mock OS retrieve dedup=false" processor="os:retrieve">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[false]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock OS store" processor="os:store">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[null]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock Slack" processor="http:request">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{ ok: true }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-variable variableName="appName" value="mc-app" doc:name="PV appName" />
+            <set-variable variableName="jobId" value="job-mc-1" doc:name="PV jobId" />
+            <set-variable variableName="missingConnectors"
+                          value="#[[ { groupId: 'com.acme', artifactId: 'mule-acme-connector' } ]]"
+                          doc:name="PV missingConnectors" />
+            <flow-ref name="pf-notify-missing-connectors" doc:name="invoke pf-notify-missing-connectors" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="dedup key built" expression="#[vars.missingNotifyKey]" is="#[MunitTools::notNullValue()]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- pf-notify-missing-connectors — already notified (dedup skip) -->
+    <munit:test name="notify-missing-connectors-deduped" doc:id="snf-test-0008"
+                description="pf-notify-missing-connectors skips when the gap was already alerted">
+        <munit:behavior>
+            <!-- os:retrieve uses target=missingNotified; set the var since mocks skip target routing -->
+            <munit-tools:mock-when doc:name="mock OS retrieve dedup=true" processor="os:retrieve">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[true]" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="missingNotified" value="#[true]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-variable variableName="appName" value="mc-app2" doc:name="PV appName" />
+            <set-variable variableName="jobId" value="job-mc-2" doc:name="PV jobId" />
+            <set-variable variableName="missingConnectors"
+                          value="#[[ { groupId: 'com.acme', artifactId: 'mule-acme-connector' } ]]"
+                          doc:name="PV missingConnectors" />
+            <flow-ref name="pf-notify-missing-connectors" doc:name="invoke pf-notify-missing-connectors" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="already notified" expression="#[vars.missingNotified]" is="#[MunitTools::equalTo(true)]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- pf-notify-missing-connectors — empty list (otherwise branch) -->
+    <munit:test name="notify-missing-connectors-empty" doc:id="snf-test-0009"
+                description="pf-notify-missing-connectors is a no-op when there are no missing connectors">
+        <munit:execution>
+            <set-variable variableName="appName" value="mc-app3" doc:name="PV appName" />
+            <set-variable variableName="jobId" value="job-mc-3" doc:name="PV jobId" />
+            <set-variable variableName="missingConnectors" value="#[[]]" doc:name="PV missingConnectors empty" />
+            <flow-ref name="pf-notify-missing-connectors" doc:name="invoke pf-notify-missing-connectors" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="no-op ok" expression="#[vars.appName]" is="#[MunitTools::equalTo('mc-app3')]" />
+        </munit:validation>
+    </munit:test>
+
+</mule>

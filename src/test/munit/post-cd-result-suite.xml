@@ -450,4 +450,166 @@
 
     </munit:test>
 
+    <!-- ==========================================================================
+         Test 7: stage=test + result=failure + job PR_OPEN -> parks MUNIT_FAILED
+         ========================================================================== -->
+    <munit:test name="post-cd-result-munit-failure-parks-MUNIT_FAILED"
+                doc:id="cd-test-0007"
+                description="An MUnit CI failure (stage=test) parks a live job in MUNIT_FAILED and notifies Slack">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="Mock OS retrieve job record (PR_OPEN)" processor="os:retrieve">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="#['OS Retrieve Job Record']" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[{ jobId: 'job-munit-007', status: 'PR_OPEN', appName: 'my-app', prUrl: 'https://gh/pr/1' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="Mock OS store" processor="os:store">
+                <munit-tools:then-return><munit-tools:payload value="#[null]" /></munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="Mock HTTP (Slack)" processor="http:request">
+                <munit-tools:then-return><munit-tools:payload value="#[{ ok: true }]" mediaType="application/json" /></munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <munit:set-event doc:name="event (stage=test failure)">
+                <munit:payload value='#[{ jobId: "job-munit-007", result: "failure", stage: "test", error: "3 tests failed" }]' />
+                <munit:attributes value="#[{ headers: { 'x-cd-token': 'test-webhook-secret-value-12345!' } }]" />
+            </munit:set-event>
+            <flow-ref name="mf-impl-post-cd-result" doc:name="invoke cd-result" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="status = MUNIT_FAILED" expression="#[payload.status]" is="#[MunitTools::equalTo('MUNIT_FAILED')]" />
+            <munit-tools:assert-that doc:name="acknowledged true" expression="#[payload.acknowledged]" is="#[MunitTools::equalTo(true)]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- ==========================================================================
+         Test 8: stage=test + result=failure + job already MUNIT_FAILED -> idempotent
+         ========================================================================== -->
+    <munit:test name="post-cd-result-munit-failure-idempotent"
+                doc:id="cd-test-0008"
+                description="A repeat MUnit failure for an already-parked job is idempotent (no re-store)">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="Mock OS retrieve job record (MUNIT_FAILED)" processor="os:retrieve">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="#['OS Retrieve Job Record']" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[{ jobId: 'job-munit-008', status: 'MUNIT_FAILED', appName: 'my-app' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <munit:set-event doc:name="event (stage=test failure idempotent)">
+                <munit:payload value='#[{ jobId: "job-munit-008", result: "failure", stage: "test" }]' />
+                <munit:attributes value="#[{ headers: { 'x-cd-token': 'test-webhook-secret-value-12345!' } }]" />
+            </munit:set-event>
+            <flow-ref name="mf-impl-post-cd-result" doc:name="invoke cd-result" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="idempotent true" expression="#[payload.idempotent]" is="#[MunitTools::equalTo(true)]" />
+            <munit-tools:verify-call doc:name="OS store NOT called" processor="os:store" times="0" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- ==========================================================================
+         Test 9: stage=test + result=success + job MUNIT_FAILED -> resumes PR_OPEN
+         ========================================================================== -->
+    <munit:test name="post-cd-result-munit-success-resumes-PR_OPEN"
+                doc:id="cd-test-0009"
+                description="An MUnit success for a parked job resumes it to PR_OPEN and notifies Slack">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="Mock OS retrieve job record (MUNIT_FAILED)" processor="os:retrieve">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="#['OS Retrieve Job Record']" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[{ jobId: 'job-munit-009', status: 'MUNIT_FAILED', appName: 'my-app', prUrl: 'https://gh/pr/2' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="Mock OS store" processor="os:store">
+                <munit-tools:then-return><munit-tools:payload value="#[null]" /></munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="Mock HTTP (Slack)" processor="http:request">
+                <munit-tools:then-return><munit-tools:payload value="#[{ ok: true }]" mediaType="application/json" /></munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <munit:set-event doc:name="event (stage=test success resume)">
+                <munit:payload value='#[{ jobId: "job-munit-009", result: "success", stage: "test" }]' />
+                <munit:attributes value="#[{ headers: { 'x-cd-token': 'test-webhook-secret-value-12345!' } }]" />
+            </munit:set-event>
+            <flow-ref name="mf-impl-post-cd-result" doc:name="invoke cd-result" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="resumed true" expression="#[payload.resumed]" is="#[MunitTools::equalTo(true)]" />
+            <munit-tools:assert-that doc:name="status PR_OPEN" expression="#[payload.status]" is="#[MunitTools::equalTo('PR_OPEN')]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- ==========================================================================
+         Test 10: stage=test + result=success + job NOT parked -> note only (no store)
+         ========================================================================== -->
+    <munit:test name="post-cd-result-munit-success-not-parked-note-only"
+                doc:id="cd-test-0010"
+                description="An MUnit success for a job that is not parked is acknowledged as a note without changing state">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="Mock OS retrieve job record (PR_OPEN)" processor="os:retrieve">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="#['OS Retrieve Job Record']" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[{ jobId: 'job-munit-010', status: 'PR_OPEN', appName: 'my-app' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <munit:set-event doc:name="event (stage=test success not parked)">
+                <munit:payload value='#[{ jobId: "job-munit-010", result: "success", stage: "test" }]' />
+                <munit:attributes value="#[{ headers: { 'x-cd-token': 'test-webhook-secret-value-12345!' } }]" />
+            </munit:set-event>
+            <flow-ref name="mf-impl-post-cd-result" doc:name="invoke cd-result" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="note present" expression="#[payload.note]" is="#[MunitTools::containsString('munit success noted')]" />
+            <munit-tools:verify-call doc:name="OS store NOT called" processor="os:store" times="0" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- ==========================================================================
+         Test 11: stage=test + unknown result -> 400
+         ========================================================================== -->
+    <munit:test name="post-cd-result-munit-unknown-result-returns-400"
+                doc:id="cd-test-0011"
+                description="An unrecognised MUnit result value returns 400">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="Mock OS retrieve job record (PR_OPEN)" processor="os:retrieve">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="#['OS Retrieve Job Record']" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[{ jobId: 'job-munit-011', status: 'PR_OPEN', appName: 'my-app' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <munit:set-event doc:name="event (stage=test unknown)">
+                <munit:payload value='#[{ jobId: "job-munit-011", result: "maybe", stage: "test" }]' />
+                <munit:attributes value="#[{ headers: { 'x-cd-token': 'test-webhook-secret-value-12345!' } }]" />
+            </munit:set-event>
+            <flow-ref name="mf-impl-post-cd-result" doc:name="invoke cd-result" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="httpStatus 400" expression="#[vars.httpStatus]" is="#[MunitTools::equalTo('400')]" />
+            <munit-tools:assert-that doc:name="error present" expression="#[payload.error]" is="#[MunitTools::containsString('invalid result')]" />
+        </munit:validation>
+    </munit:test>
+
 </mule>

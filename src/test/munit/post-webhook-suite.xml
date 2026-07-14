@@ -359,4 +359,64 @@ output text/plain
 
     </munit:test>
 
+    <!-- ──────────────────────────────────────────────────────────────────────────
+         Test 6: Valid signature + PR closed WITHOUT merge → pf-handle-pr-abandoned
+         (self-heal: parks the job CLOSED and releases the lock).
+         ────────────────────────────────────────────────────────────────────────── -->
+    <munit:test name="post-webhook-pr-closed-unmerged-abandons-job"
+                doc:id="wh-test-0006"
+                description="PR closed without merge routes to pf-handle-pr-abandoned and acknowledges 200">
+
+        <munit:behavior>
+            <!-- Object Store operations run against the real embedded stores (as in the merge
+                 test): a mock returning a payload would clobber the message payload before the
+                 PR-close choice, dropping payload.action. We pre-seed the branch index + job
+                 record in the execution phase instead. Only Slack/Jira HTTP is mocked. -->
+            <munit-tools:mock-when doc:name="Mock HTTP (Slack/Jira)" processor="http:request">
+                <munit-tools:then-return><munit-tools:payload value="#[{ ok: true }]" mediaType="application/json" /></munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+
+        <munit:execution>
+            <!-- Seed the branch→job index and the PR_OPEN job record in the real stores. -->
+            <os:store key="branch::migrate/wh-app-4.9.18-java17" objectStore="indexStore" doc:name="SEED branch index">
+                <os:value>#['job-wh-006']</os:value>
+            </os:store>
+            <os:store key="job-wh-006" objectStore="jobStore" doc:name="SEED job record">
+                <os:value>#[{ appName: 'wh-app', status: 'PR_OPEN' }]</os:value>
+            </os:store>
+            <set-variable variableName="rawBody" value="#['webhook-body-test-6' as Binary]" doc:name="PV rawBody" />
+            <ee:transform doc:name="DW Compute valid HMAC (closed-unmerged)" doc:id="wh-test-0006-hmac">
+                <ee:variables>
+                    <ee:set-variable variableName="ghSignature"><![CDATA[%dw 2.0
+import dw::Crypto
+output text/plain
+---
+"sha256=" ++ Crypto::HMACWith(
+    "test-webhook-secret-value-12345!" as Binary,
+    vars.rawBody,
+    "HmacSHA256"
+)]]></ee:set-variable>
+                </ee:variables>
+            </ee:transform>
+            <set-variable variableName="ghDelivery" value="delivery-006" doc:name="PV ghDelivery" />
+            <set-variable variableName="ghEvent"    value="pull_request" doc:name="PV ghEvent" />
+            <set-payload value="#[{
+                action: 'closed',
+                pull_request: {
+                    merged: false,
+                    head: { ref: 'migrate/wh-app-4.9.18-java17' },
+                    html_url: 'https://github.com/o/wh-app/pull/6'
+                }
+            }]" doc:name="SET closed-unmerged PR event (java map)" />
+            <flow-ref name="mf-impl-post-webhook" doc:name="invoke post-webhook" />
+        </munit:execution>
+
+        <munit:validation>
+            <munit-tools:assert-that doc:name="acknowledged true" expression="#[payload.acknowledged]" is="#[MunitTools::equalTo(true)]" />
+            <munit-tools:assert-that doc:name="jobId resolved from branch" expression="#[vars.jobId]" is="#[MunitTools::equalTo('job-wh-006')]" />
+        </munit:validation>
+
+    </munit:test>
+
 </mule>

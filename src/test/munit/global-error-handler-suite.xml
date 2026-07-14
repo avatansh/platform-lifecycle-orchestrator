@@ -1,0 +1,262 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+      xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core        http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/munit        http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+        http://www.mulesoft.org/schema/mule/munit-tools  http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd
+        http://www.mulesoft.org/schema/mule/http         http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd">
+
+    <!--
+        global-error-handler-suite.xml
+        Coverage for global/global-error-handler.xml (global-error-handler + mcp-error-handler).
+
+        Both are named error-handlers referenced by app flows. To exercise every mapped
+        on-error-continue branch deterministically, this suite defines two THIN helper flows
+        (below) that contain a single mockable http:request and delegate error handling to the
+        real named error-handler. Each test mocks that http:request to THROW a chosen error
+        typeId (raise-error cannot target reserved extension namespaces such as APIKIT/OS,
+        but a mock can simulate an extension throwing them). The helper flows live in the test
+        config so they do not count toward coverage — only the app error-handler processors do.
+    -->
+    <munit:config name="global-error-handler-suite" doc:id="geh-suite-0001" />
+
+    <!-- ═══════════════ helper flows (test-only) ═══════════════ -->
+    <flow name="teh-global-raiser" doc:id="geh-helper-0001">
+        <http:request config-ref="GitHub_Request" method="GET" path="/x"
+                      doc:name="mockable request (throws in tests)" doc:id="geh-helper-0001a" />
+        <error-handler ref="global-error-handler" doc:name="global-error-handler" />
+    </flow>
+
+    <flow name="teh-mcp-raiser" doc:id="geh-helper-0002">
+        <http:request config-ref="GitHub_Request" method="GET" path="/x"
+                      doc:name="mockable request (throws in tests)" doc:id="geh-helper-0002a" />
+        <error-handler ref="mcp-error-handler" doc:name="mcp-error-handler" />
+    </flow>
+
+    <!-- ═══════════════ global-error-handler tests ═══════════════ -->
+    <munit:test name="geh-apikit-bad-request-400" doc:id="geh-test-0001" description="APIKIT:BAD_REQUEST maps to 400">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="throw APIKIT:BAD_REQUEST" processor="http:request">
+                <munit-tools:then-return><munit-tools:error typeId="APIKIT:BAD_REQUEST" /></munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <flow-ref name="teh-global-raiser" doc:name="raise" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="httpStatus 400" expression="#[vars.httpStatus]" is="#[MunitTools::equalTo(400)]" />
+            <munit-tools:assert-that doc:name="code 400" expression="#[payload.code]" is="#[MunitTools::equalTo('400')]" />
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="geh-apikit-not-found-404" doc:id="geh-test-0002" description="APIKIT:NOT_FOUND maps to 404">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="throw APIKIT:NOT_FOUND" processor="http:request">
+                <munit-tools:then-return><munit-tools:error typeId="APIKIT:NOT_FOUND" /></munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <flow-ref name="teh-global-raiser" doc:name="raise" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="httpStatus 404" expression="#[vars.httpStatus]" is="#[MunitTools::equalTo(404)]" />
+            <munit-tools:assert-that doc:name="code 404" expression="#[payload.code]" is="#[MunitTools::equalTo('404')]" />
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="geh-apikit-method-not-allowed-405" doc:id="geh-test-0003" description="APIKIT:METHOD_NOT_ALLOWED maps to 405">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="throw APIKIT:METHOD_NOT_ALLOWED" processor="http:request">
+                <munit-tools:then-return><munit-tools:error typeId="APIKIT:METHOD_NOT_ALLOWED" /></munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <flow-ref name="teh-global-raiser" doc:name="raise" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="httpStatus 405" expression="#[vars.httpStatus]" is="#[MunitTools::equalTo(405)]" />
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="geh-apikit-not-acceptable-406" doc:id="geh-test-0004" description="APIKIT:NOT_ACCEPTABLE maps to 406">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="throw APIKIT:NOT_ACCEPTABLE" processor="http:request">
+                <munit-tools:then-return><munit-tools:error typeId="APIKIT:NOT_ACCEPTABLE" /></munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <flow-ref name="teh-global-raiser" doc:name="raise" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="httpStatus 406" expression="#[vars.httpStatus]" is="#[MunitTools::equalTo(406)]" />
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="geh-apikit-unsupported-media-415" doc:id="geh-test-0005" description="APIKIT:UNSUPPORTED_MEDIA_TYPE maps to 415">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="throw APIKIT:UNSUPPORTED_MEDIA_TYPE" processor="http:request">
+                <munit-tools:then-return><munit-tools:error typeId="APIKIT:UNSUPPORTED_MEDIA_TYPE" /></munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <flow-ref name="teh-global-raiser" doc:name="raise" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="httpStatus 415" expression="#[vars.httpStatus]" is="#[MunitTools::equalTo(415)]" />
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="geh-os-key-not-found-404" doc:id="geh-test-0006" description="OS:KEY_NOT_FOUND maps to 404 (job not found)">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="throw OS:KEY_NOT_FOUND" processor="http:request">
+                <munit-tools:then-return><munit-tools:error typeId="OS:KEY_NOT_FOUND" /></munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-variable variableName="jobId" value="job-missing" doc:name="PV jobId" />
+            <flow-ref name="teh-global-raiser" doc:name="raise" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="httpStatus 404" expression="#[vars.httpStatus]" is="#[MunitTools::equalTo(404)]" />
+            <munit-tools:assert-that doc:name="message names job" expression="#[payload.message]" is="#[MunitTools::containsString('job-missing')]" />
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="geh-validation-env-400" doc:id="geh-test-0007" description="VALIDATION:ENV_REQUIRED maps to 400">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="throw VALIDATION:ENV_REQUIRED" processor="http:request">
+                <munit-tools:then-return><munit-tools:error typeId="VALIDATION:ENV_REQUIRED" /></munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <flow-ref name="teh-global-raiser" doc:name="raise" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="httpStatus 400" expression="#[vars.httpStatus]" is="#[MunitTools::equalTo(400)]" />
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="geh-validation-app-not-found-404" doc:id="geh-test-0008" description="VALIDATION:APP_NOT_FOUND maps to 404">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="throw VALIDATION:APP_NOT_FOUND" processor="http:request">
+                <munit-tools:then-return><munit-tools:error typeId="VALIDATION:APP_NOT_FOUND" /></munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <flow-ref name="teh-global-raiser" doc:name="raise" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="httpStatus 404" expression="#[vars.httpStatus]" is="#[MunitTools::equalTo(404)]" />
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="geh-conflict-409" doc:id="geh-test-0009" description="CONFLICT:UPGRADE_IN_PROGRESS maps to 409">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="throw CONFLICT:UPGRADE_IN_PROGRESS" processor="http:request">
+                <munit-tools:then-return><munit-tools:error typeId="CONFLICT:UPGRADE_IN_PROGRESS" /></munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <flow-ref name="teh-global-raiser" doc:name="raise" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="httpStatus 409" expression="#[vars.httpStatus]" is="#[MunitTools::equalTo(409)]" />
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="geh-any-500" doc:id="geh-test-0010" description="Unmapped error maps to 500 (catch-all)">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="throw APP:BOOM" processor="http:request">
+                <munit-tools:then-return><munit-tools:error typeId="APP:BOOM" /></munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <flow-ref name="teh-global-raiser" doc:name="raise" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="httpStatus 500" expression="#[vars.httpStatus]" is="#[MunitTools::equalTo(500)]" />
+            <munit-tools:assert-that doc:name="code 500" expression="#[payload.code]" is="#[MunitTools::equalTo('500')]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- ═══════════════ mcp-error-handler tests ═══════════════ -->
+    <munit:test name="mcp-validation-env-400" doc:id="geh-test-0011" description="MCP VALIDATION:ENV_REQUIRED -> ERROR envelope code 400">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="throw VALIDATION:ENV_REQUIRED" processor="http:request">
+                <munit-tools:then-return><munit-tools:error typeId="VALIDATION:ENV_REQUIRED" /></munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <flow-ref name="teh-mcp-raiser" doc:name="raise" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="status ERROR" expression="#[payload.status]" is="#[MunitTools::equalTo('ERROR')]" />
+            <munit-tools:assert-that doc:name="code 400" expression="#[payload.code]" is="#[MunitTools::equalTo('400')]" />
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="mcp-validation-app-not-found-404" doc:id="geh-test-0012" description="MCP VALIDATION:APP_NOT_FOUND -> code 404">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="throw VALIDATION:APP_NOT_FOUND" processor="http:request">
+                <munit-tools:then-return><munit-tools:error typeId="VALIDATION:APP_NOT_FOUND" /></munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <flow-ref name="teh-mcp-raiser" doc:name="raise" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="code 404" expression="#[payload.code]" is="#[MunitTools::equalTo('404')]" />
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="mcp-os-key-not-found-404" doc:id="geh-test-0013" description="MCP OS:KEY_NOT_FOUND -> code 404 job not found">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="throw OS:KEY_NOT_FOUND" processor="http:request">
+                <munit-tools:then-return><munit-tools:error typeId="OS:KEY_NOT_FOUND" /></munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-variable variableName="jobId" value="job-x" doc:name="PV jobId" />
+            <flow-ref name="teh-mcp-raiser" doc:name="raise" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="code 404" expression="#[payload.code]" is="#[MunitTools::equalTo('404')]" />
+            <munit-tools:assert-that doc:name="message names job" expression="#[payload.message]" is="#[MunitTools::containsString('job-x')]" />
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="mcp-conflict-409" doc:id="geh-test-0014" description="MCP CONFLICT:STALE_PLAN -> code 409">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="throw CONFLICT:STALE_PLAN" processor="http:request">
+                <munit-tools:then-return><munit-tools:error typeId="CONFLICT:STALE_PLAN" /></munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <flow-ref name="teh-mcp-raiser" doc:name="raise" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="code 409" expression="#[payload.code]" is="#[MunitTools::equalTo('409')]" />
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="mcp-any-500" doc:id="geh-test-0015" description="MCP unmapped error -> code 500 catch-all">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="throw APP:BOOM" processor="http:request">
+                <munit-tools:then-return><munit-tools:error typeId="APP:BOOM" /></munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <flow-ref name="teh-mcp-raiser" doc:name="raise" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="code 500" expression="#[payload.code]" is="#[MunitTools::equalTo('500')]" />
+            <munit-tools:assert-that doc:name="status ERROR" expression="#[payload.status]" is="#[MunitTools::equalTo('ERROR')]" />
+        </munit:validation>
+    </munit:test>
+
+</mule>

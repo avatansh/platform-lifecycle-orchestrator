@@ -1,0 +1,379 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+      xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:os="http://www.mulesoft.org/schema/mule/os"
+      xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core        http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/munit        http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+        http://www.mulesoft.org/schema/mule/munit-tools  http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd
+        http://www.mulesoft.org/schema/mule/http         http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/os           http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd">
+
+    <!--
+        proc-pr-lifecycle-suite.xml
+        Coverage for pf-handle-pr-abandoned (process/pr-lifecycle.xml): a PR closed without merge
+        parks the job CLOSED, clears the branch index and releases the lock. All OS + Slack HTTP
+        are mocked; the job carries no Jira ticket so pf-jira-comment self-skips.
+    -->
+    <munit:config name="proc-pr-lifecycle-suite" doc:id="ppl-suite-0001" />
+
+    <munit:test name="prlc-abandoned-closes-job" doc:id="ppl-test-0001"
+                description="pf-handle-pr-abandoned marks an in-flight job CLOSED and releases the lock">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="mock OS retrieve (branch idx + job)" processor="os:retrieve">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{ appName: 'ab-app', status: 'PR_OPEN' }]" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="jobIdFromBranch" value="#['job-ab-1']" />
+                        <munit-tools:variable key="abandonJob" value="#[{ appName: 'ab-app', status: 'PR_OPEN' }]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock OS store" processor="os:store">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[null]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock OS remove" processor="os:remove">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[null]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock OS contains (lock held)" processor="os:contains">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[true]" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="lockPresent" value="#[true]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock Slack HTTP" processor="http:request">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{ ok: true }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-variable variableName="closedBranch" value="migrate/ab-1" doc:name="PV closedBranch" />
+            <set-variable variableName="prUrl" value="https://github.com/o/r/pull/7" doc:name="PV prUrl" />
+            <flow-ref name="pf-handle-pr-abandoned" doc:name="invoke pf-handle-pr-abandoned" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="jobId mapped from branch" expression="#[vars.jobId]" is="#[MunitTools::equalTo('job-ab-1')]" />
+            <munit-tools:assert-that doc:name="appName resolved" expression="#[vars.appName]" is="#[MunitTools::equalTo('ab-app')]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- Untracked branch → no-op (empty index mapping). -->
+    <munit:test name="prlc-untracked-branch-noop" doc:id="ppl-test-0002"
+                description="pf-handle-pr-abandoned ignores a branch that maps to no job">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="mock OS retrieve (no mapping)" processor="os:retrieve">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#['']" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="jobIdFromBranch" value="#['']" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-variable variableName="closedBranch" value="feature/not-tracked" doc:name="PV closedBranch" />
+            <flow-ref name="pf-handle-pr-abandoned" doc:name="invoke pf-handle-pr-abandoned" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="branch mapping empty" expression="#[vars.jobIdFromBranch]" is="#[MunitTools::equalTo('')]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- Branch maps to an already-terminal job → no-op (leave DEPLOYED job untouched). -->
+    <munit:test name="prlc-abandoned-terminal-noop" doc:id="ppl-test-0006"
+                description="pf-handle-pr-abandoned leaves an already-terminal (DEPLOYED) job untouched">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="mock OS retrieve (branch idx + terminal job)" processor="os:retrieve">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{ appName: 'ab-app-t', status: 'DEPLOYED' }]" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="jobIdFromBranch" value="#['job-ab-term']" />
+                        <munit-tools:variable key="abandonJob" value="#[{ appName: 'ab-app-t', status: 'DEPLOYED' }]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-variable variableName="closedBranch" value="migrate/ab-term" doc:name="PV closedBranch" />
+            <flow-ref name="pf-handle-pr-abandoned" doc:name="invoke pf-handle-pr-abandoned" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="terminal job unchanged" expression="#[vars.abandonJob.status]" is="#[MunitTools::equalTo('DEPLOYED')]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- In-flight job but the Slack notification fails → non-fatal (error handler swallows it). -->
+    <munit:test name="prlc-abandoned-slack-error-nonfatal" doc:id="ppl-test-0007"
+                description="pf-handle-pr-abandoned still closes the job when the Slack notification errors">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="mock OS retrieve (branch idx + job)" processor="os:retrieve">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{ appName: 'ab-app-s', status: 'PR_OPEN' }]" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="jobIdFromBranch" value="#['job-ab-slack']" />
+                        <munit-tools:variable key="abandonJob" value="#[{ appName: 'ab-app-s', status: 'PR_OPEN' }]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock OS store" processor="os:store">
+                <munit-tools:then-return><munit-tools:payload mediaType="application/java" value="#[null]" /></munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock OS remove" processor="os:remove">
+                <munit-tools:then-return><munit-tools:payload mediaType="application/java" value="#[null]" /></munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock OS contains (lock held)" processor="os:contains">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[true]" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="lockPresent" value="#[true]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock Slack HTTP -> error" processor="http:request">
+                <munit-tools:then-return>
+                    <munit-tools:error typeId="HTTP:CONNECTIVITY" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-variable variableName="closedBranch" value="migrate/ab-slack" doc:name="PV closedBranch" />
+            <flow-ref name="pf-handle-pr-abandoned" doc:name="invoke pf-handle-pr-abandoned" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="jobId mapped" expression="#[vars.jobId]" is="#[MunitTools::equalTo('job-ab-slack')]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- pf-reapply-job: reloads a previous job's inputs and relaunches pf-start-upgrade. -->
+    <munit:test name="prlc-reapply-job" doc:id="ppl-test-0003"
+                description="pf-reapply-job seeds inputs from the previous job, releases the lock and relaunches the upgrade">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="mock OS retrieve (prev job / lock / job)" processor="os:retrieve">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[{ appName: 'reapply-app', environment: 'Sandbox', jiraTicketId: null, coords: { owner: 'covorg', repo: 'covrepo', branch: 'main', appPath: '.' } }]" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="existingLock" value="#[false]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock OS store" processor="os:store">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[null]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock OS remove" processor="os:remove">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[null]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock OS contains (no lock)" processor="os:contains">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[false]" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="lockPresent" value="#[false]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock GET commit" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/commits/main" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{ sha: 'COVSHA' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock GET tree" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/git/trees/COVSHA" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[{ sha: 'TREESHA', truncated: false, tree: [ { path: 'pom.xml', 'type': 'blob' } ] }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock GET app pom" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/contents/pom.xml" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[%dw 2.0
+import toBase64 from dw::core::Binaries
+output application/java
+var pom = &quot;&lt;project xmlns='http://maven.apache.org/POM/4.0.0'&gt;&lt;modelVersion&gt;4.0.0&lt;/modelVersion&gt;&lt;groupId&gt;c&lt;/groupId&gt;&lt;artifactId&gt;a&lt;/artifactId&gt;&lt;version&gt;1.0.0&lt;/version&gt;&lt;properties&gt;&lt;app.runtime&gt;4.6.0&lt;/app.runtime&gt;&lt;/properties&gt;&lt;/project&gt;&quot;
+---
+{ content: toBase64(pom as Binary), encoding: 'base64' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-variable variableName="jobId" value="job-prev-1" doc:name="PV jobId (previous)" />
+            <flow-ref name="pf-reapply-job" doc:name="invoke pf-reapply-job" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="reapplied true" expression="#[payload.reapplied]" is="#[MunitTools::equalTo(true)]" />
+            <munit-tools:assert-that doc:name="previousJobId echoed" expression="#[payload.previousJobId]" is="#[MunitTools::equalTo('job-prev-1')]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- REST wrapper: mf-impl-reapply-job binds the URI jobId then delegates. -->
+    <munit:test name="prlc-reapply-rest-wrapper" doc:id="ppl-test-0004"
+                description="mf-impl-reapply-job binds attributes.uriParams.jobId, relaunches and sets 202">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="mock OS retrieve (prev job / lock / job)" processor="os:retrieve">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[{ appName: 'reapply-app2', environment: 'Sandbox', jiraTicketId: null, coords: { owner: 'covorg', repo: 'covrepo', branch: 'main', appPath: '.' } }]" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="existingLock" value="#[false]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock OS store" processor="os:store">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[null]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock OS remove" processor="os:remove">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[null]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock OS contains (no lock)" processor="os:contains">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[false]" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="lockPresent" value="#[false]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock GET commit" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/commits/main" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{ sha: 'COVSHA' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock GET tree" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/git/trees/COVSHA" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[{ sha: 'TREESHA', truncated: false, tree: [ { path: 'pom.xml', 'type': 'blob' } ] }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock GET app pom" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/contents/pom.xml" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[%dw 2.0
+import toBase64 from dw::core::Binaries
+output application/java
+var pom = &quot;&lt;project xmlns='http://maven.apache.org/POM/4.0.0'&gt;&lt;modelVersion&gt;4.0.0&lt;/modelVersion&gt;&lt;groupId&gt;c&lt;/groupId&gt;&lt;artifactId&gt;a&lt;/artifactId&gt;&lt;version&gt;1.0.0&lt;/version&gt;&lt;properties&gt;&lt;app.runtime&gt;4.6.0&lt;/app.runtime&gt;&lt;/properties&gt;&lt;/project&gt;&quot;
+---
+{ content: toBase64(pom as Binary), encoding: 'base64' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <munit:set-event doc:name="event with uriParams.jobId">
+                <munit:payload value="#[null]" />
+                <munit:attributes value="#[{ uriParams: { jobId: 'job-prev-2' } }]" mediaType="application/java" />
+            </munit:set-event>
+            <flow-ref name="mf-impl-reapply-job" doc:name="invoke mf-impl-reapply-job" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="reapplied true" expression="#[payload.reapplied]" is="#[MunitTools::equalTo(true)]" />
+            <munit-tools:assert-that doc:name="httpStatus 202" expression="#[vars.httpStatus]" is="#[MunitTools::equalTo(202)]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- MCP wrapper: reapply_job-mcp-tool. -->
+    <munit:test name="prlc-reapply-mcp-tool" doc:id="ppl-test-0005"
+                description="reapply_job-mcp-tool maps the jobId param and relaunches the upgrade">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="mock OS retrieve (prev job / lock / job)" processor="os:retrieve">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[{ appName: 'reapply-app3', environment: 'Sandbox', jiraTicketId: null, coords: { owner: 'covorg', repo: 'covrepo', branch: 'main', appPath: '.' } }]" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="existingLock" value="#[false]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock OS store" processor="os:store">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[null]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock OS remove" processor="os:remove">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[null]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock OS contains (no lock)" processor="os:contains">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[false]" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="lockPresent" value="#[false]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock GET commit" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/commits/main" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{ sha: 'COVSHA' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock GET tree" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/git/trees/COVSHA" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[{ sha: 'TREESHA', truncated: false, tree: [ { path: 'pom.xml', 'type': 'blob' } ] }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock GET app pom" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/contents/pom.xml" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[%dw 2.0
+import toBase64 from dw::core::Binaries
+output application/java
+var pom = &quot;&lt;project xmlns='http://maven.apache.org/POM/4.0.0'&gt;&lt;modelVersion&gt;4.0.0&lt;/modelVersion&gt;&lt;groupId&gt;c&lt;/groupId&gt;&lt;artifactId&gt;a&lt;/artifactId&gt;&lt;version&gt;1.0.0&lt;/version&gt;&lt;properties&gt;&lt;app.runtime&gt;4.6.0&lt;/app.runtime&gt;&lt;/properties&gt;&lt;/project&gt;&quot;
+---
+{ content: toBase64(pom as Binary), encoding: 'base64' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-payload value="#[{ jobId: 'job-prev-3' }]" doc:name="PV payload (tool params)" />
+            <flow-ref name="reapply_job-mcp-tool" doc:name="invoke reapply_job-mcp-tool" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="reapplied true" expression="#[payload.reapplied]" is="#[MunitTools::equalTo(true)]" />
+        </munit:validation>
+    </munit:test>
+
+</mule>
