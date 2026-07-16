@@ -80,6 +80,22 @@
                      expirationInterval="1"
                      expirationIntervalUnit="HOURS" />
 
+    <!--
+        anypointTokenCacheOS — in-memory backing store for the Anypoint bearer-token cache
+        (referenced by anypointTokenCachingStrategy in system/anypoint.xml). Behaves like the
+        default ee:cache store (non-persistent, short-lived) but is named/global so MUnit can
+        deterministically clear it between tests and avoid cross-suite token-cache pollution.
+    -->
+    <os:object-store name="anypointTokenCacheOS"
+                     doc:name="Anypoint Token Cache Store"
+                     doc:id="a1b2c3d4-0001-0001-0001-000000000017"
+                     persistent="false"
+                     entryTtl="1"
+                     entryTtlUnit="HOURS"
+                     maxEntries="100"
+                     expirationInterval="10"
+                     expirationIntervalUnit="MINUTES" />
+
     <!-- ===== Property Sources ===== -->
     <!-- Environment-specific non-sensitive properties: config-dev.yaml, config-prod.yaml, etc. -->
     <configuration-properties

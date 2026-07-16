@@ -34,6 +34,7 @@
         name="anypointTokenCachingStrategy"
         doc:name="Anypoint Token Caching Strategy"
         doc:id="pfpt0001-0001-0001-0001-000000000001"
+        objectStore="anypointTokenCacheOS"
         keyGenerationExpression="#['anypoint-token-' ++ (floor((now() as Number {unit: 'seconds'}) / (p('anypoint.tokenRefreshSeconds') as Number)) as String)]" />
 
     <!--

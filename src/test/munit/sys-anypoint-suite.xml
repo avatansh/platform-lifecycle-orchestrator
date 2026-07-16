@@ -2,6 +2,7 @@
 <mule xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
       xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
       xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:os="http://www.mulesoft.org/schema/mule/os"
       xmlns="http://www.mulesoft.org/schema/mule/core"
       xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
@@ -9,6 +10,7 @@
         http://www.mulesoft.org/schema/mule/core        http://www.mulesoft.org/schema/mule/core/current/mule.xsd
         http://www.mulesoft.org/schema/mule/munit        http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
         http://www.mulesoft.org/schema/mule/munit-tools  http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd
+        http://www.mulesoft.org/schema/mule/os           http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd
         http://www.mulesoft.org/schema/mule/http         http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd">
 
     <!--
@@ -30,6 +32,9 @@
             </munit-tools:mock-when>
         </munit:behavior>
         <munit:execution>
+            <!-- Guarantee a cache MISS so the mocked token POST fires: other suites (with
+                 verify enabled) may have populated the shared token cache first. -->
+            <os:clear objectStore="anypointTokenCacheOS" doc:name="clear token cache" />
             <flow-ref name="pf-get-anypoint-token" doc:name="invoke pf-get-anypoint-token" />
         </munit:execution>
         <munit:validation>
