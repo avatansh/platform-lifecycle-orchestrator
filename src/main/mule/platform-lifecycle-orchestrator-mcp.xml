@@ -82,7 +82,7 @@
   }
 }]]></mcp:parameters-schema>
             <mcp:responses>
-                <mcp:text-tool-response-content text="#[write(payload, 'application/json')]" />
+                <mcp:text-tool-response-content text="#[write((payload default {}), 'application/json')]" />
             </mcp:responses>
         </mcp:tool-listener>
 
@@ -105,6 +105,8 @@
         <flow-ref name="pf-mdc-stamp" doc:name="pf-mdc-stamp" doc:id="mc1a0001-0001-0001-0001-00000000000a" />
 
         <logger level="INFO" doc:name="LOG INFO Request Received" doc:id="a8d9977f-5d56-4505-ae43-6206eccc2153" message="#[output application/java --- 'REQUEST RECEIVED | transport=mcp | tool=assess_app']" />
+        <!-- MCP-only: reject a non-existent environment before doing any work (REST is unaffected). -->
+        <flow-ref name="pf-mcp-validate-env" doc:name="pf-mcp-validate-env" doc:id="mc1a0001-0001-0001-0001-00000000000b" />
 		<flow-ref name="pf-assess-app"
                   doc:name="pf-assess-app"
                   doc:id="mc1a0001-0001-0001-0001-000000000006" />
@@ -181,7 +183,7 @@
   }
 }]]></mcp:parameters-schema>
             <mcp:responses>
-                <mcp:text-tool-response-content text="#[write(payload, 'application/json')]" />
+                <mcp:text-tool-response-content text="#[write((payload default {}), 'application/json')]" />
             </mcp:responses>
         </mcp:tool-listener>
 
@@ -203,6 +205,9 @@
         <flow-ref name="pf-mdc-stamp" doc:name="pf-mdc-stamp" doc:id="mc2b0002-0002-0002-0002-00000000000a" />
 
         <logger level="INFO" doc:name="LOG INFO Request Received" doc:id="mc2b0002-0002-0002-0002-000000000005" message="#[output application/java --- 'REQUEST RECEIVED | transport=mcp | tool=start_upgrade']" />
+
+        <!-- MCP-only: reject a non-existent environment before doing any work (REST is unaffected). -->
+        <flow-ref name="pf-mcp-validate-env" doc:name="pf-mcp-validate-env" doc:id="mc2b0002-0002-0002-0002-00000000000b" />
 
         <flow-ref name="pf-start-upgrade"
                   doc:name="pf-start-upgrade"
@@ -248,7 +253,7 @@
   }
 }]]></mcp:parameters-schema>
             <mcp:responses>
-                <mcp:text-tool-response-content text="#[write(payload, 'application/json')]" />
+                <mcp:text-tool-response-content text="#[write((payload default {}), 'application/json')]" />
             </mcp:responses>
         </mcp:tool-listener>
 
@@ -307,7 +312,7 @@
   }
 }]]></mcp:parameters-schema>
             <mcp:responses>
-                <mcp:text-tool-response-content text="#[write(payload, 'application/json')]" />
+                <mcp:text-tool-response-content text="#[write((payload default {}), 'application/json')]" />
             </mcp:responses>
         </mcp:tool-listener>
 
@@ -363,7 +368,7 @@
   }
 }]]></mcp:parameters-schema>
             <mcp:responses>
-                <mcp:text-tool-response-content text="#[write(payload, 'application/json')]" />
+                <mcp:text-tool-response-content text="#[write((payload default {}), 'application/json')]" />
             </mcp:responses>
         </mcp:tool-listener>
 
@@ -443,7 +448,7 @@
   }
 }]]></mcp:parameters-schema>
             <mcp:responses>
-                <mcp:text-tool-response-content text="#[write(payload, 'application/json')]" />
+                <mcp:text-tool-response-content text="#[write((payload default {}), 'application/json')]" />
             </mcp:responses>
         </mcp:tool-listener>
 
@@ -462,6 +467,8 @@
 			</ee:variables>
 		</ee:transform>
 
+        <flow-ref name="pf-mdc-stamp" doc:name="pf-mdc-stamp" doc:id="mc6f0006-0006-0006-0006-00000000000a" />
+
         <logger level="INFO" doc:name="LOG INFO Request Received" doc:id="mc6f0006-0006-0006-0006-000000000005" message="#[output application/java --- 'REQUEST RECEIVED | transport=mcp | tool=upgrade_parent_pom']" />
 
         <flow-ref name="pf-upgrade-parent-pom"
@@ -474,13 +481,83 @@
 
     </flow>
 
+    <!-- ==========================================================================
+         pf-mcp-validate-env   —   MCP-INTERFACE ONLY
+         ──────────────────────────────────────────────────────────────────────────
+         Best-effort guard that rejects a non-existent Anypoint environment name up
+         front, so the MCP tools (assess_app / start_upgrade) fail fast with an
+         actionable USER_INPUT error the agent can turn into "that environment does
+         not exist — did you mean X?", instead of accepting a bogus env silently or
+         failing opaquely deep in a later Anypoint call.
+
+         Called ONLY by the *-mcp-tool flows — the REST/APIkit flows never reference
+         it, so REST behaviour is completely unaffected.
+
+         Requires: vars.environment (the caller-supplied env name)
+                   vars.requestBody (tool params; may carry an orgId override)
+         Raises:   VALIDATION:ENV_NOT_FOUND (400 USER_INPUT) when the env list was
+                   successfully retrieved AND the supplied env is not in it.
+         Degrades: if the Anypoint lookup itself fails (auth/timeout/etc.), the check
+                   is SKIPPED (logged WARN) — a transient platform issue must never be
+                   reported to the user as an invalid environment.
+         Payload:  not relied upon by callers (assess/start recompute it downstream).
+         ========================================================================== -->
+    <sub-flow name="pf-mcp-validate-env" doc:id="mcev0007-0007-0007-0007-000000000001">
+        <logger level="INFO" doc:name="LOG INFO START pf-mcp-validate-env" doc:id="mcev0007-0007-0007-0007-000000000002"
+                message="#[output application/java --- 'START - pf-mcp-validate-env | env=' ++ (vars.environment default '(none)')]" />
+        <try doc:name="TRY validate env (best-effort)" doc:id="mcev0007-0007-0007-0007-000000000003">
+            <set-variable variableName="vfyOrgId"
+                          value="#[output application/java --- ((vars.requestBody.orgId default p('anypoint.defaultOrgId')) default '') as String]"
+                          doc:name="PV SET vfyOrgId" doc:id="mcev0007-0007-0007-0007-000000000004" />
+            <flow-ref name="pf-get-anypoint-token" doc:name="pf-get-anypoint-token" doc:id="mcev0007-0007-0007-0007-000000000005" />
+            <ee:cache cachingStrategy-ref="anypointEnvCachingStrategy" doc:name="CACHE org environments" doc:id="mcev0007-0007-0007-0007-000000000006">
+                <http:request method="GET" config-ref="Anypoint_Request"
+                              path="#['/accounts/api/organizations/' ++ (vars.vfyOrgId default '') ++ '/environments']"
+                              outputMimeType="application/json"
+                              doc:name="GET org environments" doc:id="mcev0007-0007-0007-0007-000000000007">
+                    <http:headers><![CDATA[#[{ "Authorization": "Bearer " ++ (vars.anypointToken default "") }]]]></http:headers>
+                </http:request>
+            </ee:cache>
+            <set-variable variableName="envList"
+                          value="#[output application/java --- (payload.data default []) map ((e) -> (e.name default '') as String)]"
+                          doc:name="PV SET envList" doc:id="mcev0007-0007-0007-0007-000000000008" />
+            <choice doc:name="CHOICE env exists?" doc:id="mcev0007-0007-0007-0007-000000000009">
+                <when expression="#[not (((vars.envList default []) map upper($)) contains upper(vars.environment default ''))]"
+                      doc:name="env not in org" doc:id="mcev0007-0007-0007-0007-00000000000a">
+                    <logger level="WARN" doc:name="LOG WARN env not found" doc:id="mcev0007-0007-0007-0007-00000000000b"
+                            message="#[output application/java --- 'env not found | env=' ++ (vars.environment default '?') ++ ' | orgId=' ++ (vars.vfyOrgId default '?') ++ ' | valid=' ++ ((vars.envList default []) joinBy ',')]" />
+                    <raise-error type="VALIDATION:ENV_NOT_FOUND" doc:name="RAISE VALIDATION:ENV_NOT_FOUND" doc:id="mcev0007-0007-0007-0007-00000000000c"
+                                 description="#[output application/java --- 'Environment &quot;' ++ (vars.environment default '?') ++ '&quot; was not found in this Anypoint organization. Valid environments: ' ++ (if (isEmpty(vars.envList default [])) '(none)' else ((vars.envList default []) joinBy ', ')) ++ '. Please provide a valid environment name.']" />
+                </when>
+                <otherwise doc:name="env valid" doc:id="mcev0007-0007-0007-0007-00000000000d">
+                    <logger level="INFO" doc:name="LOG INFO env valid" doc:id="mcev0007-0007-0007-0007-00000000000e"
+                            message="#[output application/java --- 'env valid | env=' ++ (vars.environment default '?')]" />
+                </otherwise>
+            </choice>
+            <error-handler>
+                <!-- Our own validation error must propagate to the tool's mcp-error-handler. -->
+                <on-error-propagate type="VALIDATION:ENV_NOT_FOUND" enableNotifications="false" logException="false"
+                                    doc:name="propagate ENV_NOT_FOUND" doc:id="mcev0007-0007-0007-0007-00000000000f" />
+                <!-- Any lookup failure (auth/timeout/connectivity/etc.) → skip the check, do not block. -->
+                <on-error-continue type="ANY" enableNotifications="false" logException="false"
+                                   doc:name="skip on lookup failure" doc:id="mcev0007-0007-0007-0007-000000000010">
+                    <logger level="WARN" doc:name="LOG WARN env check skipped" doc:id="mcev0007-0007-0007-0007-000000000011"
+                            message="#[output application/java --- 'env validation SKIPPED (anypoint lookup failed: ' ++ (error.errorType.namespace default '') ++ ':' ++ (error.errorType.identifier default '') ++ ') — proceeding without env pre-check']" />
+                </on-error-continue>
+            </error-handler>
+        </try>
+        <logger level="INFO" doc:name="LOG INFO END pf-mcp-validate-env" doc:id="mcev0007-0007-0007-0007-000000000012"
+                message="#[output application/java --- 'END - pf-mcp-validate-env']" />
+    </sub-flow>
+
     <!--
         Shared error handler for all MCP tool flows. MCP tools do NOT route through the REST
         main flow, so they cannot reuse global-error-handler (which sets vars.httpStatus for the
         HTTP listener). Instead this handler returns a clean, consistent error envelope
-        { status: "ERROR", code, message, correlationId } as the tool response — mirroring the
-        REST envelope — and, critically, sanitizes unexpected errors so internal details
+        { status: "ERROR", code, errorType, category, message, invalidFields?, retryable, correlationId }
+        as the tool response and, critically, sanitizes unexpected errors so internal details
         (stack traces, DW expression errors, etc.) are never leaked to the calling agent.
         Uses on-error-continue so the connector always returns a well-formed JSON tool result.
+        Definition lives in global/global-error-handler.xml (name="mcp-error-handler").
     -->
 </mule>

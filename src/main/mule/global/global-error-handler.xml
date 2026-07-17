@@ -260,29 +260,69 @@ output application/json
         </on-error-continue>
 
     </error-handler>
+	<!--
+		========================================================================================
+		mcp-error-handler  —  MCP-INTERFACE ONLY  (referenced solely by the *-mcp-tool flows in
+		platform-lifecycle-orchestrator-mcp.xml). It is NOT used by the REST/APIkit main flow,
+		which has its own global-error-handler above. Any change here therefore affects ONLY the
+		MCP tools and can never alter REST behaviour.
+
+		Contract: every branch uses on-error-continue so the tool ALWAYS returns a well-formed
+		JSON envelope as a NORMAL tool result (never an MCP protocol error / isError). The
+		Agentforce LLM reads these fields to compose a natural response:
+
+		  { status:"ERROR", code, errorType, category, message, invalidFields?, retryable, correlationId }
+
+		category ∈ USER_INPUT | NOT_FOUND | CONFLICT | SYSTEM
+		  • USER_INPUT — the caller supplied a bad value; the agent should ask for a correction.
+		  • NOT_FOUND  — a named resource (app/repo/job) does not exist; agent asks to verify it.
+		  • CONFLICT   — state conflict (lock held / stale plan); agent explains and suggests waiting.
+		  • SYSTEM     — platform/upstream failure; message is sanitised (no internals leaked).
+		retryable — hint to the agent that a later retry may succeed (timeouts, connectivity, 429…).
+		========================================================================================
+	-->
 	<error-handler name="mcp-error-handler" doc:id="96af74ec-66ad-4da5-a822-30fde3b363fc" >
-		<on-error-continue enableNotifications="true" logException="false" doc:name="Validation Bad Request" doc:id="46907169-1e89-4777-bb04-854e708bfff6" type="VALIDATION:ENV_REQUIRED, VALIDATION:APP_NOT_REGISTERED" >
-			<logger level="WARN" doc:name="LOG WARN mcp validation" doc:id="b5953cea-4fc8-4bb3-9733-0ff9d53c47ae" message="#[output application/java --- 'code=400 | errorType=' ++ error.errorType.identifier ++ ' | ' ++ (error.description default '')]" />
-			<ee:transform doc:name="DW 400 envelope" doc:id="1aea6c53-dff3-407d-90a2-fe1f771e2226" >
+
+		<!-- 400 USER_INPUT — environment missing/blank or not a real Anypoint environment. -->
+		<on-error-continue enableNotifications="true" logException="false" doc:name="Env Invalid" doc:id="46907169-1e89-4777-bb04-854e708bfff6" type="VALIDATION:ENV_REQUIRED, VALIDATION:ENV_NOT_FOUND" >
+			<logger level="WARN" doc:name="LOG WARN mcp env invalid" doc:id="b5953cea-4fc8-4bb3-9733-0ff9d53c47ae" message="#[output application/java --- 'code=400 | errorType=' ++ (error.errorType.identifier default '') ++ ' | ' ++ (error.description default '')]" />
+			<ee:transform doc:name="DW 400 env envelope" doc:id="1aea6c53-dff3-407d-90a2-fe1f771e2226" >
 				<ee:message >
 					<ee:set-payload ><![CDATA[%dw 2.0
 output application/json
 ---
-{ status: "ERROR", code: "400", message: error.description default "Bad request", correlationId: correlationId }]]></ee:set-payload>
+{ status: "ERROR", code: "400", errorType: (error.errorType.identifier default "ENV_INVALID"), category: "USER_INPUT", message: (error.description default "The environment value is missing or invalid."), invalidFields: ["environment"], retryable: false, correlationId: correlationId }]]></ee:set-payload>
 				</ee:message>
 			</ee:transform>
 		</on-error-continue>
+
+		<!-- 400 USER_INPUT — application could not be resolved to repo coordinates. -->
+		<on-error-continue enableNotifications="true" logException="false" doc:name="App Not Registered" doc:id="a1b2c3d4-9001-9001-9001-000000000001" type="VALIDATION:APP_NOT_REGISTERED" >
+			<logger level="WARN" doc:name="LOG WARN mcp app not registered" doc:id="a1b2c3d4-9001-9001-9001-000000000002" message="#[output application/java --- 'code=400 | APP_NOT_REGISTERED | ' ++ (error.description default '')]" />
+			<ee:transform doc:name="DW 400 app envelope" doc:id="a1b2c3d4-9001-9001-9001-000000000003" >
+				<ee:message >
+					<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+{ status: "ERROR", code: "400", errorType: "APP_NOT_REGISTERED", category: "USER_INPUT", message: (error.description default "The application could not be resolved to a repository. Verify the application name or supply owner/repo."), invalidFields: ["appName"], retryable: false, correlationId: correlationId }]]></ee:set-payload>
+				</ee:message>
+			</ee:transform>
+		</on-error-continue>
+
+		<!-- 404 NOT_FOUND — the app was resolved but does not exist on GitHub. -->
 		<on-error-continue enableNotifications="true" logException="false" doc:name="App Not Found" doc:id="ca5728a4-4184-4e00-8ae3-322d8594f0f8" type="VALIDATION:APP_NOT_FOUND" >
-			<logger level="WARN" doc:name="LOG WARN mcp app not found" doc:id="559e655f-d789-46f6-911f-f0f60ae4b3c7" message="#[output application/java --- 'code=404 | ' ++ (error.description default '')]" />
-			<ee:transform doc:name="DW 404 envelope" doc:id="05e20e37-2e49-4db3-98b2-7b34c3f7d798" >
+			<logger level="WARN" doc:name="LOG WARN mcp app not found" doc:id="559e655f-d789-46f6-911f-f0f60ae4b3c7" message="#[output application/java --- 'code=404 | APP_NOT_FOUND | ' ++ (error.description default '')]" />
+			<ee:transform doc:name="DW 404 app envelope" doc:id="05e20e37-2e49-4db3-98b2-7b34c3f7d798" >
 				<ee:message >
 					<ee:set-payload ><![CDATA[%dw 2.0
 output application/json
 ---
-{ status: "ERROR", code: "404", message: error.description default "Not found", correlationId: correlationId }]]></ee:set-payload>
+{ status: "ERROR", code: "404", errorType: "APP_NOT_FOUND", category: "NOT_FOUND", message: (error.description default "The application could not be found on GitHub. Verify the application name, owner/repo, or branch."), invalidFields: ["appName"], retryable: false, correlationId: correlationId }]]></ee:set-payload>
 				</ee:message>
 			</ee:transform>
 		</on-error-continue>
+
+		<!-- 404 NOT_FOUND — job id does not exist in the Object Store. -->
 		<on-error-continue enableNotifications="true" logException="false" doc:name="Job Not Found" doc:id="d03afa08-2247-429b-807f-21b7895cce04" type="OS:KEY_NOT_FOUND" >
 			<logger level="WARN" doc:name="LOG WARN mcp job not found" doc:id="0ba821b3-337e-4a06-ad40-5cf7a7eb1999" message="#[output application/java --- 'code=404 | jobId not found: ' ++ (vars.jobId default 'unknown')]" />
 			<ee:transform doc:name="DW 404 job envelope" doc:id="4d29ac92-db51-4293-9bbf-4756cc298418" >
@@ -290,29 +330,71 @@ output application/json
 					<ee:set-payload ><![CDATA[%dw 2.0
 output application/json
 ---
-{ status: "ERROR", code: "404", message: "Job not found: " ++ (vars.jobId default "unknown"), correlationId: correlationId }]]></ee:set-payload>
+{ status: "ERROR", code: "404", errorType: "JOB_NOT_FOUND", category: "NOT_FOUND", message: ("Job not found: " ++ (vars.jobId default "unknown") ++ ". Verify the jobId (format job-{uuid})."), invalidFields: ["jobId"], retryable: false, correlationId: correlationId }]]></ee:set-payload>
 				</ee:message>
 			</ee:transform>
 		</on-error-continue>
+
+		<!-- 409 CONFLICT — single-flight lock held or the change plan is stale. -->
 		<on-error-continue enableNotifications="true" logException="false" doc:name="Conflict" doc:id="3c269d39-1c14-491a-981a-d01d84071e58" type="CONFLICT:UPGRADE_IN_PROGRESS, CONFLICT:STALE_PLAN" >
-			<logger level="WARN" doc:name="LOG WARN mcp conflict" doc:id="1fba8ea1-0be6-4582-a963-70dc9a932a42" message="#[output application/java --- 'code=409 | errorType=' ++ error.errorType.identifier ++ ' | ' ++ (error.description default '')]" />
+			<logger level="WARN" doc:name="LOG WARN mcp conflict" doc:id="1fba8ea1-0be6-4582-a963-70dc9a932a42" message="#[output application/java --- 'code=409 | errorType=' ++ (error.errorType.identifier default '') ++ ' | ' ++ (error.description default '')]" />
 			<ee:transform doc:name="DW 409 envelope" doc:id="6f9e2944-b6fb-48f2-9b73-490745109222" >
 				<ee:message >
 					<ee:set-payload ><![CDATA[%dw 2.0
 output application/json
 ---
-{ status: "ERROR", code: "409", message: error.description default "Conflict", correlationId: correlationId }]]></ee:set-payload>
+{ status: "ERROR", code: "409", errorType: (error.errorType.identifier default "CONFLICT"), category: "CONFLICT", message: (error.description default "The request conflicts with the current state of the application."), retryable: false, correlationId: correlationId }]]></ee:set-payload>
 				</ee:message>
 			</ee:transform>
 		</on-error-continue>
-		<on-error-continue enableNotifications="true" logException="true" doc:name="Internal Error" doc:id="cb2bad38-b8ab-4da8-870a-8a0c309dea39" type="ANY" >
-			<logger level="ERROR" doc:name="LOG ERROR mcp internal" doc:id="6b1607bb-bd72-4563-ac33-c405519e7104" message="#[output application/java --- 'code=500 | errorType=' ++ (error.errorType.namespace default '') ++ ':' ++ (error.errorType.identifier default '') ++ ' | ' ++ (error.description default '')]" />
-			<ee:transform doc:name="DW 500 envelope" doc:id="0551f2a1-046e-4181-8cf5-ed63ebd0a259" >
+
+		<!--
+			Catch-all — classifies EVERY remaining error (expected or not) by its errorType
+			namespace/identifier: HTTP upstream failures, Object Store availability, DataWeave
+			parse/expression errors, timeouts, connectivity, and anything unforeseen. This single
+			branch avoids referencing connector-specific error types that may not be registered
+			(which would fail deployment), while still giving the LLM an actionable category and a
+			safe, sanitised message. Real internals are logged but NEVER returned to the caller.
+		-->
+		<on-error-continue enableNotifications="true" logException="true" doc:name="Classified Failure" doc:id="cb2bad38-b8ab-4da8-870a-8a0c309dea39" type="ANY" >
+			<logger level="ERROR" doc:name="LOG ERROR mcp classified" doc:id="6b1607bb-bd72-4563-ac33-c405519e7104" message="#[output application/java --- 'errorType=' ++ (error.errorType.namespace default '') ++ ':' ++ (error.errorType.identifier default '') ++ ' | ' ++ (error.description default '')]" />
+			<ee:transform doc:name="DW classified envelope" doc:id="0551f2a1-046e-4181-8cf5-ed63ebd0a259" >
 				<ee:message >
 					<ee:set-payload ><![CDATA[%dw 2.0
 output application/json
+var errNs = error.errorType.namespace default ""
+var errId = error.errorType.identifier default ""
+var httpTransient = ["TIMEOUT","CONNECTIVITY","RETRY_EXHAUSTED","SERVICE_UNAVAILABLE","INTERNAL_SERVER_ERROR","BAD_GATEWAY","GATEWAY_TIMEOUT"]
+var httpAuthLimit = ["UNAUTHORIZED","FORBIDDEN","TOO_MANY_REQUESTS"]
 ---
-{ status: "ERROR", code: "500", message: "An internal error occurred while executing the tool. Please contact support.", correlationId: correlationId }]]></ee:set-payload>
+if (errNs == "HTTP" and errId == "NOT_FOUND")
+    { status: "ERROR", code: "404", errorType: "UPSTREAM_NOT_FOUND", category: "NOT_FOUND",
+      message: "A required GitHub resource (repository, branch, or file path) was not found. Verify the application name, owner/repo, branch, and appPath.",
+      invalidFields: ["appName"], retryable: false, correlationId: correlationId }
+else if (errNs == "HTTP" and (httpAuthLimit contains errId))
+    { status: "ERROR", code: "502", errorType: "UPSTREAM_AUTH_OR_LIMIT", category: "SYSTEM",
+      message: "The upgrade service could not authenticate to an upstream system (GitHub/Anypoint) or hit an access/rate limit. This is a temporary platform-side issue; please try again shortly.",
+      retryable: true, correlationId: correlationId }
+else if (errNs == "HTTP" and (httpTransient contains errId))
+    { status: "ERROR", code: "504", errorType: "UPSTREAM_UNAVAILABLE", category: "SYSTEM",
+      message: "A temporary problem occurred contacting an upstream system (GitHub/Anypoint). Please try again shortly.",
+      retryable: true, correlationId: correlationId }
+else if (errNs == "HTTP")
+    { status: "ERROR", code: "502", errorType: "UPSTREAM_ERROR", category: "SYSTEM",
+      message: "An upstream system (GitHub/Anypoint) returned an unexpected response. Please try again shortly.",
+      retryable: true, correlationId: correlationId }
+else if (errNs == "OS")
+    { status: "ERROR", code: "503", errorType: "STORAGE_ERROR", category: "SYSTEM",
+      message: "A temporary storage problem occurred while processing the job. Please try again shortly.",
+      retryable: true, correlationId: correlationId }
+else if (errNs == "MULE" and (errId == "EXPRESSION" or errId == "TRANSFORMATION"))
+    { status: "ERROR", code: "422", errorType: "PROJECT_PARSE_ERROR", category: "SYSTEM",
+      message: "The application's project files (e.g. pom.xml) could not be parsed or had an unexpected structure, so the request could not be completed.",
+      retryable: false, correlationId: correlationId }
+else
+    { status: "ERROR", code: "500", errorType: (if (errId != "") errId else "INTERNAL"), category: "SYSTEM",
+      message: "An internal error occurred while executing the tool. Please contact support.",
+      retryable: false, correlationId: correlationId }]]></ee:set-payload>
 				</ee:message>
 			</ee:transform>
 		</on-error-continue>
