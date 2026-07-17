@@ -57,16 +57,23 @@ var pom = &quot;&lt;project xmlns='http://maven.apache.org/POM/4.0.0'&gt;&lt;mod
                     </munit-tools:variables>
                 </munit-tools:then-return>
             </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock OS store" processor="os:store">
+                <munit-tools:then-return><munit-tools:payload mediaType="application/java" value="#[null]" /></munit-tools:then-return>
+            </munit-tools:mock-when>
         </munit:behavior>
         <munit:execution>
             <set-variable variableName="owner" value="po" doc:name="PV owner" />
             <set-variable variableName="repo" value="pr" doc:name="PV repo" />
             <set-variable variableName="branch" value="main" doc:name="PV branch" />
+            <set-variable variableName="jiraTicketId" value="J1U-9" doc:name="PV jiraTicketId" />
             <flow-ref name="pf-upgrade-parent-pom" doc:name="invoke pf-upgrade-parent-pom" />
         </munit:execution>
         <munit:validation>
             <munit-tools:assert-that doc:name="not upgraded" expression="#[payload.upgraded]" is="#[MunitTools::equalTo(false)]" />
             <munit-tools:assert-that doc:name="no edits" expression="#[sizeOf(payload.edits default [])]" is="#[MunitTools::equalTo(0)]" />
+            <munit-tools:assert-that doc:name="jobId returned" expression="#[payload.jobId]" is="#[MunitTools::notNullValue()]" />
+            <munit-tools:assert-that doc:name="status NO_CHANGE" expression="#[payload.status]" is="#[MunitTools::equalTo('NO_CHANGE')]" />
+            <munit-tools:assert-that doc:name="jiraUrl built" expression="#[payload.jiraUrl endsWith '/browse/J1U-9']" is="#[MunitTools::equalTo(true)]" />
         </munit:validation>
     </munit:test>
 
@@ -107,6 +114,9 @@ var pom = &quot;&lt;project xmlns='http://maven.apache.org/POM/4.0.0'&gt;&lt;mod
                     </munit-tools:variables>
                 </munit-tools:then-return>
             </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock OS store" processor="os:store">
+                <munit-tools:then-return><munit-tools:payload mediaType="application/java" value="#[null]" /></munit-tools:then-return>
+            </munit-tools:mock-when>
         </munit:behavior>
         <munit:execution>
             <set-payload value="#[{ owner: 'po', repo: 'pr', branch: 'main' }]" doc:name="PV payload (body)" />
@@ -114,6 +124,8 @@ var pom = &quot;&lt;project xmlns='http://maven.apache.org/POM/4.0.0'&gt;&lt;mod
         </munit:execution>
         <munit:validation>
             <munit-tools:assert-that doc:name="not upgraded" expression="#[payload.upgraded]" is="#[MunitTools::equalTo(false)]" />
+            <munit-tools:assert-that doc:name="jobId returned" expression="#[payload.jobId]" is="#[MunitTools::notNullValue()]" />
+            <munit-tools:assert-that doc:name="status NO_CHANGE" expression="#[payload.status]" is="#[MunitTools::equalTo('NO_CHANGE')]" />
         </munit:validation>
     </munit:test>
 
@@ -154,6 +166,9 @@ var pom = &quot;&lt;project xmlns='http://maven.apache.org/POM/4.0.0'&gt;&lt;mod
                     </munit-tools:variables>
                 </munit-tools:then-return>
             </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock OS store" processor="os:store">
+                <munit-tools:then-return><munit-tools:payload mediaType="application/java" value="#[null]" /></munit-tools:then-return>
+            </munit-tools:mock-when>
         </munit:behavior>
         <munit:execution>
             <set-payload value="#[{ owner: 'po', repo: 'pr', branch: 'main' }]" doc:name="PV payload (tool params)" />
@@ -161,6 +176,8 @@ var pom = &quot;&lt;project xmlns='http://maven.apache.org/POM/4.0.0'&gt;&lt;mod
         </munit:execution>
         <munit:validation>
             <munit-tools:assert-that doc:name="not upgraded" expression="#[payload.upgraded]" is="#[MunitTools::equalTo(false)]" />
+            <munit-tools:assert-that doc:name="jobId returned" expression="#[payload.jobId]" is="#[MunitTools::notNullValue()]" />
+            <munit-tools:assert-that doc:name="status NO_CHANGE" expression="#[payload.status]" is="#[MunitTools::equalTo('NO_CHANGE')]" />
         </munit:validation>
     </munit:test>
 
@@ -239,6 +256,9 @@ var pom = &quot;&lt;project xmlns='http://maven.apache.org/POM/4.0.0'&gt;&lt;mod
         <munit:validation>
             <munit-tools:assert-that doc:name="upgraded true" expression="#[payload.upgraded]" is="#[MunitTools::equalTo(true)]" />
             <munit-tools:assert-that doc:name="one edit" expression="#[sizeOf(payload.edits default [])]" is="#[MunitTools::greaterThan(0)]" />
+            <munit-tools:assert-that doc:name="jobId returned" expression="#[payload.jobId]" is="#[MunitTools::notNullValue()]" />
+            <munit-tools:assert-that doc:name="status PR_OPEN" expression="#[payload.status]" is="#[MunitTools::equalTo('PR_OPEN')]" />
+            <munit-tools:assert-that doc:name="prUrl returned" expression="#[payload.prUrl]" is="#[MunitTools::equalTo('https://github.com/po/pr/pull/12')]" />
         </munit:validation>
     </munit:test>
 

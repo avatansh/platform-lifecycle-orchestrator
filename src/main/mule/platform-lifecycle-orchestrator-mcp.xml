@@ -106,13 +106,14 @@
 
         <logger level="INFO" doc:name="LOG INFO Request Received" doc:id="a8d9977f-5d56-4505-ae43-6206eccc2153" message="#[output application/java --- 'REQUEST RECEIVED | transport=mcp | tool=assess_app']" />
         <!-- MCP-only: reject a non-existent environment before doing any work (REST is unaffected). -->
-        <flow-ref name="pf-mcp-validate-env" doc:name="pf-mcp-validate-env" doc:id="mc1a0001-0001-0001-0001-00000000000b" />
+		<flow-ref name="pf-mcp-validate-env" doc:name="pf-mcp-validate-env" doc:id="mc1a0001-0001-0001-0001-00000000000b" />
+		<logger level="DEBUG" doc:name="LOG DEBUG Request" doc:id="67c13b83-db91-4fa9-aef2-238d1fec08bc" message="#[output application/java --- 'REQUEST | Payload: ' ++ write(payload, &quot;application/json&quot;, {&quot;indent&quot;: false})]" />
 		<flow-ref name="pf-assess-app"
                   doc:name="pf-assess-app"
                   doc:id="mc1a0001-0001-0001-0001-000000000006" />
-        <logger level="INFO" doc:name="LOG INFO Response Sent" doc:id="f6e21855-0bd9-4216-88cf-1797d9a3ee97" message="#[output application/java --- 'RESPONSE SENT | status=' ++ ((vars.httpStatus default 200) as String)]" />
-
-        <error-handler ref="mcp-error-handler" doc:name="MCP Error Handler" doc:id="mc1a0001-0001-0001-0001-000000000009" />
+        <logger level="DEBUG" doc:name="LOG DEBUG Response" doc:id="113c7c5a-efb5-4d1d-86ea-f414263ee5f3" message="#[output application/java --- 'RESPONSE | Payload: ' ++ write(payload, &quot;application/json&quot;, {&quot;indent&quot;: false})]" />
+		<logger level="INFO" doc:name="LOG INFO Response Sent" doc:id="f6e21855-0bd9-4216-88cf-1797d9a3ee97" message="#[output application/java --- 'RESPONSE SENT | status=' ++ ((vars.httpStatus default 200) as String)]" />
+		<error-handler ref="mcp-error-handler" doc:name="MCP Error Handler" doc:id="mc1a0001-0001-0001-0001-000000000009" />
 
     </flow>
 
@@ -207,15 +208,16 @@
         <logger level="INFO" doc:name="LOG INFO Request Received" doc:id="mc2b0002-0002-0002-0002-000000000005" message="#[output application/java --- 'REQUEST RECEIVED | transport=mcp | tool=start_upgrade']" />
 
         <!-- MCP-only: reject a non-existent environment before doing any work (REST is unaffected). -->
-        <flow-ref name="pf-mcp-validate-env" doc:name="pf-mcp-validate-env" doc:id="mc2b0002-0002-0002-0002-00000000000b" />
+		<flow-ref name="pf-mcp-validate-env" doc:name="pf-mcp-validate-env" doc:id="mc2b0002-0002-0002-0002-00000000000b" />
 
-        <flow-ref name="pf-start-upgrade"
+        <logger level="DEBUG" doc:name="LOG DEBUG Request" doc:id="61af775b-0580-4002-b33e-237a24044736" message="#[output application/java --- 'REQUEST | Payload: ' ++ write(payload, &quot;application/json&quot;, {&quot;indent&quot;: false})]" />
+		<flow-ref name="pf-start-upgrade"
                   doc:name="pf-start-upgrade"
                   doc:id="mc2b0002-0002-0002-0002-000000000007" />
 
-        <logger level="INFO" doc:name="LOG INFO Response Sent" doc:id="mc2b0002-0002-0002-0002-000000000008" message="#[output application/java --- 'RESPONSE SENT | status=' ++ ((vars.httpStatus default 200) as String)]" />
-
-        <error-handler ref="mcp-error-handler" doc:name="MCP Error Handler" doc:id="mc2b0002-0002-0002-0002-000000000009" />
+        <logger level="DEBUG" doc:name="LOG DEBUG Response" doc:id="878cdba4-b384-4eaa-9e24-fa0ef362e98d" message="#[output application/java --- 'RESPONSE | Payload: ' ++ write(payload, &quot;application/json&quot;, {&quot;indent&quot;: false})]" />
+		<logger level="INFO" doc:name="LOG INFO Response Sent" doc:id="mc2b0002-0002-0002-0002-000000000008" message="#[output application/java --- 'RESPONSE SENT | status=' ++ ((vars.httpStatus default 200) as String)]" />
+		<error-handler ref="mcp-error-handler" doc:name="MCP Error Handler" doc:id="mc2b0002-0002-0002-0002-000000000009" />
 
     </flow>
 
@@ -272,13 +274,14 @@
 
         <logger level="INFO" doc:name="LOG INFO Request Received" doc:id="mc3c0003-0003-0003-0003-000000000005" message="#[output application/java --- 'REQUEST RECEIVED | transport=mcp | tool=get_job_status']" />
 
-        <flow-ref name="pf-get-job-status"
+        <logger level="DEBUG" doc:name="LOG DEBUG Request" doc:id="569537e7-00bd-4f14-9a15-69e9b6642ee7" message="#[output application/java --- 'REQUEST | Payload: ' ++ write(payload, &quot;application/json&quot;, {&quot;indent&quot;: false})]" />
+		<flow-ref name="pf-get-job-status"
                   doc:name="pf-get-job-status"
                   doc:id="mc3c0003-0003-0003-0003-000000000004" />
 
-        <logger level="INFO" doc:name="LOG INFO Response Sent" doc:id="mc3c0003-0003-0003-0003-000000000006" message="#[output application/java --- 'RESPONSE SENT | status=' ++ ((vars.httpStatus default 200) as String)]" />
-
-        <error-handler ref="mcp-error-handler" doc:name="MCP Error Handler" doc:id="mc3c0003-0003-0003-0003-000000000007" />
+        <logger level="DEBUG" doc:name="LOG DEBUG Response" doc:id="ef2e079c-a070-4331-8e55-b03495426f98" message="#[output application/java --- 'RESPONSE | Payload: ' ++ write(payload, &quot;application/json&quot;, {&quot;indent&quot;: false})]" />
+		<logger level="INFO" doc:name="LOG INFO Response Sent" doc:id="mc3c0003-0003-0003-0003-000000000006" message="#[output application/java --- 'RESPONSE SENT | status=' ++ ((vars.httpStatus default 200) as String)]" />
+		<error-handler ref="mcp-error-handler" doc:name="MCP Error Handler" doc:id="mc3c0003-0003-0003-0003-000000000007" />
 
     </flow>
 
@@ -328,13 +331,14 @@
 
         <logger level="INFO" doc:name="LOG INFO Request Received" doc:id="mc4d0004-0004-0004-0004-000000000005" message="#[output application/java --- 'REQUEST RECEIVED | transport=mcp | tool=reapply_job']" />
 
-        <flow-ref name="pf-reapply-job"
+        <logger level="DEBUG" doc:name="LOG DEBUG Request" doc:id="31490c32-6bf7-4e1a-9f86-9000756f70f5" message="#[output application/java --- 'REQUEST | Payload: ' ++ write(payload, &quot;application/json&quot;, {&quot;indent&quot;: false})]" />
+		<flow-ref name="pf-reapply-job"
                   doc:name="pf-reapply-job"
                   doc:id="mc4d0004-0004-0004-0004-000000000006" />
 
-        <logger level="INFO" doc:name="LOG INFO Response Sent" doc:id="mc4d0004-0004-0004-0004-000000000007" message="#[output application/java --- 'RESPONSE SENT | status=' ++ ((vars.httpStatus default 200) as String)]" />
-
-        <error-handler ref="mcp-error-handler" doc:name="MCP Error Handler" doc:id="mc4d0004-0004-0004-0004-000000000008" />
+        <logger level="DEBUG" doc:name="LOG DEBUG Response" doc:id="1094c1ca-98b4-4a28-8340-997573ea5423" message="#[output application/java --- 'RESPONSE | Payload: ' ++ write(payload, &quot;application/json&quot;, {&quot;indent&quot;: false})]" />
+		<logger level="INFO" doc:name="LOG INFO Response Sent" doc:id="mc4d0004-0004-0004-0004-000000000007" message="#[output application/java --- 'RESPONSE SENT | status=' ++ ((vars.httpStatus default 200) as String)]" />
+		<error-handler ref="mcp-error-handler" doc:name="MCP Error Handler" doc:id="mc4d0004-0004-0004-0004-000000000008" />
 
     </flow>
 
@@ -384,13 +388,14 @@
 
         <logger level="INFO" doc:name="LOG INFO Request Received" doc:id="mc5e0005-0005-0005-0005-000000000005" message="#[output application/java --- 'REQUEST RECEIVED | transport=mcp | tool=delete_job']" />
 
-        <flow-ref name="pf-delete-job"
+        <logger level="DEBUG" doc:name="LOG DEBUG Request" doc:id="510a743f-3947-49b8-94c2-58ce50ac2814" message="#[output application/java --- 'REQUEST | Payload: ' ++ write(payload, &quot;application/json&quot;, {&quot;indent&quot;: false})]" />
+		<flow-ref name="pf-delete-job"
                   doc:name="pf-delete-job"
                   doc:id="mc5e0005-0005-0005-0005-000000000006" />
 
-        <logger level="INFO" doc:name="LOG INFO Response Sent" doc:id="mc5e0005-0005-0005-0005-000000000007" message="#[output application/java --- 'RESPONSE SENT | status=' ++ ((vars.httpStatus default 200) as String)]" />
-
-        <error-handler ref="mcp-error-handler" doc:name="MCP Error Handler" doc:id="mc5e0005-0005-0005-0005-000000000008" />
+        <logger level="DEBUG" doc:name="LOG DEBUG Response" doc:id="59b7e968-5308-4fe7-8010-96680a5ba5c9" message="#[output application/java --- 'RESPONSE | Payload: ' ++ write(payload, &quot;application/json&quot;, {&quot;indent&quot;: false})]" />
+		<logger level="INFO" doc:name="LOG INFO Response Sent" doc:id="mc5e0005-0005-0005-0005-000000000007" message="#[output application/java --- 'RESPONSE SENT | status=' ++ ((vars.httpStatus default 200) as String)]" />
+		<error-handler ref="mcp-error-handler" doc:name="MCP Error Handler" doc:id="mc5e0005-0005-0005-0005-000000000008" />
 
     </flow>
 
@@ -412,7 +417,9 @@
                 from a parent/BOM (assess only pins connectors already versioned in the app pom; the rest
                 must be fixed here at the source). Only connectors the parent already MANAGES are touched —
                 none are invented. Provide repoUrl OR owner+repo; pomPath defaults to "pom.xml" and branch
-                defaults to the repo's default branch. Returns { upgraded, prUrl, prNumber, branchName, edits }.
+                defaults to the repo's default branch. Returns { jobId, status, upgraded, prUrl, prNumber,
+                branchName, jiraTicketId, jiraUrl, edits }. Track progress with get_job_status(jobId):
+                status is PR_OPEN when a PR was opened, or NO_CHANGE when the pom already met the matrix.
             </mcp:description>
             <mcp:parameters-schema><![CDATA[{
   "type": "object",
@@ -471,13 +478,14 @@
 
         <logger level="INFO" doc:name="LOG INFO Request Received" doc:id="mc6f0006-0006-0006-0006-000000000005" message="#[output application/java --- 'REQUEST RECEIVED | transport=mcp | tool=upgrade_parent_pom']" />
 
-        <flow-ref name="pf-upgrade-parent-pom"
+        <logger level="DEBUG" doc:name="LOG DEBUG Request" doc:id="2873c9c1-f226-4fc6-9d62-6020c03b2c42" message="#[output application/java --- 'REQUEST | Payload: ' ++ write(payload, &quot;application/json&quot;, {&quot;indent&quot;: false})]" />
+		<flow-ref name="pf-upgrade-parent-pom"
                   doc:name="pf-upgrade-parent-pom"
                   doc:id="mc6f0006-0006-0006-0006-000000000006" />
 
-        <logger level="INFO" doc:name="LOG INFO Response Sent" doc:id="mc6f0006-0006-0006-0006-000000000007" message="#[output application/java --- 'RESPONSE SENT | status=' ++ ((vars.httpStatus default 200) as String)]" />
-
-        <error-handler ref="mcp-error-handler" doc:name="MCP Error Handler" doc:id="mc6f0006-0006-0006-0006-000000000008" />
+        <logger level="DEBUG" doc:name="LOG DEBUG Response" doc:id="548dccbb-5007-484d-b0f1-767fb40e498f" message="#[output application/java --- 'RESPONSE | Payload: ' ++ write(payload, &quot;application/json&quot;, {&quot;indent&quot;: false})]" />
+		<logger level="INFO" doc:name="LOG INFO Response Sent" doc:id="mc6f0006-0006-0006-0006-000000000007" message="#[output application/java --- 'RESPONSE SENT | status=' ++ ((vars.httpStatus default 200) as String)]" />
+		<error-handler ref="mcp-error-handler" doc:name="MCP Error Handler" doc:id="mc6f0006-0006-0006-0006-000000000008" />
 
     </flow>
 
@@ -505,7 +513,8 @@
     <sub-flow name="pf-mcp-validate-env" doc:id="mcev0007-0007-0007-0007-000000000001">
         <logger level="INFO" doc:name="LOG INFO START pf-mcp-validate-env" doc:id="mcev0007-0007-0007-0007-000000000002"
                 message="#[output application/java --- 'START - pf-mcp-validate-env | env=' ++ (vars.environment default '(none)')]" />
-        <try doc:name="TRY validate env (best-effort)" doc:id="mcev0007-0007-0007-0007-000000000003">
+        <logger level="DEBUG" doc:name="LOG DEBUG Request" doc:id="1640a6a8-2848-4299-9d81-0d20a24eb328" message="#[output application/java --- 'REQUEST | Payload: ' ++ write(payload, &quot;application/json&quot;, {&quot;indent&quot;: false})]" />
+		<try doc:name="TRY validate env (best-effort)" doc:id="mcev0007-0007-0007-0007-000000000003">
             <set-variable variableName="vfyOrgId"
                           value="#[output application/java --- ((vars.requestBody.orgId default p('anypoint.defaultOrgId')) default '') as String]"
                           doc:name="PV SET vfyOrgId" doc:id="mcev0007-0007-0007-0007-000000000004" />
@@ -537,7 +546,8 @@
             <error-handler>
                 <!-- Our own validation error must propagate to the tool's mcp-error-handler. -->
                 <on-error-propagate type="VALIDATION:ENV_NOT_FOUND" enableNotifications="false" logException="false"
-                                    doc:name="propagate ENV_NOT_FOUND" doc:id="mcev0007-0007-0007-0007-00000000000f" />
+                                    doc:name="propagate ENV_NOT_FOUND" doc:id="mcev0007-0007-0007-0007-00000000000f" >
+				</on-error-propagate>
                 <!-- Any lookup failure (auth/timeout/connectivity/etc.) → skip the check, do not block. -->
                 <on-error-continue type="ANY" enableNotifications="false" logException="false"
                                    doc:name="skip on lookup failure" doc:id="mcev0007-0007-0007-0007-000000000010">
@@ -546,7 +556,8 @@
                 </on-error-continue>
             </error-handler>
         </try>
-        <logger level="INFO" doc:name="LOG INFO END pf-mcp-validate-env" doc:id="mcev0007-0007-0007-0007-000000000012"
+		<logger level="DEBUG" doc:name="LOG DEBUG Response" doc:id="286edfe6-b553-4304-94ae-f0160b150803" message="#[output application/java --- 'RESPONSE | Payload: ' ++ write(payload, &quot;application/json&quot;, {&quot;indent&quot;: false})]" />
+		<logger level="INFO" doc:name="LOG INFO END pf-mcp-validate-env" doc:id="mcev0007-0007-0007-0007-000000000012"
                 message="#[output application/java --- 'END - pf-mcp-validate-env']" />
     </sub-flow>
 

@@ -332,6 +332,15 @@ types:
   ParentPomUpgradeResult:
     type: object
     properties:
+      jobId:
+        type: string
+        description: |
+          Tracking id for this parent/BOM upgrade run. Poll GET /jobs/{jobId} to follow its
+          status (PR_OPEN when a PR was opened, NO_CHANGE when the pom already met the matrix).
+      status:
+        type: string
+        description: Current job status — PR_OPEN when a PR was opened, NO_CHANGE when nothing changed.
+        enum: [PR_OPEN, NO_CHANGE]
       upgraded:
         type: boolean
         description: True when connector version edits were applied and a PR was opened.
@@ -347,6 +356,14 @@ types:
       prNumber:
         type: integer
         required: false
+      jiraTicketId:
+        type: string
+        required: false
+        description: The linked Jira ticket, when one was supplied on the request.
+      jiraUrl:
+        type: string
+        required: false
+        description: Clickable Jira link, built when a jiraTicketId was supplied.
       edits:
         type: FileEdit[]
         required: false

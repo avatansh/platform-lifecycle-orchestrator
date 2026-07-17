@@ -94,6 +94,9 @@ output application/java
             </when>
         </choice>
 
+        <!-- appName (= repo) is needed for the trackable job record in BOTH branches below. -->
+        <set-variable variableName="appName" value="#[vars.repoCoords.repo as String]" doc:name="PV SET appName (repo)" doc:id="b1c2d3e4-0009-0009-0009-0000000000a1" />
+
         <flow-ref name="pf-load-matrix" doc:name="pf-load-matrix" doc:id="b1c2d3e4-0009-0009-0009-000000000018" />
 
         <!-- Resolve base branch: explicit vars.branch, else a branch parsed from the URL, else the repo's default branch. -->
@@ -143,16 +146,43 @@ rewriteParentPom((vars.pomText as String), vars.matrix, (vars.pomPath as String)
         <choice doc:name="CHOICE any edits?" doc:id="b1c2d3e4-0009-0009-0009-000000000025">
             <when expression="#[isEmpty(vars.rewrite.edits default [])]">
                 <logger level="INFO" doc:name="LOG INFO already compliant" doc:id="b1c2d3e4-0009-0009-0009-000000000026" message="#[output application/java --- 'parent-pom already meets matrix | ' ++ (vars.repoCoords.owner default '?') ++ '/' ++ (vars.repoCoords.repo default '?') ++ ':' ++ (vars.pomPath default '?')]" />
+                <!-- Persist a terminal, trackable job record so GET /jobs/{jobId} resolves this no-op run. -->
+                <ee:transform doc:name="DW Build parent-pom job record (no change)" doc:id="b1c2d3e4-0009-0009-0009-0000000000c1">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+import nowUtc from dwl::dates
+---
+{
+    jobId:        vars.jobId,
+    kind:         "parentPomUpgrade",
+    status:       "NO_CHANGE",
+    appName:      vars.appName,
+    environment:  vars.environment,
+    jiraTicketId: vars.jiraTicketId,
+    pomPath:      vars.pomPath,
+    coords:       { owner: vars.repoCoords.owner, repo: vars.repoCoords.repo, defaultBranch: vars.defaultBranch },
+    createdAt:    nowUtc(),
+    updatedAt:    nowUtc(),
+    completedAt:  nowUtc()
+}]]></ee:set-payload>
+                    </ee:message>
+                </ee:transform>
+                <os:store doc:name="OS Store parent-pom job (no change)" doc:id="b1c2d3e4-0009-0009-0009-0000000000c2" key="#[vars.jobId]" objectStore="jobStore" />
                 <ee:transform doc:name="DW Build 200 result (no change)" doc:id="b1c2d3e4-0009-0009-0009-000000000027">
                     <ee:message>
                         <ee:set-payload><![CDATA[%dw 2.0
 output application/json
 ---
 {
-    upgraded: false,
-    pomPath:  vars.pomPath,
-    edits:    [],
-    message:  ("Parent/BOM already meets the Java 17 matrix; nothing to change in " ++ (vars.pomPath as String))
+    jobId:        vars.jobId,
+    status:       "NO_CHANGE",
+    upgraded:     false,
+    pomPath:      vars.pomPath,
+    edits:        [],
+    jiraTicketId: vars.jiraTicketId,
+    jiraUrl:      (if ((vars.jiraTicketId default null) != null and (p('jira.baseUrl') default '') != '') ((p('jira.baseUrl') as String) ++ "/browse/" ++ (vars.jiraTicketId as String)) else null),
+    message:      ("Parent/BOM already meets the Java 17 matrix; nothing to change in " ++ (vars.pomPath as String))
 }]]></ee:set-payload>
                     </ee:message>
                     <ee:variables>
@@ -187,8 +217,34 @@ output application/java
               ++ ((vars.rewrite.edits default []) map ((e) -> ((e.artifactId default '?') as String) ++ " " ++ ((e.from default 'unknown') as String) ++ " -> " ++ ((e.to default '?') as String)) joinBy "; ")) ] }]]></ee:set-variable>
                     </ee:variables>
                 </ee:transform>
+                <!-- Seed a trackable job record BEFORE committing. pf-atomic-commit and pf-open-pr
+                     merge branch/commit/PR details onto this record, so GET /jobs/{jobId} works. -->
+                <ee:transform doc:name="DW Build parent-pom job record" doc:id="b1c2d3e4-0009-0009-0009-0000000000d1">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+import nowUtc from dwl::dates
+---
+{
+    jobId:        vars.jobId,
+    kind:         "parentPomUpgrade",
+    status:       "PROCESSING",
+    appName:      vars.appName,
+    environment:  vars.environment,
+    jiraTicketId: vars.jiraTicketId,
+    pomPath:      vars.pomPath,
+    coords:       vars.coords,
+    createdAt:    nowUtc(),
+    updatedAt:    nowUtc()
+}]]></ee:set-payload>
+                    </ee:message>
+                </ee:transform>
+                <os:store doc:name="OS Store parent-pom job record" doc:id="b1c2d3e4-0009-0009-0009-0000000000d2" key="#[vars.jobId]" objectStore="jobStore" />
                 <flow-ref name="pf-atomic-commit" doc:name="pf-atomic-commit" doc:id="b1c2d3e4-0009-0009-0009-000000000029" />
                 <flow-ref name="pf-open-pr" doc:name="pf-open-pr" doc:id="b1c2d3e4-0009-0009-0009-00000000002a" />
+                <!-- Mark PR_OPEN so the job status endpoint reports the parent/BOM PR is ready. -->
+                <set-variable variableName="targetStatus" value="PR_OPEN" doc:name="PV SET targetStatus=PR_OPEN" doc:id="b1c2d3e4-0009-0009-0009-0000000000d3" />
+                <flow-ref name="pf-set-status" doc:name="pf-set-status (PR_OPEN)" doc:id="b1c2d3e4-0009-0009-0009-0000000000d4" />
                 <flow-ref name="pf-notify" doc:name="pf-notify" doc:id="b1c2d3e4-0009-0009-0009-00000000002b" />
                 <ee:transform doc:name="DW Build 202 result" doc:id="b1c2d3e4-0009-0009-0009-00000000002c">
                     <ee:message>
@@ -196,13 +252,17 @@ output application/java
 output application/json
 ---
 {
-    upgraded:   true,
-    pomPath:    vars.pomPath,
-    branchName: vars.branchName,
-    prUrl:      vars.prUrl,
-    prNumber:   vars.prNumber,
-    edits:      (vars.rewrite.edits default []),
-    message:    ("Opened PR pinning " ++ sizeOf(vars.rewrite.edits default []) ++ " connector(s) in " ++ (vars.pomPath as String))
+    jobId:        vars.jobId,
+    status:       "PR_OPEN",
+    upgraded:     true,
+    pomPath:      vars.pomPath,
+    branchName:   vars.branchName,
+    prUrl:        vars.prUrl,
+    prNumber:     vars.prNumber,
+    jiraTicketId: vars.jiraTicketId,
+    jiraUrl:      (if ((vars.jiraTicketId default null) != null and (p('jira.baseUrl') default '') != '') ((p('jira.baseUrl') as String) ++ "/browse/" ++ (vars.jiraTicketId as String)) else null),
+    edits:        (vars.rewrite.edits default []),
+    message:      ("Opened PR pinning " ++ sizeOf(vars.rewrite.edits default []) ++ " connector(s) in " ++ (vars.pomPath as String))
 }]]></ee:set-payload>
                     </ee:message>
                     <ee:variables>

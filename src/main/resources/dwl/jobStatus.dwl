@@ -14,6 +14,7 @@ var statusMeta = {
     COMMITTING:    { message: "Applying transforms and committing changes to a branch.",    nextPollSeconds: 5  },
     COMMITTED:     { message: "Changes committed; opening a pull request.",                 nextPollSeconds: 5  },
     PR_OPEN:       { message: "Pull request is open and ready for review/merge.",           nextPollSeconds: 0  },
+    NO_CHANGE:     { message: "No changes required — the target already meets the Java 17 matrix.", nextPollSeconds: 0 },
     MUNIT_FAILED:  { message: "MUnit tests failed in CI. Paused for human action — fix the tests; the job resumes automatically when CI reports a test success.", nextPollSeconds: 300 },
     DEPLOYING:     { message: "PR merged; CI/CD is building and deploying.",                nextPollSeconds: 10 },
     DEPLOYED:      { message: "Upgrade deployed successfully.",                             nextPollSeconds: 0  },
