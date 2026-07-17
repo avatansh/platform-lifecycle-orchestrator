@@ -55,6 +55,7 @@ http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/cu
             <ee:variables>
                 <ee:set-variable variableName="repoCoords"><![CDATA[%dw 2.0
 output application/java
+import drop from dw::core::Arrays
 ---
 if ((vars.owner default '') != '' and (vars.repo default '') != '')
     { owner: (vars.owner as String), repo: (vars.repo as String), urlBranch: null, urlPomPath: null }
@@ -64,19 +65,22 @@ else do {
     var noProto = clean replace /^[A-Za-z]+:\/\// with ""
     var segs0   = (noProto splitBy "/") filter ((s) -> s != "")
     // If the first segment looks like a host (contains a dot, e.g. github.com), drop it.
-    var segs    = if ((segs0[0] default '') contains ".") (segs0[1 to -1] default []) else segs0
+    // NOTE: use `drop` (not the range selector segs0[1 to -1]) — the range form is ambiguous and
+    // was silently collapsing the tail (…/tree/<branch>/<dir>), leaving only owner/repo.
+    var segs    = if ((segs0[0] default '') contains ".") (segs0 drop 1) else segs0
     var owner   = segs[0] default ''
     var repo    = segs[1] default ''
     // A GitHub web URL may embed the branch + sub-path: /<owner>/<repo>/tree|blob/<branch>/<sub-path...>
     var marker    = segs[2] default ''
     var isTree    = marker == "tree" or marker == "blob"
     var urlBranch = if (isTree) (segs[3] default null) else null
-    var rest      = if (isTree and sizeOf(segs) > 4) (segs[4 to -1]) else []
+    // Everything after /<owner>/<repo>/<tree|blob>/<branch> is the sub-path to the pom (dir or file).
+    var rest      = if (isTree) (segs drop 4) else []
     var restStr   = rest joinBy "/"
     var lastSeg   = rest[-1] default ''
     // A trailing file (has a dot) is the pom path itself; a directory implies <dir>/pom.xml.
     var urlPomPath =
-        if (restStr == '') null
+        if (isEmpty(restStr)) null
         else if (lastSeg contains ".") restStr
         else (restStr ++ "/pom.xml")
     --- { owner: owner, repo: repo, urlBranch: urlBranch, urlPomPath: urlPomPath }
@@ -110,6 +114,10 @@ output application/java
             </otherwise>
         </choice>
 
+        <!-- Diagnostic: confirm exactly what was resolved from repoUrl/owner+repo so a mis-parse
+             (e.g. reading the root pom.xml instead of a sub-path) is obvious in the logs. -->
+        <logger level="INFO" doc:name="LOG INFO resolved coordinates" doc:id="b1c2d3e4-0009-0009-0009-0000000000e1" message="#[output application/java --- 'parent-pom resolved | owner=' ++ (vars.repoCoords.owner default '?') ++ ' repo=' ++ (vars.repoCoords.repo default '?') ++ ' branch=' ++ (vars.defaultBranch default '?') ++ ' pomPath=' ++ (vars.pomPath default '?') ++ ' | fromRepoUrl=' ++ (vars.repoUrl default '(none)')]" />
+
         <!-- Pin the plan to the current HEAD of the base branch (pf-atomic-commit stale-plan check). -->
         <http:request doc:name="GET base branch HEAD commit" doc:id="b1c2d3e4-0009-0009-0009-00000000001d" config-ref="GitHub_Request" path="#['/repos/' ++ vars.repoCoords.owner ++ '/' ++ vars.repoCoords.repo ++ '/commits/' ++ vars.defaultBranch]" outputMimeType="application/json" target="headCommit" />
         <set-variable variableName="headSha" value="#[(vars.headCommit.sha as String)]" doc:name="PV SET headSha" doc:id="b1c2d3e4-0009-0009-0009-00000000001e" />
@@ -124,6 +132,12 @@ output application/java
                 <raise-error type="VALIDATION:APP_NOT_REGISTERED" doc:name="RAISE VALIDATION (pom empty)" doc:id="b1c2d3e4-0009-0009-0009-000000000022" description="#[output application/java --- 'The pom.xml at &quot;' ++ (vars.pomPath default '?') ++ '&quot; in ' ++ (vars.repoCoords.owner default '?') ++ '/' ++ (vars.repoCoords.repo default '?') ++ ' could not be read (path may be a directory, empty, or too large). Verify pomPath.']" />
             </when>
         </choice>
+
+        <!-- Parity with the app upgrade path: when the request carries no jiraTicketId, auto-create a
+             migration ticket (self-guarding on jira.autoCreate). Runs before the job record is stored
+             so vars.jiraTicketId is populated in BOTH the NO_CHANGE and PR_OPEN records/responses. -->
+        <flow-ref name="pf-jira-create-issue" doc:name="pf-jira-create-issue" doc:id="b1c2d3e4-0009-0009-0009-0000000000e2" />
+
         <ee:transform doc:name="DW Decode + rewrite parent pom" doc:id="b1c2d3e4-0009-0009-0009-000000000023">
             <ee:variables>
                 <ee:set-variable variableName="pomText"><![CDATA[%dw 2.0
@@ -169,6 +183,8 @@ import nowUtc from dwl::dates
                     </ee:message>
                 </ee:transform>
                 <os:store doc:name="OS Store parent-pom job (no change)" doc:id="b1c2d3e4-0009-0009-0009-0000000000c2" key="#[vars.jobId]" objectStore="jobStore" />
+                <!-- Notify on the no-change outcome too, so the parent-pom path always sends Slack + Jira. -->
+                <flow-ref name="pf-notify-parentpom-nochange" doc:name="pf-notify-parentpom-nochange" doc:id="b1c2d3e4-0009-0009-0009-0000000000c3" />
                 <ee:transform doc:name="DW Build 200 result (no change)" doc:id="b1c2d3e4-0009-0009-0009-000000000027">
                     <ee:message>
                         <ee:set-payload><![CDATA[%dw 2.0
@@ -178,12 +194,13 @@ output application/json
     jobId:        vars.jobId,
     status:       "NO_CHANGE",
     upgraded:     false,
+    appName:      vars.appName,
     pomPath:      vars.pomPath,
     edits:        [],
     jiraTicketId: vars.jiraTicketId,
     jiraUrl:      (if ((vars.jiraTicketId default null) != null and (p('jira.baseUrl') default '') != '') ((p('jira.baseUrl') as String) ++ "/browse/" ++ (vars.jiraTicketId as String)) else null),
     message:      ("Parent/BOM already meets the Java 17 matrix; nothing to change in " ++ (vars.pomPath as String))
-}]]></ee:set-payload>
+} filterObject ((value, key) -> value != null)]]></ee:set-payload>
                     </ee:message>
                     <ee:variables>
                         <ee:set-variable variableName="httpStatus"><![CDATA[200]]></ee:set-variable>
@@ -255,6 +272,7 @@ output application/json
     jobId:        vars.jobId,
     status:       "PR_OPEN",
     upgraded:     true,
+    appName:      vars.appName,
     pomPath:      vars.pomPath,
     branchName:   vars.branchName,
     prUrl:        vars.prUrl,
@@ -263,7 +281,7 @@ output application/json
     jiraUrl:      (if ((vars.jiraTicketId default null) != null and (p('jira.baseUrl') default '') != '') ((p('jira.baseUrl') as String) ++ "/browse/" ++ (vars.jiraTicketId as String)) else null),
     edits:        (vars.rewrite.edits default []),
     message:      ("Opened PR pinning " ++ sizeOf(vars.rewrite.edits default []) ++ " connector(s) in " ++ (vars.pomPath as String))
-}]]></ee:set-payload>
+} filterObject ((value, key) -> value != null)]]></ee:set-payload>
                     </ee:message>
                     <ee:variables>
                         <ee:set-variable variableName="httpStatus"><![CDATA[202]]></ee:set-variable>

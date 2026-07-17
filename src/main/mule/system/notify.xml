@@ -104,6 +104,44 @@ var hasUrl  = url != ""
 	</sub-flow>
 	
 	<!-- ==========================================================================
+	     pf-notify-parentpom-nochange  (parent/BOM already Java-17 compliant)
+	     Slack alert + Jira comment for the parent-pom upgrade NO_CHANGE outcome, so
+	     the parent-pom path notifies on BOTH results (pf-notify covers PR_OPEN).
+	     NON-FATAL: wrapped in <try>; a notification outage never fails the run.
+	     Inputs: vars.appName, vars.pomPath, vars.jobId, vars.jiraTicketId (optional)
+	     ========================================================================== -->
+	<sub-flow name="pf-notify-parentpom-nochange" doc:id="pfppn001-0001-0001-0001-000000000001" doc:description="Send Slack + optional Jira comment for a parent-pom NO_CHANGE result. Non-fatal.">
+		<try doc:name="TRY notification (non-fatal)" doc:id="pfppn001-0001-0001-0001-000000000002">
+			<logger level="INFO" doc:name="LOG INFO START pf-notify-parentpom-nochange" doc:id="pfppn001-0001-0001-0001-000000000003" message="#[output application/java --- 'START - pf-notify-parentpom-nochange | app=' ++ (vars.appName default '?') ++ ' pom=' ++ (vars.pomPath default '?')]" />
+			<ee:transform doc:name="DW Build Slack no-change message" doc:id="pfppn001-0001-0001-0001-000000000004">
+				<ee:message>
+					<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    channel: p('slack.channel'),
+    text: (":white_check_mark: *Parent/BOM already Java 17 compliant* - " ++ (vars.appName default '?')
+           ++ "\n" ++ (vars.pomPath default '?') ++ " meets the Java 17 matrix; no changes needed."
+           ++ "\nJob " ++ (vars.jobId default '?') ++ " - status NO_CHANGE"
+           ++ (if (vars.jiraTicketId != null) ("\nJira: <" ++ (p('jira.baseUrl') default '') ++ "/browse/" ++ (vars.jiraTicketId as String) ++ "|" ++ (vars.jiraTicketId as String) ++ ">") else ""))
+}]]></ee:set-payload>
+				</ee:message>
+			</ee:transform>
+			<set-variable value="#[p('secure::slack.webhookUrl') replace 'https://hooks.slack.com' with '']" doc:name="PV SET slackPath" doc:id="pfppn001-0001-0001-0001-000000000005" variableName="slackPath" />
+			<http:request doc:name="POST Slack no-change notification" doc:id="pfppn001-0001-0001-0001-000000000006" config-ref="Slack_Request" method="POST" path="#[vars.slackPath]" />
+			<set-variable value="#[output application/java --- 'Parent/BOM ' ++ (vars.pomPath default '?') ++ ' for ' ++ (vars.appName default '?') ++ ' already meets the Java 17 matrix - no changes needed (status NO_CHANGE).']" doc:name="PV SET jiraCommentText (no change)" doc:id="pfppn001-0001-0001-0001-000000000007" variableName="jiraCommentText" />
+			<set-variable value="#[null]" doc:name="PV SET jiraCommentUrl (no change)" doc:id="pfppn001-0001-0001-0001-000000000008" variableName="jiraCommentUrl" />
+			<flow-ref doc:name="pf-jira-comment (no change)" doc:id="pfppn001-0001-0001-0001-000000000009" name="pf-jira-comment" />
+			<error-handler>
+				<on-error-continue enableNotifications="true" logException="true" doc:name="swallow notification error" doc:id="pfppn001-0001-0001-0001-000000000010" type="ANY">
+					<logger level="WARN" doc:name="LOG WARN notification failed" doc:id="pfppn001-0001-0001-0001-000000000011" message="#[output application/java --- 'parent-pom no-change notification error swallowed: ' ++ (error.description default 'unknown')]" />
+				</on-error-continue>
+			</error-handler>
+		</try>
+		<logger level="INFO" doc:name="LOG INFO END pf-notify-parentpom-nochange" doc:id="pfppn001-0001-0001-0001-000000000012" message="#[output application/java --- 'END - pf-notify-parentpom-nochange']" />
+	</sub-flow>
+
+	<!-- ==========================================================================
 	     pf-jira-create-issue  (auto-create migration ticket — JIRA Feature 2)
 	     When NO jiraTicketId was supplied AND jira.autoCreate=true, create a Jira
 	     issue in jira.projectKey and adopt its key as vars.jiraTicketId for the rest

@@ -24,6 +24,11 @@
     <munit:test name="parentpom-no-edits" doc:id="ppp-test-0001"
                 description="pf-upgrade-parent-pom returns upgraded=false when the parent pom already meets the matrix">
         <munit:behavior>
+            <!-- Generic fallback so Slack + Jira-comment notifications resolve; the specific
+                 GitHub GET mocks below (declared later) override this for their exact paths. -->
+            <munit-tools:mock-when doc:name="mock http fallback (slack/jira)" processor="http:request">
+                <munit-tools:then-return><munit-tools:payload mediaType="application/java" value="#[{}]" /></munit-tools:then-return>
+            </munit-tools:mock-when>
             <munit-tools:mock-when doc:name="mock GET HEAD commit" processor="http:request">
                 <munit-tools:with-attributes>
                     <munit-tools:with-attribute whereValue="/repos/po/pr/commits/main" attributeName="path" />
@@ -81,6 +86,11 @@ var pom = &quot;&lt;project xmlns='http://maven.apache.org/POM/4.0.0'&gt;&lt;mod
     <munit:test name="parentpom-rest-wrapper" doc:id="ppp-test-0002"
                 description="mf-impl-post-parent-pom-upgrade maps the body and returns a no-change result">
         <munit:behavior>
+            <!-- Generic fallback so Slack + Jira-comment notifications resolve; the specific
+                 GitHub GET mocks below (declared later) override this for their exact paths. -->
+            <munit-tools:mock-when doc:name="mock http fallback (slack/jira)" processor="http:request">
+                <munit-tools:then-return><munit-tools:payload mediaType="application/java" value="#[{}]" /></munit-tools:then-return>
+            </munit-tools:mock-when>
             <munit-tools:mock-when doc:name="mock GET HEAD commit" processor="http:request">
                 <munit-tools:with-attributes>
                     <munit-tools:with-attribute whereValue="/repos/po/pr/commits/main" attributeName="path" />
@@ -113,6 +123,20 @@ var pom = &quot;&lt;project xmlns='http://maven.apache.org/POM/4.0.0'&gt;&lt;mod
 { content: toBase64(pom as Binary), encoding: 'base64' }]" />
                     </munit-tools:variables>
                 </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock Jira create issue" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/rest/api/3/issue" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{ key: 'J1U-P' }]" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="createdIssue" value="#[{ key: 'J1U-P' }]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock OS retrieve" processor="os:retrieve">
+                <munit-tools:then-return><munit-tools:payload mediaType="application/java" value="#[{}]" /></munit-tools:then-return>
             </munit-tools:mock-when>
             <munit-tools:mock-when doc:name="mock OS store" processor="os:store">
                 <munit-tools:then-return><munit-tools:payload mediaType="application/java" value="#[null]" /></munit-tools:then-return>
@@ -133,6 +157,11 @@ var pom = &quot;&lt;project xmlns='http://maven.apache.org/POM/4.0.0'&gt;&lt;mod
     <munit:test name="parentpom-mcp-tool" doc:id="ppp-test-0003"
                 description="upgrade_parent_pom-mcp-tool maps the params and returns a no-change result">
         <munit:behavior>
+            <!-- Generic fallback so Slack + Jira-comment notifications resolve; the specific
+                 GitHub GET mocks below (declared later) override this for their exact paths. -->
+            <munit-tools:mock-when doc:name="mock http fallback (slack/jira)" processor="http:request">
+                <munit-tools:then-return><munit-tools:payload mediaType="application/java" value="#[{}]" /></munit-tools:then-return>
+            </munit-tools:mock-when>
             <munit-tools:mock-when doc:name="mock GET HEAD commit" processor="http:request">
                 <munit-tools:with-attributes>
                     <munit-tools:with-attribute whereValue="/repos/po/pr/commits/main" attributeName="path" />
@@ -165,6 +194,20 @@ var pom = &quot;&lt;project xmlns='http://maven.apache.org/POM/4.0.0'&gt;&lt;mod
 { content: toBase64(pom as Binary), encoding: 'base64' }]" />
                     </munit-tools:variables>
                 </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock Jira create issue" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/rest/api/3/issue" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{ key: 'J1U-P' }]" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="createdIssue" value="#[{ key: 'J1U-P' }]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock OS retrieve" processor="os:retrieve">
+                <munit-tools:then-return><munit-tools:payload mediaType="application/java" value="#[{}]" /></munit-tools:then-return>
             </munit-tools:mock-when>
             <munit-tools:mock-when doc:name="mock OS store" processor="os:store">
                 <munit-tools:then-return><munit-tools:payload mediaType="application/java" value="#[null]" /></munit-tools:then-return>
