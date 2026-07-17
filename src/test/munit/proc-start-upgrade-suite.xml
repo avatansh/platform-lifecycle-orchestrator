@@ -280,4 +280,75 @@ var pom = &quot;&lt;project xmlns='http://maven.apache.org/POM/4.0.0'&gt;&lt;mod
         </munit:execution>
     </munit:test>
 
+    <!-- Lock held: the CONFLICT message now includes the in-flight jobId, PR and Jira links.
+         The error is caught in-test so the enriched description can be asserted. -->
+    <munit:test name="startup-conflict-message-enriched" doc:id="psu-test-0006"
+                description="pf-start-upgrade conflict message includes the in-flight jobId, PR url and Jira link">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="mock GET commit" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/commits/main" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{ sha: 'COVSHA' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock GET tree" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/git/trees/COVSHA" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[{ sha: 'TREESHA', truncated: false, tree: [ { path: 'pom.xml', 'type': 'blob' } ] }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock GET app pom" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/covorg/covrepo/contents/pom.xml" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[%dw 2.0
+import toBase64 from dw::core::Binaries
+output application/java
+var pom = &quot;&lt;project xmlns='http://maven.apache.org/POM/4.0.0'&gt;&lt;modelVersion&gt;4.0.0&lt;/modelVersion&gt;&lt;groupId&gt;c&lt;/groupId&gt;&lt;artifactId&gt;a&lt;/artifactId&gt;&lt;version&gt;1.0.0&lt;/version&gt;&lt;properties&gt;&lt;app.runtime&gt;4.6.0&lt;/app.runtime&gt;&lt;/properties&gt;&lt;/project&gt;&quot;
+---
+{ content: toBase64(pom as Binary), encoding: 'base64' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <!-- Lock HELD + the in-flight job record (returned for both the lock retrieve and the
+                 heldJob retrieve; heldJob var is set explicitly since mocks don't route targets). -->
+            <munit-tools:mock-when doc:name="mock OS retrieve (lock HELD + job record)" processor="os:retrieve">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[{ jobId: 'job-inflight', status: 'PR_OPEN', prUrl: 'https://github.com/o/r/pull/77', jiraTicketId: 'J1U-77' }]" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="existingLock" value="#['job-inflight']" />
+                        <munit-tools:variable key="heldJob" value="#[{ jobId: 'job-inflight', status: 'PR_OPEN', prUrl: 'https://github.com/o/r/pull/77', jiraTicketId: 'J1U-77' }]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-variable variableName="appName" value="startup-conflict-app" doc:name="PV appName" />
+            <set-variable variableName="environment" value="Sandbox" doc:name="PV environment" />
+            <set-variable variableName="requestBody"
+                          value="#[{ owner: 'covorg', repo: 'covrepo', branch: 'main', appPath: '.' }]"
+                          doc:name="PV requestBody" />
+            <try doc:name="TRY capture conflict error">
+                <flow-ref name="pf-start-upgrade" doc:name="invoke pf-start-upgrade" />
+                <error-handler>
+                    <on-error-continue type="CONFLICT:UPGRADE_IN_PROGRESS" doc:name="capture conflict description">
+                        <set-variable variableName="conflictMsg" value="#[error.description]" doc:name="PV conflictMsg" />
+                    </on-error-continue>
+                </error-handler>
+            </try>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="message has jobId"  expression="#[vars.conflictMsg]" is="#[MunitTools::containsString('job-inflight')]" />
+            <munit-tools:assert-that doc:name="message has PR url"  expression="#[vars.conflictMsg]" is="#[MunitTools::containsString('pull/77')]" />
+            <munit-tools:assert-that doc:name="message has Jira"    expression="#[vars.conflictMsg]" is="#[MunitTools::containsString('/browse/J1U-77')]" />
+        </munit:validation>
+    </munit:test>
+
 </mule>

@@ -133,7 +133,21 @@ var branch = vars.coords.defaultBranch default ""
 		<choice doc:name="CHOICE lock held?" doc:id="0a1733f8-acad-4a33-8aa7-f675b2e79574" doc:description="Reject concurrent upgrades for the same app" >
 			<when expression="#[vars.existingLock != false]" doc:id="pf000002-0002-0002-0002-000000000014" >
 				<logger level="ERROR" doc:name="LOG ERROR upgrade in progress" doc:id="b7fc832f-9964-4722-b9b0-b2f3efd745f7" message="#[output application/java --- 'upgrade already in progress | heldByJobId=' ++ vars.existingLock]" />
-				<raise-error doc:name="RAISE CONFLICT:UPGRADE_IN_PROGRESS" doc:id="cb671065-73d6-46b0-a92e-d1ffb9bdbe30" type="CONFLICT:UPGRADE_IN_PROGRESS" description="#[output application/java --- 'An upgrade for app &quot;' ++ vars.appName ++ '&quot; is already in progress (jobId=' ++ vars.existingLock ++ '). Wait for it to complete or fail before starting a new one.']" />
+				<!-- Load the in-flight job (keyed by the lock's jobId) so the 409 message can
+				     surface its jobId + PR + Jira links. Non-fatal: if the record has aged out
+				     we still raise a useful message with just the jobId. -->
+				<os:retrieve doc:name="OS Retrieve in-flight job" doc:id="pf000002-0002-0002-0002-000000000018" key="#[vars.existingLock as String]" objectStore="jobStore" target="heldJob" >
+					<os:default-value ><![CDATA[#[{}]]]></os:default-value>
+				</os:retrieve>
+				<raise-error doc:name="RAISE CONFLICT:UPGRADE_IN_PROGRESS" doc:id="cb671065-73d6-46b0-a92e-d1ffb9bdbe30" type="CONFLICT:UPGRADE_IN_PROGRESS" description="#[%dw 2.0
+output application/java
+var held    = vars.heldJob default {}
+var pr      = held.prUrl default null
+var jira    = held.jiraTicketId default null
+var prPart   = if (pr != null)   (' PR: ' ++ (pr as String) ++ '.') else ''
+var jiraPart = if (jira != null) (' Jira: ' ++ (p('jira.baseUrl') default '') ++ '/browse/' ++ (jira as String) ++ '.') else ''
+---
+'An upgrade for app &quot;' ++ (vars.appName default '?') ++ '&quot; is already in progress (jobId=' ++ (vars.existingLock as String) ++ ').' ++ prPart ++ jiraPart ++ ' Wait for it to complete or fail before starting a new one.']" />
 			</when>
 			<otherwise doc:id="pf000002-0002-0002-0002-000000000017" >
 				<os:store doc:name="OS Store upgrade lock" doc:id="92eece25-12ea-4ff3-baac-cf7951a903b8" key="#['lock::' ++ vars.appName]" objectStore="locksStore" >

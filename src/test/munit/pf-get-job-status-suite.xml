@@ -89,6 +89,15 @@
                 doc:name="assert completedAt absent"
                 expression="#[payload.completedAt?]"
                 is="#[MunitTools::equalTo(false)]" />
+            <!-- No Jira ticket on this record → jiraTicketId/jiraUrl must be absent -->
+            <munit-tools:assert-that
+                doc:name="assert jiraTicketId absent"
+                expression="#[payload.jiraTicketId?]"
+                is="#[MunitTools::equalTo(false)]" />
+            <munit-tools:assert-that
+                doc:name="assert jiraUrl absent"
+                expression="#[payload.jiraUrl?]"
+                is="#[MunitTools::equalTo(false)]" />
         </munit:validation>
 
     </munit:test>
@@ -289,6 +298,48 @@
                 doc:name="assert fallback message non-empty"
                 expression="#[payload.message]"
                 is="#[MunitTools::notNullValue()]" />
+        </munit:validation>
+
+    </munit:test>
+
+    <!-- ──────────────────────────────────────────────────────────────────────────
+         Test 6: job with a Jira ticket → jiraTicketId + clickable jiraUrl included
+         ────────────────────────────────────────────────────────────────────────── -->
+    <munit:test name="pf-get-job-status-with-jira"
+                doc:id="jss-test-0006"
+                description="A job carrying a jiraTicketId returns jiraTicketId and a clickable jiraUrl (baseUrl + /browse/KEY)">
+
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="Mock OS retrieve — job with jira"
+                                   processor="os:retrieve">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[{
+                        jobId:        'job-jira-006',
+                        status:       'PR_OPEN',
+                        appName:      'test-app',
+                        jiraTicketId: 'J1U-123',
+                        prUrl:        'https://github.com/owner/repo/pull/9',
+                        prNumber:     9
+                    }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+
+        <munit:execution>
+            <set-variable variableName="jobId" value="job-jira-006" doc:name="PV SET jobId" />
+            <flow-ref name="pf-get-job-status" doc:name="invoke pf-get-job-status" />
+        </munit:execution>
+
+        <munit:validation>
+            <munit-tools:assert-that
+                doc:name="assert jiraTicketId included"
+                expression="#[payload.jiraTicketId]"
+                is="#[MunitTools::equalTo('J1U-123')]" />
+            <munit-tools:assert-that
+                doc:name="assert jiraUrl points at the ticket"
+                expression="#[payload.jiraUrl]"
+                is="#[MunitTools::containsString('/browse/J1U-123')]" />
         </munit:validation>
 
     </munit:test>

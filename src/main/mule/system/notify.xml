@@ -282,4 +282,43 @@ var list = (vars.missingConnectors default []) map ((c) -> "• " ++ (c.groupId 
 			</otherwise>
 		</choice>
 	</sub-flow>
+
+    <!-- ==========================================================================
+         pf-notify-event  (generic lifecycle event — Slack + optional Jira comment)
+         Reusable notification for lifecycle events that are NOT the PR-opened or
+         failure paths (e.g. job deleted, job reapplied). Sends a Slack message
+         (vars.eventSlackText) and, when a Jira ticket is known, a Jira comment
+         (vars.jiraCommentText [+ vars.jiraCommentUrl]). NON-FATAL and
+         PAYLOAD-PRESERVING, so callers can invoke it anywhere in a flow without
+         losing the response they have already built.
+         Inputs: vars.eventSlackText (required), vars.jiraTicketId (optional),
+                 vars.jiraCommentText (optional), vars.jiraCommentUrl (optional)
+         ========================================================================== -->
+	<sub-flow name="pf-notify-event" doc:id="pfev0001-0001-0001-0001-000000000001" doc:description="Generic Slack + optional Jira lifecycle notification. Non-fatal + payload-preserving.">
+		<set-variable variableName="eventPayloadSnapshot" value="#[payload]" doc:name="PV snapshot payload" doc:id="pfev0001-0001-0001-0001-000000000002" />
+		<try doc:name="TRY event notification (non-fatal)" doc:id="pfev0001-0001-0001-0001-000000000003">
+			<logger level="INFO" doc:name="LOG INFO START pf-notify-event" doc:id="pfev0001-0001-0001-0001-000000000004" message="#[output application/java --- 'START - pf-notify-event | ' ++ (vars.eventSlackText default '(no text)')]" />
+			<ee:transform doc:name="DW Build Slack event message" doc:id="pfev0001-0001-0001-0001-000000000005">
+				<ee:message>
+					<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    channel: p('slack.channel'),
+    text: (vars.eventSlackText default "")
+}]]></ee:set-payload>
+				</ee:message>
+			</ee:transform>
+			<set-variable value="#[p('secure::slack.webhookUrl') replace 'https://hooks.slack.com' with '']" doc:name="PV SET slackPath" doc:id="pfev0001-0001-0001-0001-000000000006" variableName="slackPath" />
+			<http:request doc:name="POST Slack event notification" doc:id="pfev0001-0001-0001-0001-000000000007" doc:description="Send lifecycle-event message to the configured Slack channel" config-ref="Slack_Request" method="POST" path="#[vars.slackPath]" />
+			<flow-ref name="pf-jira-comment" doc:name="pf-jira-comment (event)" doc:id="pfev0001-0001-0001-0001-000000000008" />
+			<error-handler>
+				<on-error-continue enableNotifications="true" logException="true" doc:name="swallow event notification error" doc:id="pfev0001-0001-0001-0001-000000000009" type="ANY">
+					<logger level="WARN" doc:name="LOG WARN event notification failed" doc:id="pfev0001-0001-0001-0001-00000000000a" message="#[output application/java --- 'event notification error swallowed: ' ++ (error.description default 'unknown')]" />
+				</on-error-continue>
+			</error-handler>
+		</try>
+		<set-payload value="#[vars.eventPayloadSnapshot]" doc:name="PV restore payload" doc:id="pfev0001-0001-0001-0001-00000000000b" />
+		<logger level="INFO" doc:name="LOG INFO END pf-notify-event" doc:id="pfev0001-0001-0001-0001-00000000000c" message="#[output application/java --- 'END - pf-notify-event']" />
+	</sub-flow>
 </mule>

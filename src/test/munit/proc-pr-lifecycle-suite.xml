@@ -217,6 +217,17 @@ var pom = &quot;&lt;project xmlns='http://maven.apache.org/POM/4.0.0'&gt;&lt;mod
 { content: toBase64(pom as Binary), encoding: 'base64' }]" />
                 </munit-tools:then-return>
             </munit-tools:mock-when>
+            <!-- Slack lifecycle alert fired synchronously by pf-reapply-job. Match ONLY the Slack
+                 webhook path so the path-specific GitHub mocks above are not overridden (MUnit
+                 applies the LAST matching mock). Non-fatal anyway. -->
+            <munit-tools:mock-when doc:name="mock Slack event" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/services/T00/B00/test" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{ ok: true }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
         </munit:behavior>
         <munit:execution>
             <set-variable variableName="jobId" value="job-prev-1" doc:name="PV jobId (previous)" />
@@ -288,6 +299,17 @@ output application/java
 var pom = &quot;&lt;project xmlns='http://maven.apache.org/POM/4.0.0'&gt;&lt;modelVersion&gt;4.0.0&lt;/modelVersion&gt;&lt;groupId&gt;c&lt;/groupId&gt;&lt;artifactId&gt;a&lt;/artifactId&gt;&lt;version&gt;1.0.0&lt;/version&gt;&lt;properties&gt;&lt;app.runtime&gt;4.6.0&lt;/app.runtime&gt;&lt;/properties&gt;&lt;/project&gt;&quot;
 ---
 { content: toBase64(pom as Binary), encoding: 'base64' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <!-- Slack lifecycle alert fired synchronously by pf-reapply-job. Match ONLY the Slack
+                 webhook path so the path-specific GitHub mocks above are not overridden (MUnit
+                 applies the LAST matching mock). Non-fatal anyway. -->
+            <munit-tools:mock-when doc:name="mock Slack event" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/services/T00/B00/test" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{ ok: true }]" />
                 </munit-tools:then-return>
             </munit-tools:mock-when>
         </munit:behavior>
@@ -364,6 +386,17 @@ output application/java
 var pom = &quot;&lt;project xmlns='http://maven.apache.org/POM/4.0.0'&gt;&lt;modelVersion&gt;4.0.0&lt;/modelVersion&gt;&lt;groupId&gt;c&lt;/groupId&gt;&lt;artifactId&gt;a&lt;/artifactId&gt;&lt;version&gt;1.0.0&lt;/version&gt;&lt;properties&gt;&lt;app.runtime&gt;4.6.0&lt;/app.runtime&gt;&lt;/properties&gt;&lt;/project&gt;&quot;
 ---
 { content: toBase64(pom as Binary), encoding: 'base64' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <!-- Slack lifecycle alert fired synchronously by pf-reapply-job. Match ONLY the Slack
+                 webhook path so the path-specific GitHub mocks above are not overridden (MUnit
+                 applies the LAST matching mock). Non-fatal anyway. -->
+            <munit-tools:mock-when doc:name="mock Slack event" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/services/T00/B00/test" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{ ok: true }]" />
                 </munit-tools:then-return>
             </munit-tools:mock-when>
         </munit:behavior>

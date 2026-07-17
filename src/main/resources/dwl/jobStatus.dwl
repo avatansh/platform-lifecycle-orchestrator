@@ -27,10 +27,14 @@ var statusMeta = {
 
 /**
  * Builds the public JobStatus payload from a stored job record.
- * Optional fields (branchName/prUrl/prNumber/completedAt/error) are included only
- * when present, preserving the original response shape exactly.
+ * Optional fields (branchName/prUrl/prNumber/jiraTicketId/jiraUrl/completedAt/error)
+ * are included only when present, preserving the original response shape exactly.
+ *
+ * @param rec         the persisted job record
+ * @param jiraBaseUrl the Jira site base URL (e.g. https://acme.atlassian.net) used to
+ *                    build a clickable jiraUrl; pass "" to omit the link.
  */
-fun buildJobStatus(rec) = do {
+fun buildJobStatus(rec, jiraBaseUrl = "") = do {
     var meta = statusMeta[rec.status]
                default { message: ("Status: " ++ (rec.status default "UNKNOWN")), nextPollSeconds: 10 }
     ---
@@ -43,6 +47,9 @@ fun buildJobStatus(rec) = do {
     ++ (if (rec.branchName  != null) { branchName:  rec.branchName  } else {})
     ++ (if (rec.prUrl       != null) { prUrl:        rec.prUrl       } else {})
     ++ (if (rec.prNumber    != null) { prNumber:     rec.prNumber    } else {})
+    ++ (if (rec.jiraTicketId != null) { jiraTicketId: rec.jiraTicketId } else {})
+    ++ (if (rec.jiraTicketId != null and jiraBaseUrl != "")
+          { jiraUrl: (jiraBaseUrl ++ "/browse/" ++ (rec.jiraTicketId as String)) } else {})
     ++ (if (rec.completedAt != null) { completedAt:  rec.completedAt } else {})
     ++ (if (rec.error       != null) { error:        rec.error       } else {})
 }

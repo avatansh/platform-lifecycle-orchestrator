@@ -223,6 +223,14 @@ output application/json
         <flow-ref name="pf-start-upgrade" doc:name="pf-start-upgrade (reapply)"
                   doc:id="pfra0001-0001-0001-0001-000000000009" />
 
+        <!-- Snapshot the relaunch outcome for the notification below. Explicit output media type:
+             payload is application/json and previousJobId is Java, so a bare expression cannot
+             infer a single output type. -->
+        <set-variable variableName="newJobId" value="#[output application/java --- payload.jobId default vars.previousJobId]"
+                      doc:name="PV SET newJobId" doc:id="pfra0001-0001-0001-0001-000000000020" />
+        <set-variable variableName="reapplyStatus" value="#[output application/java --- payload.status default 'PROCESSING']"
+                      doc:name="PV SET reapplyStatus" doc:id="pfra0001-0001-0001-0001-000000000021" />
+
         <!-- Build the reapply response from pf-start-upgrade's result. -->
         <ee:transform doc:name="DW Build reapply response" doc:id="pfra0001-0001-0001-0001-00000000000a">
             <ee:message>
@@ -241,9 +249,44 @@ output application/json
             </ee:message>
         </ee:transform>
 
+        <!-- Slack alert + Jira comment for the reapply (non-fatal, payload-preserving).
+             Skip when nothing was relaunched (app was already in the desired state). -->
+        <choice doc:name="CHOICE new job relaunched?" doc:id="pfra0001-0001-0001-0001-000000000022">
+            <when expression="#[(vars.reapplyStatus default 'PROCESSING') != 'ALREADY_UPGRADED']"
+                  doc:id="pfra0001-0001-0001-0001-000000000023">
+                <ee:transform doc:name="DW Build reapply notification text"
+                              doc:id="pfra0001-0001-0001-0001-000000000024">
+                    <ee:message />
+                    <ee:variables>
+                        <ee:set-variable variableName="eventSlackText"><![CDATA[%dw 2.0
+output text/plain
+---
+":arrows_counterclockwise: *Upgrade job reapplied* — " ++ (vars.appName default "unknown")
+++ "\nPrevious job " ++ (vars.previousJobId default "?")
+++ " relaunched as " ++ (vars.newJobId default "?")
+++ " (env " ++ (vars.environment default "?") ++ ")"]]></ee:set-variable>
+                        <ee:set-variable variableName="jiraCommentText"><![CDATA[%dw 2.0
+output text/plain
+---
+"Upgrade reapplied for " ++ (vars.appName default "unknown") ++ ": previous job "
+++ (vars.previousJobId default "?") ++ " was relaunched as " ++ (vars.newJobId default "?")
+++ ", re-assessed against the current compatibility matrix."]]></ee:set-variable>
+                        <ee:set-variable variableName="jiraCommentUrl"><![CDATA[null]]></ee:set-variable>
+                    </ee:variables>
+                </ee:transform>
+                <flow-ref name="pf-notify-event" doc:name="pf-notify-event (reapplied)"
+                          doc:id="pfra0001-0001-0001-0001-000000000025" />
+            </when>
+            <otherwise doc:id="pfra0001-0001-0001-0001-000000000026">
+                <logger level="INFO" doc:name="LOG INFO reapply already upgraded — no notify"
+                        doc:id="pfra0001-0001-0001-0001-000000000027"
+                        message="#[output application/java --- 'reapply found nothing to relaunch (ALREADY_UPGRADED) — skipping notification']" />
+            </otherwise>
+        </choice>
+
         <logger level="INFO" doc:name="LOG INFO END pf-reapply-job"
                 doc:id="pfra0001-0001-0001-0001-00000000000b"
-                message="#[output application/java --- 'END - pf-reapply-job | previousJobId=' ++ (vars.previousJobId default '?') ++ ' | newJobId=' ++ (payload.jobId default '?')]" />
+                message="#[output application/java --- 'END - pf-reapply-job | previousJobId=' ++ (vars.previousJobId default '?') ++ ' | newJobId=' ++ (vars.newJobId default '?')]" />
     </sub-flow>
 
     <!-- REST entry for POST /jobs/{jobId}/reapply: bind the URI jobId, delegate to the

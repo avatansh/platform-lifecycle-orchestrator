@@ -64,6 +64,12 @@ http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/
                       doc:name="PV SET appName"
                       doc:id="a7b8c9d0-0007-0007-0007-000000000120" />
 
+        <!-- Capture the Jira ticket (if any) so we can comment on the delete below. -->
+        <set-variable variableName="jiraTicketId"
+                      value="#[payload.jiraTicketId default null]"
+                      doc:name="PV SET jiraTicketId"
+                      doc:id="a7b8c9d0-0007-0007-0007-000000000140" />
+
         <!-- Remove the job record. -->
         <os:remove doc:name="OS Remove Job Record"
                    doc:id="a7b8c9d0-0007-0007-0007-000000000107"
@@ -170,6 +176,28 @@ output application/json
 }]]></ee:set-payload>
             </ee:message>
         </ee:transform>
+
+        <!-- Slack alert + Jira comment for the delete (non-fatal, payload-preserving). -->
+        <ee:transform doc:name="DW Build delete notification text"
+                      doc:id="a7b8c9d0-0007-0007-0007-000000000141">
+            <ee:message />
+            <ee:variables>
+                <ee:set-variable variableName="eventSlackText"><![CDATA[%dw 2.0
+output text/plain
+---
+":wastebasket: *Upgrade job deleted* — " ++ (vars.appName default "unknown")
+++ "\nJob " ++ (vars.jobId default "?")
+++ (if (vars.lockReleased default false) " • app lock released" else "")]]></ee:set-variable>
+                <ee:set-variable variableName="jiraCommentText"><![CDATA[%dw 2.0
+output text/plain
+---
+"Upgrade job " ++ (vars.jobId default "?") ++ " for " ++ (vars.appName default "unknown")
+++ " was deleted and the app lock released."]]></ee:set-variable>
+                <ee:set-variable variableName="jiraCommentUrl"><![CDATA[null]]></ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+        <flow-ref name="pf-notify-event" doc:name="pf-notify-event (deleted)"
+                  doc:id="a7b8c9d0-0007-0007-0007-000000000142" />
 
         <logger level="INFO" doc:name="LOG INFO END delete job"
                 doc:id="a7b8c9d0-0007-0007-0007-000000000110"

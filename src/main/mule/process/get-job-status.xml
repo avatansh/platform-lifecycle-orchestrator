@@ -48,7 +48,7 @@ http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/
 output application/json
 import buildJobStatus from dwl::jobStatus
 ---
-buildJobStatus(payload)]]></ee:set-payload>
+buildJobStatus(payload, (p('jira.baseUrl') default ''))]]></ee:set-payload>
 			</ee:message>
 		</ee:transform>
 		<logger level="INFO" doc:name="LOG INFO END pf-get-job-status" doc:id="c052784d-bb53-40f6-a228-a7663b245d6a" message="#[output application/java --- 'END - pf-get-job-status | status found | status=' ++ payload.status]" />

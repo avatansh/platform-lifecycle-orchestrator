@@ -235,4 +235,47 @@
         </munit:validation>
     </munit:test>
 
+    <!-- pf-notify-event — generic lifecycle event: Slack + Jira comment, payload preserved -->
+    <munit:test name="notify-event-with-jira" doc:id="snf-test-0010"
+                description="pf-notify-event posts Slack + Jira comment and preserves the caller payload">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="mock HTTP (slack/jira)" processor="http:request">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{ ok: true }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-payload value="#[{ carried: 'keepme' }]" doc:name="seed payload" />
+            <set-variable variableName="eventSlackText" value="event happened" doc:name="PV eventSlackText" />
+            <set-variable variableName="jiraTicketId" value="TST-EV1" doc:name="PV jiraTicketId" />
+            <set-variable variableName="jiraCommentText" value="event comment" doc:name="PV jiraCommentText" />
+            <set-variable variableName="jiraCommentUrl" value="#[null]" doc:name="PV jiraCommentUrl" />
+            <flow-ref name="pf-notify-event" doc:name="invoke pf-notify-event" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="payload preserved" expression="#[payload.carried]" is="#[MunitTools::equalTo('keepme')]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- pf-notify-event — Slack error is swallowed (non-fatal) and payload still restored -->
+    <munit:test name="notify-event-error-swallowed" doc:id="snf-test-0011"
+                description="pf-notify-event swallows a Slack HTTP error and still preserves the payload">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="mock Slack error" processor="http:request">
+                <munit-tools:then-return>
+                    <munit-tools:error typeId="HTTP:CONNECTIVITY" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-payload value="#[{ carried: 'stillhere' }]" doc:name="seed payload" />
+            <set-variable variableName="eventSlackText" value="event happened 2" doc:name="PV eventSlackText" />
+            <flow-ref name="pf-notify-event" doc:name="invoke pf-notify-event (error)" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="payload preserved" expression="#[payload.carried]" is="#[MunitTools::equalTo('stillhere')]" />
+        </munit:validation>
+    </munit:test>
+
 </mule>
