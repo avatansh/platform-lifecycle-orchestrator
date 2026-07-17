@@ -4,7 +4,7 @@
 
 	<groupId>2e14f8c6-4d60-481b-bfb6-798695efc8f4</groupId>
 	<artifactId>platform-lifecycle-orchestrator</artifactId>
-	<version>1.0.7</version>
+	<version>1.0.8</version>
 	<packaging>mule-application</packaging>
 	<name>platform-lifecycle-orchestrator</name>
 
