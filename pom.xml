@@ -4,7 +4,7 @@
 
 	<groupId>2e14f8c6-4d60-481b-bfb6-798695efc8f4</groupId>
 	<artifactId>platform-lifecycle-orchestrator</artifactId>
-	<version>1.0.3</version>
+	<version>1.0.4</version>
 	<packaging>mule-application</packaging>
 	<name>platform-lifecycle-orchestrator</name>
 
@@ -111,6 +111,16 @@
 						<!-- Non-secret runtime properties -->
 						<properties>
 							<env>${ch2.runtimeEnv}</env>
+							<!--
+								API Autodiscovery ENVIRONMENT credentials. These are reserved property
+								names the runtime's API Gateway reads at startup to register this app
+								against its API Manager instance (api.id). MUST be pushed to the worker
+								as runtime properties — passing them only as -D flags to the Maven JVM
+								does NOT reach CloudHub. client_id is non-secret; the secret is masked
+								via <secureProperties> below. Values resolve from .mvn/settings.xml
+								(env-var backed) or -Danypoint.platform.client_id=... at deploy time.
+							-->
+							<anypoint.platform.client_id>${anypoint.platform.client_id}</anypoint.platform.client_id>
 						</properties>
 						<!--
 							Secret runtime properties. CloudHub 2.0 encrypts these before storing,
@@ -121,6 +131,7 @@
 						-->
 						<secureProperties>
 							<encrypt.key>${encrypt.key}</encrypt.key>
+							<anypoint.platform.client_secret>${anypoint.platform.client_secret}</anypoint.platform.client_secret>
 						</secureProperties>
 					</cloudhub2Deployment>
 				</configuration>
