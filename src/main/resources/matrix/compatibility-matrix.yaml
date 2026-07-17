@@ -55,6 +55,14 @@ connectors:
   - { property: "xml.module.version",               set: "1.4.2",  groupId: "org.mule.modules",    artifactId: "mule-xml-module" }
   - { property: "oauth.module.version",             set: "1.1.24", groupId: "org.mule.modules",    artifactId: "mule-oauth-module" }
   - { property: "tracing.module.version",           set: "1.0.3",  groupId: "org.mule.modules",    artifactId: "mule-tracing-module" }
+  # ── Third-party SaaS connectors (Java 17 versions per MuleSoft connector release notes /
+  #    KB "Java 17-Compatible Anypoint Connectors", id=000782248). 'set' = a conservative,
+  #    known-good Java-17 version that stays WITHIN the connector's current major line to avoid
+  #    breaking API changes; bump only if the app already declares a lower version. ───────────
+  - { property: "twilio.connector.version",         set: "4.2.9",  groupId: "com.mulesoft.connectors", artifactId: "mule-twilio-connector" } # Java 17 since 4.2.7
+  - { property: "gmail.connector.version",          set: "1.1.2",  groupId: "com.mulesoft.connectors", artifactId: "mule4-gmail-connector" } # Java 17 since 1.1.2 (latest)
+  - { property: "slack.connector.version",          set: "1.0.17", groupId: "com.mulesoft.connectors", artifactId: "mule4-slack-connector" } # Java 17 since 1.0.17 (1.x); 2.x is a breaking major
+  - { property: "salesforce.connector.version",     set: "10.19.2",groupId: "com.mulesoft.connectors", artifactId: "mule-salesforce-connector" } # Java 17 since 10.19.2 (10.x); 11.x is a newer major
   # wsc/vm/sftp/file/email/mq present in BOM but unused by demo app — bump if found
 
 # HYGIENE

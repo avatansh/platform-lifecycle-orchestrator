@@ -42,7 +42,7 @@ matrix:
   refreshSeconds: "86400"                    # matrix cache TTL = 1 day (bucketed floor(epoch/refreshSeconds))
   exchange:                                  # Exchange asset IDENTITY (orgId is env-specific → env file)
     assetId: "java17-compatibility-matrix"
-    version: "1.0.3"                         # published on Exchange (matches bundled classpath copy incl. sockets 1.2.8); bump on new revision or use source=exchange-latest
+    version: "1.0.4"                         # published on Exchange (matches bundled classpath copy incl. sockets 1.2.8); bump on new revision or use source=exchange-latest
     classifier: "custom"                     # Exchange custom-asset classifier ("" if none)
     packaging: "yaml"                        # main file extension of the published asset
   notifyMissing: "true"                      # Slack-alert connectors the app declares but the matrix doesn't cover
