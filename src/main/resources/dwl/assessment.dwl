@@ -32,6 +32,21 @@ fun lt(a, b) = do {
         ((x[0] default 0) == (y[0] default 0) and (x[1] default 0) == (y[1] default 0) and (x[2] default 0) < (y[2] default 0))
 }
 
+// bumpMinor(v): increment the MINOR segment of a semver (resetting patch to 0),
+// preserving any -qualifier.
+//   "1.0.0"           -> "1.1.0"
+//   "1.0.3-SNAPSHOT"  -> "1.1.0-SNAPSHOT"
+//   "2.3"             -> "2.4.0"   (missing patch treated as 0)
+fun bumpMinor(v) = do {
+    var s         = (v default "") as String
+    var hasQual   = s contains "-"
+    var core      = if (hasQual) substringBefore(s, "-") else s
+    var qualifier = if (hasQual) ("-" ++ substringAfter(s, "-")) else ""
+    var parts     = core splitBy "."
+    var minor     = ((parts[1] default "0") as Number) + 1
+    --- (parts[0] default "0") ++ "." ++ (minor as String) ++ ".0" ++ qualifier
+}
+
 // rawProp(name): first non-null property value across the chain (nearest-first), no indirection.
 fun rawProp(chain, name) = ((chain map ((c) -> propOf(c.pom, name))) filter ($ != null))[0] default null
 
@@ -429,7 +444,23 @@ fun buildAssessmentResult(
             [{ file: ciWorkflowPath, kind: "ciWorkflow", from: ciCur, to: m.target.javaVersion }] else [])
     // Tier-0 hygiene edits — strip JPMS argLines from MUnit plugin blocks (any in-repo pom).
     var argLineEdits = computeMunitArgLineEdits(chain, m)
-    var all = propEdits ++ appEdits ++ argLineEdits
+    // All the edits that actually modify files as part of this upgrade.
+    var coreEdits    = propEdits ++ appEdits ++ argLineEdits
+    // (4) App pom <version> minor bump — ONLY when the upgrade already changes something
+    //     (never bump on a NO_CHANGE / reapply-with-no-diff), and only when the app declares
+    //     its OWN literal <version> + <artifactId>. A ${property}-driven or inherited version
+    //     is left alone (a placeholder is handled as a pomProperty edit; inherited versions
+    //     belong to the parent). Targets the app's own module pom (chain[0]). This only
+    //     rewrites the value inside the EXISTING <version> tag — no tag is added.
+    var projArtifact = (chain[0].pom.project.artifactId default null)
+    var projVer      = (chain[0].pom.project.version default null)
+    var projVerIsRef = (projVer != null) and ((projVer as String) matches /^\s*\$\{.+\}\s*$/)
+    var versionEdit  =
+        if (!isEmpty(coreEdits) and projArtifact != null and projVer != null and !projVerIsRef)
+            [{ file: chain[0].path, kind: "pomVersion", artifactId: (projArtifact as String),
+               from: (projVer as String), to: bumpMinor(projVer as String), change: true }]
+        else []
+    var all = coreEdits ++ versionEdit
     // WARNING (shared build file): property/dependency/plugin edits can land on a shared
     // parent or BOM pom (any chain entry other than the app's OWN module pom at chain[0]).
     // Editing those upgrades every module that inherits from them, so surface it explicitly.

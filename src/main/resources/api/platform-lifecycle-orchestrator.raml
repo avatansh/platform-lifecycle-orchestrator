@@ -90,7 +90,7 @@ types:
           be a shared parent/BOM pom inherited by other modules (see the warnings array).
       kind:
         type: string
-        enum: [pomProperty, depVersion, pluginVersion, munitRuntimeVersion, muleArtifactJson, ciWorkflow, munitArgLines]
+        enum: [pomProperty, depVersion, pluginVersion, munitRuntimeVersion, muleArtifactJson, ciWorkflow, munitArgLines, pomVersion]
         description: |
           Category of edit, which tells the worker how to apply it:
           pomProperty (a <properties> value), depVersion / pluginVersion (an inline
@@ -98,7 +98,9 @@ types:
           muleArtifactJson (minMuleVersion + javaSpecificationVersions), ciWorkflow
           (target Java version in the CI workflow), munitArgLines (Tier-0 hygiene:
           strip JPMS --add-opens/--add-exports/--add-modules argLines from MUnit
-          plugin blocks that break the embedded MUnit container on Mule 4.9 / Java 17).
+          plugin blocks that break the embedded MUnit container on Mule 4.9 / Java 17),
+          pomVersion (minor-bump the value of the app module's own existing <version>
+          tag; emitted only when the upgrade already changes something).
       property:
         type: string
         required: false
@@ -367,7 +369,10 @@ types:
       edits:
         type: FileEdit[]
         required: false
-        description: The connector/property version edits applied to the parent/BOM pom.
+        description: |
+          The connector/property version edits applied to the parent/BOM pom. When any
+          connector is pinned, a trailing pomVersion edit is also included that minor-bumps
+          the parent/BOM's own <version>.
       message:
         type: string
         required: false

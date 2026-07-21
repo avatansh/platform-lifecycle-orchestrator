@@ -240,8 +240,14 @@ output application/java
                         <ee:set-variable variableName="assessment"><![CDATA[%dw 2.0
 output application/java
 ---
-{ warnings: [ ("Parent/BOM connector version upgrade pinning " ++ sizeOf(vars.rewrite.edits default []) ++ " connector(s): "
-              ++ ((vars.rewrite.edits default []) map ((e) -> ((e.artifactId default '?') as String) ++ " " ++ ((e.from default 'unknown') as String) ++ " -> " ++ ((e.to default '?') as String)) joinBy "; ")) ] }]]></ee:set-variable>
+do {
+    var connEdits = (vars.rewrite.edits default []) filter ((e) -> (e.kind default '') != 'pomVersion')
+    var verEdit   = ((vars.rewrite.edits default []) filter ((e) -> (e.kind default '') == 'pomVersion'))[0]
+    ---
+    { warnings: [ ("Parent/BOM connector version upgrade pinning " ++ sizeOf(connEdits) ++ " connector(s): "
+              ++ (connEdits map ((e) -> ((e.artifactId default '?') as String) ++ " " ++ ((e.from default 'unknown') as String) ++ " -> " ++ ((e.to default '?') as String)) joinBy "; ")
+              ++ (if (verEdit != null) ("; parent version " ++ ((verEdit.from default '?') as String) ++ " -> " ++ ((verEdit.to default '?') as String)) else "")) ] }
+}]]></ee:set-variable>
                     </ee:variables>
                 </ee:transform>
                 <!-- Seed a trackable job record BEFORE committing. pf-atomic-commit and pf-open-pr
@@ -290,7 +296,13 @@ output application/json
     jiraTicketId: vars.jiraTicketId,
     jiraUrl:      (if ((vars.jiraTicketId default null) != null and (p('jira.baseUrl') default '') != '') ((p('jira.baseUrl') as String) ++ "/browse/" ++ (vars.jiraTicketId as String)) else null),
     edits:        (vars.rewrite.edits default []),
-    message:      ("Opened PR pinning " ++ sizeOf(vars.rewrite.edits default []) ++ " connector(s) in " ++ (vars.pomPath as String))
+    message:      (do {
+                      var connEdits = (vars.rewrite.edits default []) filter ((e) -> (e.kind default '') != 'pomVersion')
+                      var verEdit   = ((vars.rewrite.edits default []) filter ((e) -> (e.kind default '') == 'pomVersion'))[0]
+                      ---
+                      "Opened PR pinning " ++ sizeOf(connEdits) ++ " connector(s) in " ++ (vars.pomPath as String)
+                      ++ (if (verEdit != null) (" and bumping the parent version to " ++ ((verEdit.to default '?') as String)) else "")
+                  })
 } filterObject ((value, key) -> value != null)]]></ee:set-payload>
                     </ee:message>
                     <ee:variables>

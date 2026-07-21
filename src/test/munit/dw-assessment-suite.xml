@@ -382,4 +382,73 @@ buildAssessmentResult(matrix, chain, appText, null, "mule-artifact.json", null, 
         </munit:validation>
     </munit:test>
 
+    <!-- ══════════════════════════════════════════════════════════════════════════
+         assessment :: pomVersion minor bump — emitted for the app pom when the upgrade
+         changes something and the app declares its OWN literal <version> + <artifactId>.
+         ══════════════════════════════════════════════════════════════════════════ -->
+    <munit:test name="assessment-emits-pomVersion-minor-bump" doc:id="dwa-test-0010"
+                description="buildAssessmentResult adds a single pomVersion edit (minor bump) on the app pom when other edits exist">
+        <munit:execution>
+            <ee:transform doc:name="DW buildAssessmentResult (with project version)" doc:id="dwa-test-0010-exec">
+                <ee:variables>
+                    <ee:set-variable variableName="result"><![CDATA[%dw 2.0
+import buildAssessmentResult from dwl::assessment
+output application/java
+var childText = "<project><artifactId>my-app</artifactId><version>1.0.0-SNAPSHOT</version><properties><app.runtime>4.6.0</app.runtime></properties></project>"
+var childPom = read(childText, "application/xml")
+var chain = [{ path: "app/pom.xml", pom: childPom }]
+var matrix = {
+    target: { runtime: "4.9.18", javaVersion: "17" },
+    muleArtifact: { minMuleVersion: "4.9.0", javaSpecificationVersions: ["17"] },
+    gating: { r: { property: "app.runtime", set: "4.9.18" } },
+    connectors: []
+}
+---
+buildAssessmentResult(matrix, chain, childText, null, null, null, null, "my-app", "APP_STANDALONE", "sha", false, false, false, [])]]></ee:set-variable>
+                </ee:variables>
+            </ee:transform>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="exactly one pomVersion edit"
+                expression="#[sizeOf(vars.result.changePlan.fileEdits filter ((e) -> e.kind == 'pomVersion'))]"
+                is="#[MunitTools::equalTo(1)]" />
+            <munit-tools:assert-that doc:name="minor bumped to 1.1.0-SNAPSHOT"
+                expression="#[(vars.result.changePlan.fileEdits filter ((e) -> e.kind == 'pomVersion'))[0].to]"
+                is="#[MunitTools::equalTo('1.1.0-SNAPSHOT')]" />
+            <munit-tools:assert-that doc:name="version edit targets the app pom"
+                expression="#[(vars.result.changePlan.fileEdits filter ((e) -> e.kind == 'pomVersion'))[0].file]"
+                is="#[MunitTools::equalTo('app/pom.xml')]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- pomVersion is NOT emitted when there is nothing else to change (NO_CHANGE upgrade). -->
+    <munit:test name="assessment-no-pomVersion-when-no-changes" doc:id="dwa-test-0011"
+                description="buildAssessmentResult does NOT bump the version when the app is already at target (no core edits)">
+        <munit:execution>
+            <ee:transform doc:name="DW buildAssessmentResult (already at target)" doc:id="dwa-test-0011-exec">
+                <ee:variables>
+                    <ee:set-variable variableName="result"><![CDATA[%dw 2.0
+import buildAssessmentResult from dwl::assessment
+output application/java
+var childText = "<project><artifactId>my-app</artifactId><version>1.0.0-SNAPSHOT</version><properties><app.runtime>4.9.18</app.runtime></properties></project>"
+var childPom = read(childText, "application/xml")
+var chain = [{ path: "app/pom.xml", pom: childPom }]
+var matrix = {
+    target: { runtime: "4.9.18", javaVersion: "17" },
+    muleArtifact: { minMuleVersion: "4.9.0", javaSpecificationVersions: ["17"] },
+    gating: { r: { property: "app.runtime", set: "4.9.18" } },
+    connectors: []
+}
+---
+buildAssessmentResult(matrix, chain, childText, null, null, null, null, "my-app", "APP_STANDALONE", "sha", false, false, false, [])]]></ee:set-variable>
+                </ee:variables>
+            </ee:transform>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="no pomVersion edit"
+                expression="#[sizeOf(vars.result.changePlan.fileEdits filter ((e) -> e.kind == 'pomVersion'))]"
+                is="#[MunitTools::equalTo(0)]" />
+        </munit:validation>
+    </munit:test>
+
 </mule>

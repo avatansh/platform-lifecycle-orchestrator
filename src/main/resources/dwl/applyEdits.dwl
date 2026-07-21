@@ -13,13 +13,14 @@ import rewriteMunitRuntime   from dwl::rewriteMunitRuntime
 import rewriteMuleArtifact   from dwl::rewriteMuleArtifact
 import rewriteCiWorkflow     from dwl::rewriteCiWorkflow
 import rewriteMunitArgLines  from dwl::rewriteMunitArgLines
+import rewritePomVersion     from dwl::rewritePomVersion
 import fromBase64 from dw::core::Binaries
 
 /**
  * base64Content : raw base64 file content from the GitHub Contents API
  * edits         : the edit list for this file (kinds: depVersion, pluginVersion,
  *                 pomProperty, munitRuntimeVersion, muleArtifactJson, ciWorkflow,
- *                 munitArgLines)
+ *                 munitArgLines, pomVersion)
  * returns       : the rewritten file text
  *
  * Inline dependency + plugin <version> rewrites run first, then property rewrites
@@ -44,6 +45,12 @@ fun applyEdits(base64Content, edits) = do {
     // Tier-0 hygiene: strip JPMS argLines from MUnit plugin blocks so MUnit runs on Java 17.
     var argEdit   = (edits filter ((e) -> e.kind == "munitArgLines"))[0]
     var step5     = if (argEdit != null) rewriteMunitArgLines(step4, argEdit.flags) else step4
+    // Minor-bump the app module's own <version> (only ever emitted for the app pom, and only
+    // when the upgrade actually changes something — see dwl::assessment).
+    var verEdit   = (edits filter ((e) -> e.kind == "pomVersion"))[0]
+    var step6     = if (verEdit != null)
+                        rewritePomVersion(step5, (verEdit.artifactId default "") as String, (verEdit.to default "") as String)
+                    else step5
     ---
-    step5
+    step6
 }

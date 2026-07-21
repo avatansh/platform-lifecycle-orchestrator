@@ -514,4 +514,150 @@ rewriteMunitArgLines(samplePom, ["--add-opens", "--add-exports", "--add-modules"
         </munit:validation>
     </munit:test>
 
+    <!-- ══════════════════════════════════════════════════════════════════════════
+         rewritePomVersion — patch-bump ONLY the project's own <version>
+         ══════════════════════════════════════════════════════════════════════════ -->
+
+    <!--
+        Test 13: bumps the project's own <version> and leaves the <parent> version and
+        dependency versions untouched. -SNAPSHOT qualifier preserved.
+    -->
+    <munit:test name="rewritePomVersion-bumps-only-project-version"
+                doc:id="dw-test-0013"
+                description="rewritePomVersion bumps the app's own project version (minor) and never touches the parent or dependency versions">
+        <munit:execution>
+            <ee:transform doc:name="DW invoke rewritePomVersion" doc:id="dw-test-0013-exec">
+                <ee:variables>
+                    <ee:set-variable variableName="result"><![CDATA[%dw 2.0
+import rewritePomVersion from dwl::rewritePomVersion
+output application/java
+var samplePom = "<project>
+  <parent>
+    <groupId>org.acme</groupId>
+    <artifactId>solutions-parent-pom</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+  </parent>
+  <groupId>org.acme</groupId>
+  <artifactId>my-app</artifactId>
+  <version>1.0.0-SNAPSHOT</version>
+  <packaging>mule-application</packaging>
+  <dependencies>
+    <dependency>
+      <groupId>org.mule.connectors</groupId>
+      <artifactId>mule-http-connector</artifactId>
+      <version>1.9.0</version>
+    </dependency>
+  </dependencies>
+</project>"
+---
+rewritePomVersion(samplePom, "my-app", "1.1.0-SNAPSHOT")]]></ee:set-variable>
+                </ee:variables>
+            </ee:transform>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="project version bumped" expression="#[vars.result]" is="#[MunitTools::containsString('&lt;artifactId&gt;my-app&lt;/artifactId&gt;')]" />
+            <munit-tools:assert-that doc:name="new version present" expression="#[vars.result]" is="#[MunitTools::containsString('&lt;version&gt;1.1.0-SNAPSHOT&lt;/version&gt;')]" />
+            <munit-tools:assert-that doc:name="parent version untouched (still one 1.0.0-SNAPSHOT)" expression="#[sizeOf(vars.result scan /1\.0\.0-SNAPSHOT/)]" is="#[MunitTools::equalTo(1)]" />
+            <munit-tools:assert-that doc:name="dependency version untouched" expression="#[vars.result]" is="#[MunitTools::containsString('&lt;version&gt;1.9.0&lt;/version&gt;')]" />
+        </munit:validation>
+    </munit:test>
+
+    <!--
+        Test 14: no-op when the project artifactId isn't the one requested (nothing matches).
+    -->
+    <munit:test name="rewritePomVersion-noop-when-artifact-not-found"
+                doc:id="dw-test-0014"
+                description="rewritePomVersion leaves the text unchanged when the requested artifactId is not declared with a following version tag">
+        <munit:execution>
+            <ee:transform doc:name="DW invoke rewritePomVersion (no match)" doc:id="dw-test-0014-exec">
+                <ee:variables>
+                    <ee:set-variable variableName="result"><![CDATA[%dw 2.0
+import rewritePomVersion from dwl::rewritePomVersion
+output application/java
+var samplePom = "<project><artifactId>my-app</artifactId><version>1.0.0</version></project>"
+---
+rewritePomVersion(samplePom, "some-other-artifact", "9.9.9")]]></ee:set-variable>
+                </ee:variables>
+            </ee:transform>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="unchanged" expression="#[vars.result]" is="#[MunitTools::containsString('&lt;version&gt;1.0.0&lt;/version&gt;')]" />
+            <munit-tools:assert-that doc:name="new version NOT applied" expression="#[vars.result contains '9.9.9']" is="#[MunitTools::equalTo(false)]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- ══════════════════════════════════════════════════════════════════════════
+         rewriteParentPom — self-bump the parent/BOM's OWN <version> when connectors change
+         ══════════════════════════════════════════════════════════════════════════ -->
+
+    <!--
+        Test 15: a managed connector below target is pinned AND the parent/BOM's own <version>
+        is minor-bumped; the <parent> block version is left untouched.
+    -->
+    <munit:test name="rewriteParentPom-selfbumps-minor-when-connectors-change"
+                doc:id="dw-test-0015"
+                description="rewriteParentPom pins a managed connector and minor-bumps the parent's own version, leaving the grandparent version untouched">
+        <munit:execution>
+            <ee:transform doc:name="DW invoke rewriteParentPom (with edits)" doc:id="dw-test-0015-exec">
+                <ee:variables>
+                    <ee:set-variable variableName="result"><![CDATA[%dw 2.0
+import rewriteParentPom from dwl::parentPomRewrite
+output application/java
+var samplePom = "<project>
+  <parent><groupId>c</groupId><artifactId>grandparent</artifactId><version>9.9.9</version></parent>
+  <groupId>c</groupId>
+  <artifactId>my-parent</artifactId>
+  <version>1.0.0</version>
+  <packaging>pom</packaging>
+  <properties><http.connector.version>1.7.0</http.connector.version></properties>
+</project>"
+var matrix = {
+    target: { runtime: "4.9.18", javaVersion: "17" },
+    connectors: [ { property: "http.connector.version", set: "1.11.3", groupId: "org.mule.connectors", artifactId: "mule-http-connector" } ]
+}
+---
+rewriteParentPom(samplePom, matrix, "bom/pom.xml")]]></ee:set-variable>
+                </ee:variables>
+            </ee:transform>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="connector pinned" expression="#[vars.result.text]" is="#[MunitTools::containsString('&lt;http.connector.version&gt;1.11.3&lt;/http.connector.version&gt;')]" />
+            <munit-tools:assert-that doc:name="own version bumped to 1.1.0" expression="#[vars.result.text]" is="#[MunitTools::containsString('&lt;version&gt;1.1.0&lt;/version&gt;')]" />
+            <munit-tools:assert-that doc:name="grandparent version untouched" expression="#[vars.result.text]" is="#[MunitTools::containsString('&lt;version&gt;9.9.9&lt;/version&gt;')]" />
+            <munit-tools:assert-that doc:name="exactly one pomVersion edit" expression="#[sizeOf(vars.result.edits filter ((e) -> e.kind == 'pomVersion'))]" is="#[MunitTools::equalTo(1)]" />
+            <munit-tools:assert-that doc:name="pomVersion edit to=1.1.0" expression="#[(vars.result.edits filter ((e) -> e.kind == 'pomVersion'))[0].to]" is="#[MunitTools::equalTo('1.1.0')]" />
+            <munit-tools:assert-that doc:name="pomVersion edit targets pomPath" expression="#[(vars.result.edits filter ((e) -> e.kind == 'pomVersion'))[0].file]" is="#[MunitTools::equalTo('bom/pom.xml')]" />
+            <munit-tools:assert-that doc:name="one connector edit" expression="#[sizeOf(vars.result.edits filter ((e) -> e.kind != 'pomVersion'))]" is="#[MunitTools::equalTo(1)]" />
+        </munit:validation>
+    </munit:test>
+
+    <!--
+        Test 16: no managed connector is below target → no edits at all, so the parent's own
+        version is NOT bumped (parity with the "never bump on NO_CHANGE" app rule).
+    -->
+    <munit:test name="rewriteParentPom-no-selfbump-when-no-connector-edits"
+                doc:id="dw-test-0016"
+                description="rewriteParentPom does NOT bump the parent version when there are no connector edits">
+        <munit:execution>
+            <ee:transform doc:name="DW invoke rewriteParentPom (no edits)" doc:id="dw-test-0016-exec">
+                <ee:variables>
+                    <ee:set-variable variableName="result"><![CDATA[%dw 2.0
+import rewriteParentPom from dwl::parentPomRewrite
+output application/java
+var samplePom = "<project><groupId>c</groupId><artifactId>my-parent</artifactId><version>1.0.0</version><packaging>pom</packaging></project>"
+var matrix = {
+    target: { runtime: "4.9.18", javaVersion: "17" },
+    connectors: [ { property: "http.connector.version", set: "1.11.3", groupId: "org.mule.connectors", artifactId: "mule-http-connector" } ]
+}
+---
+rewriteParentPom(samplePom, matrix, "pom.xml")]]></ee:set-variable>
+                </ee:variables>
+            </ee:transform>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="no edits at all" expression="#[sizeOf(vars.result.edits default [])]" is="#[MunitTools::equalTo(0)]" />
+            <munit-tools:assert-that doc:name="version unchanged" expression="#[vars.result.text]" is="#[MunitTools::containsString('&lt;version&gt;1.0.0&lt;/version&gt;')]" />
+        </munit:validation>
+    </munit:test>
+
 </mule>
