@@ -125,9 +125,9 @@
         </munit:validation>
     </munit:test>
 
-    <!-- PR_OPEN stale + PR closed unmerged → FAILED_DEPLOY + lock released. -->
+    <!-- PR_OPEN stale + PR closed unmerged → CLOSED + lock released (parity with webhook). -->
     <munit:test name="reconcile-pr-closed-unmerged" doc:id="src-test-0004"
-                description="pf-reconcile finalises a stale PR_OPEN job as FAILED_DEPLOY when the PR was closed unmerged">
+                description="pf-reconcile finalises a stale PR_OPEN job as CLOSED when the PR was closed unmerged">
         <munit:behavior>
             <munit-tools:mock-when doc:name="mock all keys" processor="os:retrieve-all-keys">
                 <munit-tools:then-return><munit-tools:payload mediaType="application/java" value="#[['job-prc']]" /></munit-tools:then-return>

@@ -553,11 +553,11 @@
     </munit:test>
 
     <!-- ==========================================================================
-         Test 10: stage=test + result=success + job NOT parked -> note only (no store)
+         Test 10: stage=test + result=success + job PR_OPEN -> mark MUnit passed + notify
          ========================================================================== -->
-    <munit:test name="post-cd-result-munit-success-not-parked-note-only"
+    <munit:test name="post-cd-result-munit-success-pr-open-marks-passed"
                 doc:id="cd-test-0010"
-                description="An MUnit success for a job that is not parked is acknowledged as a note without changing state">
+                description="An MUnit success for a PR_OPEN job records a munit-passed marker (status stays PR_OPEN) and notifies Slack">
         <munit:behavior>
             <munit-tools:mock-when doc:name="Mock OS retrieve job record (PR_OPEN)" processor="os:retrieve">
                 <munit-tools:with-attributes>
@@ -565,13 +565,61 @@
                 </munit-tools:with-attributes>
                 <munit-tools:then-return>
                     <munit-tools:payload mediaType="application/java"
-                        value="#[{ jobId: 'job-munit-010', status: 'PR_OPEN', appName: 'my-app' }]" />
+                        value="#[{ jobId: 'job-munit-010', status: 'PR_OPEN', appName: 'my-app', prUrl: 'https://gh/pr/10' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="Mock OS store (munit marker)" processor="os:store">
+                <munit-tools:then-return><munit-tools:payload value="#[null]" /></munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="Mock HTTP (Slack)" processor="http:request">
+                <munit-tools:then-return><munit-tools:payload value="#[{ ok: true }]" mediaType="application/json" /></munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <munit:set-event doc:name="event (stage=test success PR_OPEN)">
+                <munit:payload value='#[{ jobId: "job-munit-010", result: "success", stage: "test" }]' />
+                <munit:attributes value="#[{ headers: { 'x-cd-token': 'test-webhook-secret-value-12345!' } }]" />
+            </munit:set-event>
+            <flow-ref name="mf-impl-post-cd-result" doc:name="invoke cd-result" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="munit passed" expression="#[payload.munit]" is="#[MunitTools::equalTo('passed')]" />
+            <munit-tools:assert-that doc:name="status still PR_OPEN" expression="#[payload.status]" is="#[MunitTools::equalTo('PR_OPEN')]" />
+            <!-- The munit-passed marker must have been persisted -->
+            <munit-tools:verify-call doc:name="verify OS store munit marker" processor="os:store">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="#['OS Store MUnit-passed marker']" />
+                </munit-tools:with-attributes>
+            </munit-tools:verify-call>
+            <!-- Slack MUnit-passed notification fired via pf-notify-event -->
+            <munit-tools:verify-call doc:name="verify Slack event POST" processor="http:request" times="1">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="#['POST Slack event notification']" />
+                </munit-tools:with-attributes>
+            </munit-tools:verify-call>
+        </munit:validation>
+    </munit:test>
+
+    <!-- ==========================================================================
+         Test 10b: stage=test + result=success + job NOT parked & NOT PR_OPEN -> note only
+         ========================================================================== -->
+    <munit:test name="post-cd-result-munit-success-not-parked-note-only"
+                doc:id="cd-test-0010b"
+                description="An MUnit success for a job that is neither parked nor PR_OPEN is acknowledged as a note without changing state">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="Mock OS retrieve job record (COMMITTED)" processor="os:retrieve">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="#['OS Retrieve Job Record']" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[{ jobId: 'job-munit-010b', status: 'COMMITTED', appName: 'my-app' }]" />
                 </munit-tools:then-return>
             </munit-tools:mock-when>
         </munit:behavior>
         <munit:execution>
             <munit:set-event doc:name="event (stage=test success not parked)">
-                <munit:payload value='#[{ jobId: "job-munit-010", result: "success", stage: "test" }]' />
+                <munit:payload value='#[{ jobId: "job-munit-010b", result: "success", stage: "test" }]' />
                 <munit:attributes value="#[{ headers: { 'x-cd-token': 'test-webhook-secret-value-12345!' } }]" />
             </munit:set-event>
             <flow-ref name="mf-impl-post-cd-result" doc:name="invoke cd-result" />

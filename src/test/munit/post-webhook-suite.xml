@@ -230,6 +230,11 @@ output text/plain
             </munit-tools:mock-when>
             <!-- os:store is left unmocked: it is a void op that preserves the payload, and
                  verify-call still counts the real invocation against the in-memory test store. -->
+            <!-- The DEPLOYING transition now fires pf-notify-event (Slack). Mock HTTP so no
+                 real network call is attempted (the notify is non-fatal either way). -->
+            <munit-tools:mock-when doc:name="Mock HTTP (Slack deploying)" processor="http:request">
+                <munit-tools:then-return><munit-tools:payload value="#[{ ok: true }]" mediaType="application/json" /></munit-tools:then-return>
+            </munit-tools:mock-when>
         </munit:behavior>
 
         <munit:execution>

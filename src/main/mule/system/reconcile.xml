@@ -83,38 +83,94 @@ import nowUtc from dwl::dates
                                           doc:name="OS Store DEPLOYING" doc:id="pfrc0001-0001-0001-0001-000000000019">
                                     <os:value>#[payload]</os:value>
                                 </os:store>
+
+                                <!-- Slack + Jira: PR merged, now deploying (parity with the webhook path) -->
+                                <set-variable variableName="jobId" value="#[vars.rec.jobId default vars.k]"
+                                              doc:name="PV SET jobId (reconcile deploying)" doc:id="pfrc0001-0001-0001-0001-00000000001a" />
+                                <set-variable variableName="appName" value="#[vars.rec.appName default 'unknown']"
+                                              doc:name="PV SET appName (reconcile deploying)" doc:id="pfrc0001-0001-0001-0001-00000000001b" />
+                                <set-variable variableName="prUrl" value="#[vars.rec.prUrl default null]"
+                                              doc:name="PV SET prUrl (reconcile deploying)" doc:id="pfrc0001-0001-0001-0001-00000000001c" />
+                                <set-variable variableName="jiraTicketId" value="#[vars.rec.jiraTicketId default null]"
+                                              doc:name="PV SET jiraTicketId (reconcile deploying)" doc:id="pfrc0001-0001-0001-0001-00000000001d" />
+                                <ee:transform doc:name="DW Build DEPLOYING notification vars (reconcile)" doc:id="pfrc0001-0001-0001-0001-00000000001e">
+                                    <ee:message /><ee:variables>
+                                        <ee:set-variable variableName="eventSlackText"><![CDATA[%dw 2.0
+output text/plain
+---
+":rocket: *PR merged - deploying* - " ++ (vars.appName default "unknown")
+++ "\nJob " ++ (vars.jobId default "?") ++ " is DEPLOYING; CI/CD is building and deploying."
+++ (if (vars.prUrl != null) ("\n" ++ (vars.prUrl as String)) else "")]]></ee:set-variable>
+                                        <ee:set-variable variableName="jiraCommentText"><![CDATA[%dw 2.0
+output text/plain
+---
+"The Java 17 upgrade PR for " ++ (vars.appName as String) ++ " (job " ++ (vars.jobId as String) ++ ") was merged (detected by reconcile). Deployment is in progress (DEPLOYING)."]]></ee:set-variable>
+                                        <ee:set-variable variableName="jiraCommentUrl"><![CDATA[vars.prUrl default null]]></ee:set-variable>
+                                    </ee:variables>
+                                </ee:transform>
+                                <flow-ref name="pf-notify-event" doc:name="pf-notify-event (reconcile deploying)"
+                                          doc:id="pfrc0001-0001-0001-0001-00000000001f" />
+
                                 <set-variable variableName="fixed" value="#[vars.fixed + 1]"
                                               doc:name="PV fixed++" doc:id="pfrc0001-0001-0001-0001-000000000020" />
-                                <logger level="INFO" doc:name="LOG INFO PR_OPENâ†’DEPLOYING" doc:id="pfrc0001-0001-0001-0001-000000000021"
-                                        message="#[output application/java --- 'reconciled PR_OPEN→DEPLOYING (missed merge webhook)']" />
+                                <logger level="INFO" doc:name="LOG INFO PR_OPEN-&gt;DEPLOYING" doc:id="pfrc0001-0001-0001-0001-000000000021"
+                                        message="#[output application/java --- 'reconciled PR_OPEN->DEPLOYING (missed merge webhook)']" />
                             </when>
 
                             <when expression="#[vars.pr.state == 'closed' and vars.pr.merged == false]"
                                   doc:name="PR closed unmerged" doc:id="pfrc0001-0001-0001-0001-000000000022">
                                 <os:retrieve key="#[vars.k]" objectStore="jobStore"
-                                             doc:name="OS Re-retrieve before FAILED_DEPLOY" doc:id="pfrc0001-0001-0001-0001-000000000023">
+                                             doc:name="OS Re-retrieve before CLOSED" doc:id="pfrc0001-0001-0001-0001-000000000023">
                                     <os:default-value>#[{}]</os:default-value>
                                 </os:retrieve>
-                                <ee:transform doc:name="DW FAILED_DEPLOY closed-unmerged" doc:id="pfrc0001-0001-0001-0001-000000000024">
+                                <!-- Closed WITHOUT merge is CLOSED (not a deploy failure). Keep this in
+                                     lock-step with the webhook path (pf-handle-pr-abandoned) so the same
+                                     event is never labelled two different ways. -->
+                                <ee:transform doc:name="DW CLOSED closed-unmerged" doc:id="pfrc0001-0001-0001-0001-000000000024">
                                     <ee:message><ee:set-payload><![CDATA[%dw 2.0
 output application/json
 import mergeWith from dw::core::Objects
 import nowUtc from dwl::dates
---- payload mergeWith { status: "FAILED_DEPLOY", error: "PR was closed without merging",
+--- payload mergeWith { status: "CLOSED", error: "Pull request was closed without merging",
     completedAt: nowUtc(),
     updatedAt: nowUtc() }]]></ee:set-payload></ee:message>
                                 </ee:transform>
                                 <os:store key="#[vars.k]" objectStore="jobStore"
-                                          doc:name="OS Store FAILED_DEPLOY" doc:id="pfrc0001-0001-0001-0001-000000000025">
+                                          doc:name="OS Store CLOSED" doc:id="pfrc0001-0001-0001-0001-000000000025">
                                     <os:value>#[payload]</os:value>
                                 </os:store>
                                 <set-variable variableName="lockApp" value="#[vars.rec.appName default '']"
                                               doc:name="PV lockApp" doc:id="pfrc0001-0001-0001-0001-000000000026" />
                                 <flow-ref name="pf-release-lock" doc:name="pf-release-lock" doc:id="pfrc0001-0001-0001-0001-000000000027" />
+
+                                <!-- Slack + Jira: CLOSED (parity with the webhook self-heal path) -->
+                                <set-variable variableName="jobId" value="#[vars.rec.jobId default vars.k]"
+                                              doc:name="PV SET jobId (reconcile closed)" doc:id="pfrc0001-0001-0001-0001-000000000028" />
+                                <set-variable variableName="appName" value="#[vars.rec.appName default 'unknown']"
+                                              doc:name="PV SET appName (reconcile closed)" doc:id="pfrc0001-0001-0001-0001-000000000029" />
+                                <set-variable variableName="jiraTicketId" value="#[vars.rec.jiraTicketId default null]"
+                                              doc:name="PV SET jiraTicketId (reconcile closed)" doc:id="pfrc0001-0001-0001-0001-00000000002a" />
+                                <ee:transform doc:name="DW Build CLOSED notification vars" doc:id="pfrc0001-0001-0001-0001-00000000002b">
+                                    <ee:message /><ee:variables>
+                                        <ee:set-variable variableName="eventSlackText"><![CDATA[%dw 2.0
+output text/plain
+---
+":wastebasket: *Java 17 upgrade PR closed without merging* - " ++ (vars.appName default "unknown")
+++ "\nJob " ++ (vars.jobId default "?") ++ " parked (CLOSED); the lock is released so the app can be re-run or reapplied."]]></ee:set-variable>
+                                        <ee:set-variable variableName="jiraCommentText"><![CDATA[%dw 2.0
+output text/plain
+---
+"The Java 17 upgrade PR for " ++ (vars.appName as String) ++ " (job " ++ (vars.jobId as String) ++ ") was closed without merging (detected by reconcile). The job is parked (CLOSED) and the upgrade lock released, so the app can be re-run or reapplied."]]></ee:set-variable>
+                                        <ee:set-variable variableName="jiraCommentUrl"><![CDATA[null]]></ee:set-variable>
+                                    </ee:variables>
+                                </ee:transform>
+                                <flow-ref name="pf-notify-event" doc:name="pf-notify-event (reconcile CLOSED)"
+                                          doc:id="pfrc0001-0001-0001-0001-00000000002c" />
+
                                 <set-variable variableName="fixed" value="#[vars.fixed + 1]"
                                               doc:name="PV fixed++" doc:id="pfrc0001-0001-0001-0001-000000000030" />
-                                <logger level="INFO" doc:name="LOG INFO PR_OPENâ†’FAILED_DEPLOY" doc:id="pfrc0001-0001-0001-0001-000000000031"
-                                        message="#[output application/java --- 'reconciled PR_OPEN→FAILED_DEPLOY (closed unmerged)']" />
+                                <logger level="INFO" doc:name="LOG INFO PR_OPEN-&gt;CLOSED" doc:id="pfrc0001-0001-0001-0001-000000000031"
+                                        message="#[output application/java --- 'reconciled PR_OPEN->CLOSED (closed unmerged)']" />
                             </when>
 
                             <otherwise doc:name="PR still open" doc:id="pfrc0001-0001-0001-0001-000000000032">

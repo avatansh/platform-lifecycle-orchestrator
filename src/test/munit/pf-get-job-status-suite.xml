@@ -344,4 +344,47 @@
 
     </munit:test>
 
+    <!-- ──────────────────────────────────────────────────────────────────────────
+         Test 7: PR_OPEN + munit.result=passed → message reflects the "MUnit passed"
+         sub-stage while status stays PR_OPEN (RAML enum unchanged).
+         ────────────────────────────────────────────────────────────────────────── -->
+    <munit:test name="pf-get-job-status-PR_OPEN-munit-passed"
+                doc:id="jss-test-0007"
+                description="A PR_OPEN job with a munit-passed marker returns the enriched 'MUnit tests passed' message; status stays PR_OPEN">
+
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="Mock OS retrieve — PR_OPEN munit-passed job"
+                                   processor="os:retrieve">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[{
+                        jobId:    'job-mp-007',
+                        status:   'PR_OPEN',
+                        appName:  'test-app',
+                        prNumber: 12,
+                        prUrl:    'https://github.com/owner/repo/pull/12',
+                        munit:    { result: 'passed', at: '2025-06-01T12:00:00Z' }
+                    }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+
+        <munit:execution>
+            <set-variable variableName="jobId" value="job-mp-007" doc:name="PV SET jobId" />
+            <flow-ref name="pf-get-job-status" doc:name="invoke pf-get-job-status" />
+        </munit:execution>
+
+        <munit:validation>
+            <munit-tools:assert-that
+                doc:name="assert status still PR_OPEN"
+                expression="#[payload.status]"
+                is="#[MunitTools::equalTo('PR_OPEN')]" />
+            <munit-tools:assert-that
+                doc:name="assert message reflects MUnit passed"
+                expression="#[payload.message]"
+                is="#[MunitTools::containsString('MUnit tests passed')]" />
+        </munit:validation>
+
+    </munit:test>
+
 </mule>

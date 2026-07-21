@@ -38,11 +38,20 @@ var statusMeta = {
 fun buildJobStatus(rec, jiraBaseUrl = "") = do {
     var meta = statusMeta[rec.status]
                default { message: ("Status: " ++ (rec.status default "UNKNOWN")), nextPollSeconds: 10 }
+    // Sub-stage refinement: several fine-grained lifecycle stages intentionally share
+    // one coarse RAML status value (the enum is fixed). We surface the finer stage
+    // through the `message` field so callers/agents can tell them apart without an
+    // enum change. Currently: "MUnit tests passed" is still PR_OPEN.
+    var munitResult = (rec.munit.result default "") as String
+    var message =
+        if (rec.status == "PR_OPEN" and munitResult == "passed")
+            "MUnit tests passed in CI. Pull request is open and ready for review/merge."
+        else meta.message
     ---
     {
         jobId:           rec.jobId,
         status:          rec.status,
-        message:         meta.message,
+        message:         message,
         nextPollSeconds: meta.nextPollSeconds
     }
     ++ (if (rec.branchName  != null) { branchName:  rec.branchName  } else {})

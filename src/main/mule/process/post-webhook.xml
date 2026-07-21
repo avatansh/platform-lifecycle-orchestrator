@@ -205,6 +205,27 @@ payload mergeWith {
                                             <os:value>#[payload]</os:value>
                                         </os:store>
 
+                                        <!-- Slack + Jira: PR merged, now deploying (non-fatal, payload-preserving) -->
+                                        <set-variable variableName="jiraTicketId" value="#[payload.jiraTicketId default null]"
+                                                      doc:name="PV SET jiraTicketId (deploying)" doc:id="b8c9d0e1-0008-0008-0008-000000000014" />
+                                        <ee:transform doc:name="DW Build DEPLOYING notification vars" doc:id="b8c9d0e1-0008-0008-0008-000000000015">
+                                            <ee:message /><ee:variables>
+                                                <ee:set-variable variableName="eventSlackText"><![CDATA[%dw 2.0
+output text/plain
+---
+":rocket: *PR merged - deploying* - " ++ (vars.appName default "unknown")
+++ "\nJob " ++ (vars.jobId default "?") ++ " is DEPLOYING; CI/CD is building and deploying."
+++ (if (vars.prUrl != null) ("\n" ++ (vars.prUrl as String)) else "")]]></ee:set-variable>
+                                                <ee:set-variable variableName="jiraCommentText"><![CDATA[%dw 2.0
+output text/plain
+---
+"The Java 17 upgrade PR for " ++ (vars.appName as String) ++ " (job " ++ (vars.jobId as String) ++ ") was merged. Deployment is in progress (DEPLOYING)."]]></ee:set-variable>
+                                                <ee:set-variable variableName="jiraCommentUrl"><![CDATA[vars.prUrl default null]]></ee:set-variable>
+                                            </ee:variables>
+                                        </ee:transform>
+                                        <flow-ref name="pf-notify-event" doc:name="pf-notify-event (deploying)"
+                                                  doc:id="b8c9d0e1-0008-0008-0008-000000000016" />
+
                                         <logger level="INFO"
                                                 doc:name="LOG INFO Job DEPLOYING"
                                                 doc:id="b8c9d0e1-0008-0008-0008-000000000012"
@@ -576,17 +597,74 @@ output application/json
 { acknowledged: true, resumed: true, jobId: vars.jobId, status: "PR_OPEN" }]]></ee:set-payload></ee:message>
 				                        </ee:transform>
 				                    </when>
-				                    <otherwise doc:name="not parked — note only"
+				                    <otherwise doc:name="not parked"
 				                               doc:id="c1d2e3f4-000a-000a-000a-000000000027">
-				                        <logger level="INFO" doc:name="LOG INFO MUnit success noted"
-				                                doc:id="c1d2e3f4-000a-000a-000a-000000000028"
-				                        message="#[output application/java --- 'munit success noted (job not parked, status=' ++ (vars.curStatus default '?') ++ ')']" />
-				                        <ee:transform doc:name="DW 200 MUnit success noted" doc:id="c1d2e3f4-000a-000a-000a-000000000029">
-				                            <ee:message><ee:set-payload><![CDATA[%dw 2.0
+				                        <choice doc:name="CHOICE PR_OPEN — record MUnit passed?"
+				                                doc:id="c1d2e3f4-000b-000b-000b-000000000001"
+				                                doc:description="A test success while PR_OPEN is a distinct sub-stage (MUnit passed): mark it + notify. Other statuses stay note-only.">
+				                            <when expression="#[(vars.curStatus default '') == 'PR_OPEN']"
+				                                  doc:name="PR_OPEN — mark MUnit passed + notify"
+				                                  doc:id="c1d2e3f4-000b-000b-000b-000000000002">
+				                                <!-- Persist a MUnit-passed marker so GET /jobs/{jobId} can surface the
+				                                     sub-stage via `message` (status stays PR_OPEN — enum unchanged). -->
+				                                <ee:transform doc:name="DW Mark MUnit passed" doc:id="c1d2e3f4-000b-000b-000b-000000000003">
+				                                    <ee:message><ee:set-payload><![CDATA[%dw 2.0
+output application/json
+import mergeWith from dw::core::Objects
+import nowUtc from dwl::dates
+---
+vars.jobRec mergeWith {
+    munit:     { result: "passed", at: nowUtc() },
+    updatedAt: nowUtc()
+}]]></ee:set-payload></ee:message>
+				                                </ee:transform>
+				                                <os:store key="#[vars.jobId]" objectStore="jobStore"
+				                                          doc:name="OS Store MUnit-passed marker" doc:id="c1d2e3f4-000b-000b-000b-000000000004">
+				                                    <os:value>#[payload]</os:value>
+				                                </os:store>
+
+				                                <!-- Slack + Jira: MUnit passed (non-fatal, payload-preserving) -->
+				                                <ee:transform doc:name="DW Build MUnit-passed notification vars" doc:id="c1d2e3f4-000b-000b-000b-000000000005">
+				                                    <ee:message /><ee:variables>
+				                                        <ee:set-variable variableName="eventSlackText"><![CDATA[%dw 2.0
+output text/plain
+---
+":white_check_mark: *MUnit tests passed* - " ++ (vars.appName default "unknown")
+++ "\nJob " ++ (vars.jobId default "?") ++ " is PR_OPEN and ready for review/merge."
+++ (if (vars.prUrl != null) ("\n" ++ (vars.prUrl as String)) else "")]]></ee:set-variable>
+				                                        <ee:set-variable variableName="jiraCommentText"><![CDATA[%dw 2.0
+output text/plain
+---
+"MUnit tests passed in CI for " ++ (vars.appName as String) ++ " (job " ++ (vars.jobId as String) ++ "). The pull request is open and ready for review/merge."]]></ee:set-variable>
+				                                        <ee:set-variable variableName="jiraCommentUrl"><![CDATA[vars.prUrl default null]]></ee:set-variable>
+				                                    </ee:variables>
+				                                </ee:transform>
+				                                <flow-ref name="pf-notify-event" doc:name="pf-notify-event (MUnit passed)"
+				                                          doc:id="c1d2e3f4-000b-000b-000b-000000000006" />
+
+				                                <logger level="INFO" doc:name="LOG INFO MUnit passed (PR_OPEN)"
+				                                        doc:id="c1d2e3f4-000b-000b-000b-000000000007"
+				                                        message="#[output application/java --- 'munit passed | PR_OPEN marker set + notified | job=' ++ (vars.jobId default '?')]" />
+				                                <ee:transform doc:name="DW 200 MUnit passed Ack" doc:id="c1d2e3f4-000b-000b-000b-000000000008">
+				                                    <ee:message><ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{ acknowledged: true, jobId: vars.jobId, status: "PR_OPEN", munit: "passed" }]]></ee:set-payload></ee:message>
+				                                </ee:transform>
+				                            </when>
+				                            <otherwise doc:name="note only"
+				                                       doc:id="c1d2e3f4-000b-000b-000b-000000000009">
+				                                <logger level="INFO" doc:name="LOG INFO MUnit success noted"
+				                                        doc:id="c1d2e3f4-000a-000a-000a-000000000028"
+				                                message="#[output application/java --- 'munit success noted (job not parked, status=' ++ (vars.curStatus default '?') ++ ')']" />
+				                                <ee:transform doc:name="DW 200 MUnit success noted" doc:id="c1d2e3f4-000a-000a-000a-000000000029">
+				                                    <ee:message><ee:set-payload><![CDATA[%dw 2.0
 output application/json
 ---
 { acknowledged: true, jobId: vars.jobId, status: vars.curStatus, note: "munit success noted" }]]></ee:set-payload></ee:message>
-				                        </ee:transform>
+				                                </ee:transform>
+				                            </otherwise>
+				                        </choice>
 				                    </otherwise>
 				                </choice>
 				            </when>
