@@ -213,4 +213,175 @@ var okList = ((p('anypoint.verify.healthyStatuses') default "") splitBy ",") map
 
     </sub-flow>
 
+    <!-- ==========================================================================
+         pf-read-deployment  (Batch A #1 — assessment cross-check)
+           Requires: vars.vfyApp   (application name as it appears in AMC)
+                     vars.vfyEnv   (environment name, e.g. "Development")
+                     vars.vfyOrgId (business group / org id)
+           Returns:  vars.deployedState = {
+                        reachable:      Boolean,   // Runtime Manager answered
+                        found:          Boolean,   // a deployment matched vfyApp
+                        status:         String,    // AMC status (upper-case) or "UNKNOWN"
+                        runtimeVersion: String|null
+                     }
+
+         Thin normaliser over pf-verify-deployment so the assess flow can compare the
+         REAL deployed runtime against the source pom. Fully non-fatal: pf-verify-deployment
+         already swallows platform/network errors (yielding verified=false), so this never
+         raises and the caller falls back to a source-only assessment.
+         ========================================================================== -->
+    <sub-flow name="pf-read-deployment"
+              doc:id="pfpt0005-0005-0005-0005-000000000001">
+
+        <logger level="INFO" doc:name="LOG INFO START pf-read-deployment" doc:id="pfpt0005-0005-0005-0005-000000000002" message="#[output application/java --- 'START - pf-read-deployment | app=' ++ (vars.vfyApp default '?') ++ ' | env=' ++ (vars.vfyEnv default '?')]" />
+        <flow-ref name="pf-verify-deployment"
+                  doc:name="pf-verify-deployment"
+                  doc:id="pfpt0005-0005-0005-0005-000000000003" />
+        <set-variable variableName="deployedState"
+                      doc:name="PV SET vars.deployedState"
+                      doc:id="pfpt0005-0005-0005-0005-000000000004"
+                      value="#[output application/java
+---
+{
+    reachable:      ((vars.verify.status default 'UNKNOWN') != 'UNKNOWN') or (vars.verify.found default false),
+    found:          (vars.verify.found default false),
+    status:         (vars.verify.status default 'UNKNOWN'),
+    runtimeVersion: (vars.verify.runtimeVersion default null)
+}]" />
+        <logger level="INFO" doc:name="LOG INFO END pf-read-deployment" doc:id="pfpt0005-0005-0005-0005-000000000005" message="#[output application/java --- 'END - pf-read-deployment | reachable=' ++ (vars.deployedState.reachable default false) ++ ' | found=' ++ (vars.deployedState.found default false) ++ ' | runtimeVersion=' ++ (vars.deployedState.runtimeVersion default 'null')]" />
+
+    </sub-flow>
+
+    <!-- ==========================================================================
+         pf-read-api-policies  (Batch A #6 — real API-policy detection)
+           Requires: vars.apApp   (application name; matched against API Manager assetId)
+                     vars.apEnv   (environment name, e.g. "Development")
+                     vars.apOrgId (business group / org id)
+           Returns:  vars.hasApiPolicies (Boolean) — set from the app's applied policies.
+
+         Resolves envId (cached per org), lists API Manager instances for the org/env,
+         matches one to the app by assetId, then reads its applied policies and sets
+         vars.hasApiPolicies = (at least one ENABLED policy). When no API instance matches
+         the app, the app has no managed API → hasApiPolicies=false.
+
+         Non-fatal: ANY platform/network/schema error leaves vars.hasApiPolicies UNCHANGED
+         (the scanFlags placeholder, false) so the assessment is never blocked. API Manager
+         response shapes vary by version, so every field is read defensively.
+         ========================================================================== -->
+    <sub-flow name="pf-read-api-policies"
+              doc:id="pfpt0006-0006-0006-0006-000000000001">
+
+        <logger level="INFO" doc:name="LOG INFO START pf-read-api-policies" doc:id="pfpt0006-0006-0006-0006-000000000002" message="#[output application/java --- 'START - pf-read-api-policies | app=' ++ (vars.apApp default '?') ++ ' | env=' ++ (vars.apEnv default '?')]" />
+        <try doc:name="TRY api-policy read (non-fatal)"
+             doc:id="pfpt0006-0006-0006-0006-000000000003">
+
+            <flow-ref name="pf-get-anypoint-token"
+                      doc:name="pf-get-anypoint-token"
+                      doc:id="pfpt0006-0006-0006-0006-000000000004" />
+
+            <!-- Resolve environment name → envId (shares the per-org env cache with verify) -->
+            <set-variable variableName="vfyOrgId"
+                          value="#[vars.apOrgId default '']"
+                          doc:name="PV SET vars.vfyOrgId (env cache key)"
+                          doc:id="pfpt0006-0006-0006-0006-000000000005" />
+            <ee:cache cachingStrategy-ref="anypointEnvCachingStrategy"
+                      doc:name="CACHE org environments"
+                      doc:id="pfpt0006-0006-0006-0006-000000000006">
+                <http:request method="GET"
+                              config-ref="Anypoint_Request"
+                              path="#['/accounts/api/organizations/' ++ (vars.apOrgId default '') ++ '/environments']"
+                              doc:name="GET org environments"
+                              doc:id="pfpt0006-0006-0006-0006-000000000007">
+                    <http:headers><![CDATA[#[{ "Authorization": "Bearer " ++ (vars.anypointToken default "") }]]]></http:headers>
+                </http:request>
+            </ee:cache>
+            <set-variable variableName="envId"
+                          value="#[((payload.data default []) filter ((e) -> upper(e.name default '') == upper(vars.apEnv default '')))[0].id default '']"
+                          doc:name="PV SET vars.envId"
+                          doc:id="pfpt0006-0006-0006-0006-000000000008" />
+
+            <!-- List API instances for this org/env -->
+            <http:request method="GET"
+                          config-ref="Anypoint_Request"
+                          path="#['/apimanager/api/v1/organizations/' ++ (vars.apOrgId default '') ++ '/environments/' ++ (vars.envId default '') ++ '/apis']"
+                          target="apisResp"
+                          doc:name="GET API Manager apis"
+                          doc:id="pfpt0006-0006-0006-0006-000000000009">
+                <http:headers><![CDATA[#[{ "Authorization": "Bearer " ++ (vars.anypointToken default "") }]]]></http:headers>
+            </http:request>
+
+            <!-- Match one API instance to the app by assetId (defensive across schemas) -->
+            <set-variable variableName="apiInstanceId"
+                          doc:name="PV SET vars.apiInstanceId"
+                          doc:id="pfpt0006-0006-0006-0006-00000000000a"
+                          value="#[%dw 2.0
+output application/java
+---
+do {
+    var r       = vars.apisResp default {}
+    var grouped = (r.assets default [])
+    var flat    = if (!isEmpty(grouped))
+                    flatten(grouped map ((a) ->
+                        (a.apis default []) map ((api) ->
+                            { id: (api.id default null),
+                              key: lower((a.assetId default a.exchangeAssetName default '') as String) })))
+                  else ((r.instances default []) map ((api) ->
+                            { id: (api.id default null),
+                              key: lower(((api.assetId default api.exchangeAssetName default '')) as String) }))
+    var app     = lower((vars.apApp default '') as String)
+    var match   = (flat filter ((x) ->
+                     (x.id != null) and (x.key != '') and ((x.key contains app) or (app contains x.key))))[0]
+    ---
+    if (match == null) null else (match.id as String)
+}]" />
+
+            <choice doc:name="CHOICE api instance matched?"
+                    doc:id="pfpt0006-0006-0006-0006-00000000000b">
+                <when expression="#[vars.apiInstanceId != null]"
+                      doc:id="pfpt0006-0006-0006-0006-00000000000c">
+                    <http:request method="GET"
+                                  config-ref="Anypoint_Request"
+                                  path="#['/apimanager/api/v1/organizations/' ++ (vars.apOrgId default '') ++ '/environments/' ++ (vars.envId default '') ++ '/apis/' ++ (vars.apiInstanceId default '') ++ '/policies']"
+                                  target="policiesResp"
+                                  doc:name="GET applied policies"
+                                  doc:id="pfpt0006-0006-0006-0006-00000000000d">
+                        <http:headers><![CDATA[#[{ "Authorization": "Bearer " ++ (vars.anypointToken default "") }]]]></http:headers>
+                    </http:request>
+                    <set-variable variableName="hasApiPolicies"
+                                  doc:name="PV SET vars.hasApiPolicies"
+                                  doc:id="pfpt0006-0006-0006-0006-00000000000e"
+                                  value="#[%dw 2.0
+output application/java
+---
+do {
+    var p    = vars.policiesResp default {}
+    var pols = (p.policies default (if (p is Array) p else []))
+    --- sizeOf((pols default []) filter ((x) -> !(x.disabled default false))) > 0
+}]" />
+                </when>
+                <otherwise doc:id="pfpt0006-0006-0006-0006-00000000000f">
+                    <set-variable variableName="hasApiPolicies"
+                                  value="#[false]"
+                                  doc:name="PV SET vars.hasApiPolicies (no api instance)"
+                                  doc:id="pfpt0006-0006-0006-0006-000000000010" />
+                    <logger level="INFO" doc:name="LOG INFO no api instance matched" doc:id="pfpt0006-0006-0006-0006-000000000011" message="#[output application/java --- 'no API Manager instance matched app=' ++ (vars.apApp default '?') ++ ' in env=' ++ (vars.apEnv default '?') ++ ' — hasApiPolicies=false']" />
+                </otherwise>
+            </choice>
+
+            <error-handler>
+                <on-error-continue type="ANY"
+                                   doc:name="api-policy read failed → leave unchanged"
+                                   doc:id="pfpt0006-0006-0006-0006-000000000012">
+                    <logger level="WARN"
+                            doc:name="LOG WARN api-policy read failed (non-fatal)"
+                            doc:id="pfpt0006-0006-0006-0006-000000000013"
+                            message="#[output application/java --- 'api-policy read failed (non-fatal), keeping hasApiPolicies unchanged | app=' ++ (vars.apApp default '?') ++ ' | error=' ++ (error.description default 'unknown')]" />
+                </on-error-continue>
+            </error-handler>
+
+        </try>
+        <logger level="INFO" doc:name="LOG INFO END pf-read-api-policies" doc:id="pfpt0006-0006-0006-0006-000000000014" message="#[output application/java --- 'END - pf-read-api-policies | hasApiPolicies=' ++ (vars.hasApiPolicies default false)]" />
+
+    </sub-flow>
+
 </mule>

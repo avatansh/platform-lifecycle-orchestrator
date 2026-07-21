@@ -228,6 +228,74 @@ scanFlags(vars.tree, vars.appPomText)]]></ee:set-variable>
 				<ee:set-variable variableName="warnings" ><![CDATA[#[vars.flags.warnings]]]></ee:set-variable>
 			</ee:variables>
 		</ee:transform>
+		<!-- ============================================================================
+		     Batch A #6 — real API-policy detection (gated by assess.apiPolicyCheck, non-fatal).
+		     Overrides the scanFlags placeholder (hasApiPolicies=false) with the app's real
+		     API Manager policy state. Any failure is swallowed inside pf-read-api-policies
+		     (and this TRY), leaving hasApiPolicies at its safe default.
+		     ============================================================================ -->
+		<choice doc:name="CHOICE assess.apiPolicyCheck on?" doc:id="a8f8c1c7-66e2-441e-af4d-59e690aea001" doc:description="Only read API Manager when the environment opts in via assess.apiPolicyCheck">
+			<when expression="#[(p('assess.apiPolicyCheck') default 'false') == 'true']" doc:id="a8f8c1c7-66e2-441e-af4d-59e690aea002">
+				<try doc:name="TRY api-policy read (non-fatal)" doc:id="a8f8c1c7-66e2-441e-af4d-59e690aea003">
+					<set-variable variableName="apOrgId" value="#[vars.coords.orgId default p('anypoint.defaultOrgId')]" doc:name="PV SET vars.apOrgId" doc:id="a8f8c1c7-66e2-441e-af4d-59e690aea004" />
+					<set-variable variableName="apEnv" value="#[vars.environment]" doc:name="PV SET vars.apEnv" doc:id="a8f8c1c7-66e2-441e-af4d-59e690aea005" />
+					<set-variable variableName="apApp" value="#[vars.appName]" doc:name="PV SET vars.apApp" doc:id="a8f8c1c7-66e2-441e-af4d-59e690aea006" />
+					<flow-ref name="pf-read-api-policies" doc:name="pf-read-api-policies" doc:id="a8f8c1c7-66e2-441e-af4d-59e690aea007" />
+					<error-handler>
+						<on-error-continue type="ANY" doc:name="api-policy read failed (non-fatal)" doc:id="a8f8c1c7-66e2-441e-af4d-59e690aea008">
+							<logger level="WARN" doc:name="LOG WARN api-policy read failed" doc:id="a8f8c1c7-66e2-441e-af4d-59e690aea009" message="#[output application/java --- 'assess api-policy read failed (non-fatal) | app=' ++ (vars.appName default '?') ++ ' | error=' ++ (error.description default 'unknown')]" />
+						</on-error-continue>
+					</error-handler>
+				</try>
+			</when>
+		</choice>
+		<!-- ============================================================================
+		     Batch A #1 — live Runtime Manager cross-check (gated by assess.armCrossCheck, non-fatal).
+		     Reads the app's REAL deployed runtime and appends a source-vs-deployed NOTE to
+		     vars.warnings. Never overrides currentRuntime/currentJavaVersion (source/Git remains
+		     the source of truth for the change plan). Any failure leaves warnings unchanged.
+		     ============================================================================ -->
+		<choice doc:name="CHOICE assess.armCrossCheck on?" doc:id="a8f8c1c7-66e2-441e-af4d-59e690aeb001" doc:description="Only read Runtime Manager when the environment opts in via assess.armCrossCheck">
+			<when expression="#[(p('assess.armCrossCheck') default 'false') == 'true']" doc:id="a8f8c1c7-66e2-441e-af4d-59e690aeb002">
+				<try doc:name="TRY arm cross-check (non-fatal)" doc:id="a8f8c1c7-66e2-441e-af4d-59e690aeb003">
+					<set-variable variableName="vfyApp" value="#[vars.appName]" doc:name="PV SET vars.vfyApp" doc:id="a8f8c1c7-66e2-441e-af4d-59e690aeb004" />
+					<set-variable variableName="vfyEnv" value="#[vars.environment]" doc:name="PV SET vars.vfyEnv" doc:id="a8f8c1c7-66e2-441e-af4d-59e690aeb005" />
+					<set-variable variableName="vfyOrgId" value="#[vars.coords.orgId default p('anypoint.defaultOrgId')]" doc:name="PV SET vars.vfyOrgId" doc:id="a8f8c1c7-66e2-441e-af4d-59e690aeb006" />
+					<flow-ref name="pf-read-deployment" doc:name="pf-read-deployment" doc:id="a8f8c1c7-66e2-441e-af4d-59e690aeb007" />
+					<ee:transform doc:name="DW Append ARM cross-check warning" doc:id="a8f8c1c7-66e2-441e-af4d-59e690aeb008">
+						<ee:variables>
+							<ee:set-variable variableName="warnings"><![CDATA[%dw 2.0
+output application/java
+import resolveProp from dwl::assessment
+---
+(vars.warnings default []) ++ (do {
+    var ds       = vars.deployedState default {}
+    var deployed = (ds.runtimeVersion default null)
+    var source   = (resolveProp(vars.chain, "app.runtime") default resolveProp(vars.chain, "app.runtime.semver") default null)
+    ---
+    if ((ds.found default false) and deployed != null and source != null and (lower(trim(deployed as String)) != lower(trim(source as String))))
+        [ ("NOTE: " ++ (vars.appName default 'this app') ++ " is deployed on Mule runtime " ++ (deployed as String)
+           ++ " in '" ++ (vars.environment default '?') ++ "', but the source pom declares " ++ (source as String)
+           ++ ". The change plan is computed from source (Git); confirm the deployed app matches the branch being upgraded.") ]
+    else if (ds.found default false)
+        []
+    else if (!(ds.reachable default false))
+        [ ("NOTE: Runtime Manager could not be reached during assessment for '" ++ (vars.appName default 'this app')
+           ++ "' in '" ++ (vars.environment default '?') ++ "'; the assessment is based on source (Git) only.") ]
+    else
+        [ ("NOTE: no running deployment was found in Runtime Manager for '" ++ (vars.appName default 'this app')
+           ++ "' in environment '" ++ (vars.environment default '?') ++ "'; the assessment is based on source (Git) only.") ]
+})]]></ee:set-variable>
+						</ee:variables>
+					</ee:transform>
+					<error-handler>
+						<on-error-continue type="ANY" doc:name="arm cross-check failed (non-fatal)" doc:id="a8f8c1c7-66e2-441e-af4d-59e690aeb009">
+							<logger level="WARN" doc:name="LOG WARN arm cross-check failed" doc:id="a8f8c1c7-66e2-441e-af4d-59e690aeb00a" message="#[output application/java --- 'assess arm cross-check failed (non-fatal) | app=' ++ (vars.appName default '?') ++ ' | error=' ++ (error.description default 'unknown')]" />
+						</on-error-continue>
+					</error-handler>
+				</try>
+			</when>
+		</choice>
 		<choice doc:name="CHOICE fetch mule-artifact.json?" doc:id="38855c51-99bc-4313-89d0-8e98a883ebef" doc:description="Fetch and parse mule-artifact.json only when present in the tree" >
 			<when expression="#[vars.muleArtifactExists default false]" doc:id="pf000001-0001-0001-0001-0000000000a1" >
 				<set-variable value="#['/repos/' ++ vars.coords.owner ++ '/' ++ vars.coords.repo ++ '/contents/' ++ vars.muleArtifactPath]" doc:name="Set urlPath" doc:id="88352539-936b-44dd-8512-5cc02e10b4e9" variableName="urlPath"/>

@@ -36,6 +36,14 @@ anypoint:
     # AMC/CH2.0 deployment statuses treated as a healthy/successful deploy (comma-separated, upper-case).
     healthyStatuses: "RUNNING,APPLIED,STARTED,PARTIALLY_STARTED"
 
+assess:
+  # Batch A — live Anypoint Platform cross-checks during POST /jobs/assess. Both are
+  # BEST-EFFORT and NON-FATAL: any auth/network/schema issue is swallowed and the
+  # assessment falls back to source-only (Git). OFF by default so base/prod behaviour is
+  # unchanged until an environment with reachable Anypoint creds explicitly opts in.
+  armCrossCheck:  "false"   # read Runtime Manager (ARM) and warn when the deployed runtime differs from the source pom
+  apiPolicyCheck: "false"   # read API Manager and set changePlan.hasApiPolicies from the app's applied policies
+
 matrix:
   path: "matrix/compatibility-matrix.yaml"   # classpath copy — packaged in the app; used as fallback
   source: "exchange-latest"                  # exchange | exchange-latest | classpath

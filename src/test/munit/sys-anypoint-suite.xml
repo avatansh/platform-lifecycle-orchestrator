@@ -97,4 +97,157 @@
         </munit:validation>
     </munit:test>
 
+    <!-- ======================================================================
+         Batch A #1 — pf-read-deployment (assessment ARM cross-check normaliser)
+         ====================================================================== -->
+
+    <!-- pf-read-deployment — deployment found → runtimeVersion surfaced -->
+    <munit:test name="anypoint-read-deployment-found" doc:id="sap-test-0004"
+                description="pf-read-deployment normalises a found deployment into vars.deployedState with runtimeVersion">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="mock Anypoint HTTP" processor="http:request">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                                         value="#[{
+                                             access_token: 'tok-123',
+                                             data:  [ { name: 'Development', id: 'env-1' } ]
+                                         }]" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="deployments"
+                                              value="#[{ items: [ { name: 'rd-app', application: { status: 'RUNNING' }, target: { deploymentSettings: { runtimeVersion: '4.6.0' } } } ] }]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-variable variableName="vfyApp" value="rd-app" doc:name="PV vfyApp" />
+            <set-variable variableName="vfyEnv" value="Development" doc:name="PV vfyEnv" />
+            <set-variable variableName="vfyOrgId" value="org-rd-1" doc:name="PV vfyOrgId" />
+            <flow-ref name="pf-read-deployment" doc:name="invoke pf-read-deployment" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="found" expression="#[vars.deployedState.found]" is="#[MunitTools::equalTo(true)]" />
+            <munit-tools:assert-that doc:name="reachable" expression="#[vars.deployedState.reachable]" is="#[MunitTools::equalTo(true)]" />
+            <munit-tools:assert-that doc:name="runtimeVersion" expression="#[vars.deployedState.runtimeVersion]" is="#[MunitTools::equalTo('4.6.0')]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- pf-read-deployment — platform answered but no matching deployment -->
+    <munit:test name="anypoint-read-deployment-not-found" doc:id="sap-test-0005"
+                description="pf-read-deployment reports reachable but not found when no deployment matches">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="mock Anypoint HTTP" processor="http:request">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                                         value="#[{
+                                             access_token: 'tok-123',
+                                             data:  [ { name: 'Development', id: 'env-1' } ]
+                                         }]" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="deployments" value="#[{ items: [] }]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-variable variableName="vfyApp" value="no-such-app" doc:name="PV vfyApp" />
+            <set-variable variableName="vfyEnv" value="Development" doc:name="PV vfyEnv" />
+            <set-variable variableName="vfyOrgId" value="org-rd-2" doc:name="PV vfyOrgId" />
+            <flow-ref name="pf-read-deployment" doc:name="invoke pf-read-deployment" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="not found" expression="#[vars.deployedState.found]" is="#[MunitTools::equalTo(false)]" />
+            <munit-tools:assert-that doc:name="reachable" expression="#[vars.deployedState.reachable]" is="#[MunitTools::equalTo(true)]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- ======================================================================
+         Batch A #6 — pf-read-api-policies (real API-policy detection)
+         ====================================================================== -->
+
+    <!-- pf-read-api-policies — matching API instance WITH an enabled policy → true -->
+    <munit:test name="anypoint-read-api-policies-present" doc:id="sap-test-0006"
+                description="pf-read-api-policies sets hasApiPolicies=true when a matched API instance has an enabled policy">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="mock Anypoint HTTP" processor="http:request">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                                         value="#[{
+                                             access_token: 'tok-123',
+                                             data:  [ { name: 'Development', id: 'env-1' } ]
+                                         }]" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="apisResp"
+                                              value="#[{ assets: [ { assetId: 'pol-app', apis: [ { id: 'api-55' } ] } ] }]" />
+                        <munit-tools:variable key="policiesResp"
+                                              value="#[{ policies: [ { policyId: 1, disabled: false } ] }]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-variable variableName="hasApiPolicies" value="#[false]" doc:name="PV hasApiPolicies seed" />
+            <set-variable variableName="apOrgId" value="org-ap-1" doc:name="PV apOrgId" />
+            <set-variable variableName="apEnv" value="Development" doc:name="PV apEnv" />
+            <set-variable variableName="apApp" value="pol-app" doc:name="PV apApp" />
+            <flow-ref name="pf-read-api-policies" doc:name="invoke pf-read-api-policies" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="hasApiPolicies true" expression="#[vars.hasApiPolicies]" is="#[MunitTools::equalTo(true)]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- pf-read-api-policies — no matching API instance → false (no managed API) -->
+    <munit:test name="anypoint-read-api-policies-none" doc:id="sap-test-0007"
+                description="pf-read-api-policies sets hasApiPolicies=false when no API instance matches the app">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="mock Anypoint HTTP" processor="http:request">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                                         value="#[{
+                                             access_token: 'tok-123',
+                                             data:  [ { name: 'Development', id: 'env-1' } ]
+                                         }]" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="apisResp"
+                                              value="#[{ assets: [ { assetId: 'other-app', apis: [ { id: 'api-1' } ] } ] }]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-variable variableName="hasApiPolicies" value="#[true]" doc:name="PV hasApiPolicies seed" />
+            <set-variable variableName="apOrgId" value="org-ap-2" doc:name="PV apOrgId" />
+            <set-variable variableName="apEnv" value="Development" doc:name="PV apEnv" />
+            <set-variable variableName="apApp" value="pol-app" doc:name="PV apApp" />
+            <flow-ref name="pf-read-api-policies" doc:name="invoke pf-read-api-policies" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="hasApiPolicies false" expression="#[vars.hasApiPolicies]" is="#[MunitTools::equalTo(false)]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- pf-read-api-policies — platform error → hasApiPolicies left UNCHANGED (non-fatal) -->
+    <munit:test name="anypoint-read-api-policies-error" doc:id="sap-test-0008"
+                description="pf-read-api-policies swallows platform errors and leaves hasApiPolicies unchanged">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="mock Anypoint HTTP error" processor="http:request">
+                <munit-tools:then-return>
+                    <munit-tools:error typeId="HTTP:CONNECTIVITY" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <os:clear objectStore="anypointTokenCacheOS" doc:name="clear token cache" />
+            <set-variable variableName="hasApiPolicies" value="#[true]" doc:name="PV hasApiPolicies seed" />
+            <set-variable variableName="apOrgId" value="org-ap-3" doc:name="PV apOrgId" />
+            <set-variable variableName="apEnv" value="Development" doc:name="PV apEnv" />
+            <set-variable variableName="apApp" value="err-app" doc:name="PV apApp" />
+            <flow-ref name="pf-read-api-policies" doc:name="invoke pf-read-api-policies" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="hasApiPolicies unchanged" expression="#[vars.hasApiPolicies]" is="#[MunitTools::equalTo(true)]" />
+        </munit:validation>
+    </munit:test>
+
 </mule>

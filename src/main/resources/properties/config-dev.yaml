@@ -20,6 +20,12 @@ anypoint:
     # trust the CI (cd-result) signal. Set "true" once deploying to a real environment.
     enabled: "true"
 
+assess:
+  # Batch A cross-checks ON in dev/demo (Anypoint creds are configured here). Still fully
+  # non-fatal — if the platform is unreachable the assessment silently stays source-only.
+  armCrossCheck:  "true"
+  apiPolicyCheck: "true"
+
 slack:
   channel: "#java17-upgrades"
 

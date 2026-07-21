@@ -389,7 +389,10 @@ fun scanFlags(tree, appPomText) = do {
     {
         customJavaFound: customJava,
         lookupFound:     lookupInPom,
-        hasApiPolicies:  false,    // TODO: query Anypoint API Manager for applied policies
+        // Safe default only. Real detection is done in-flow by pf-read-api-policies (Batch A),
+        // which queries API Manager for the app's applied policies and overrides vars.hasApiPolicies
+        // when assess.apiPolicyCheck is enabled. Stays false when the check is off or unreachable.
+        hasApiPolicies:  false,
         warnings:        truncWarning ++ javaWarning ++ lookupWarning
     }
 }
