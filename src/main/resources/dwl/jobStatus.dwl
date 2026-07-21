@@ -16,6 +16,7 @@ var statusMeta = {
     PR_OPEN:       { message: "Pull request is open and ready for review/merge.",           nextPollSeconds: 0  },
     NO_CHANGE:     { message: "No changes required — the target already meets the Java 17 matrix.", nextPollSeconds: 0 },
     MUNIT_FAILED:  { message: "MUnit tests failed in CI. Paused for human action — fix the tests; the job resumes automatically when CI reports a test success.", nextPollSeconds: 300 },
+    DEP_GUARD_FAILED: { message: "Java 17 dependency guard failed in CI: one or more resolved connectors (incl. transitives) are below their Java 17 minimum. Paused for human action — pin the connector(s) to a Java 17-compatible version; the job resumes automatically when CI reports a dependency-guard success. See `report` for the offending dependencies.", nextPollSeconds: 300 },
     DEPLOYING:     { message: "PR merged; CI/CD is building and deploying.",                nextPollSeconds: 10 },
     DEPLOYED:      { message: "Upgrade deployed successfully.",                             nextPollSeconds: 0  },
     CLOSED:        { message: "The upgrade pull request was closed without merging. The job is closed and the app lock released — re-run or reapply to try again.", nextPollSeconds: 0 },
@@ -62,4 +63,7 @@ fun buildJobStatus(rec, jiraBaseUrl = "") = do {
           { jiraUrl: (jiraBaseUrl ++ "/browse/" ++ (rec.jiraTicketId as String)) } else {})
     ++ (if (rec.completedAt != null) { completedAt:  rec.completedAt } else {})
     ++ (if (rec.error       != null) { error:        rec.error       } else {})
+    // Java-17 dependency-guard violations (only present when the guard has run and found
+    // offending dependencies). Surfaced so callers/agents can show what to pin.
+    ++ (if (!isEmpty(rec.depGuard.report default [])) { report: rec.depGuard.report } else {})
 }

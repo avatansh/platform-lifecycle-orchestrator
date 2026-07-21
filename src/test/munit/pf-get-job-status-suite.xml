@@ -387,4 +387,57 @@
 
     </munit:test>
 
+    <!-- ──────────────────────────────────────────────────────────────────────────
+         Test 8: DEP_GUARD_FAILED → paused message + report array surfaced from
+         depGuard.report so the caller/agent knows exactly what to pin.
+         ────────────────────────────────────────────────────────────────────────── -->
+    <munit:test name="pf-get-job-status-DEP_GUARD_FAILED"
+                doc:id="jss-test-0008"
+                description="A DEP_GUARD_FAILED job surfaces the dependency-guard violations report and a paused message">
+
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="Mock OS retrieve — DEP_GUARD_FAILED job"
+                                   processor="os:retrieve">
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[{
+                        jobId:    'job-dg-008',
+                        status:   'DEP_GUARD_FAILED',
+                        appName:  'test-app',
+                        prUrl:    'https://github.com/owner/repo/pull/8',
+                        error:    '1 Java 17 dependency violation',
+                        depGuard: { at: '2025-06-01T12:00:00Z', report: [
+                            { groupId: 'org.mule.connectors', artifactId: 'mule-objectstore-connector', resolvedVersion: '1.2.0', requiredVersion: '1.2.2', reason: 'below Java 17 minimum' }
+                        ] }
+                    }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+
+        <munit:execution>
+            <set-variable variableName="jobId" value="job-dg-008" doc:name="PV SET jobId" />
+            <flow-ref name="pf-get-job-status" doc:name="invoke pf-get-job-status" />
+        </munit:execution>
+
+        <munit:validation>
+            <munit-tools:assert-that
+                doc:name="assert status = DEP_GUARD_FAILED"
+                expression="#[payload.status]"
+                is="#[MunitTools::equalTo('DEP_GUARD_FAILED')]" />
+            <munit-tools:assert-that
+                doc:name="assert report surfaced (1 entry)"
+                expression="#[sizeOf(payload.report default [])]"
+                is="#[MunitTools::equalTo(1)]" />
+            <munit-tools:assert-that
+                doc:name="assert report names the offending artifact"
+                expression="#[payload.report[0].artifactId]"
+                is="#[MunitTools::equalTo('mule-objectstore-connector')]" />
+            <munit-tools:assert-that
+                doc:name="assert message mentions dependency guard"
+                expression="#[payload.message]"
+                is="#[MunitTools::containsString('dependency guard')]" />
+        </munit:validation>
+
+    </munit:test>
+
 </mule>

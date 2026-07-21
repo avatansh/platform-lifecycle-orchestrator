@@ -241,6 +241,12 @@
                 MUNIT_FAILED is a non-terminal PAUSE that needs human action: the app's MUnit suite
                 failed in CI (see the error field) and the job waits (retained ~30 days) until a human
                 fixes the tests and CI reports a test success, which resumes it automatically.
+                DEP_GUARD_FAILED is a similar non-terminal PAUSE: the CI Java-17 dependency guard
+                resolved the full dependency tree and found a Mule connector (often a transitive one)
+                below its Java-17 minimum. The offending dependencies are listed in the `report` array
+                (each with groupId, artifactId, resolvedVersion, requiredVersion). Pin the connector(s)
+                to a Java-17-compatible version; the job resumes automatically when CI reports a
+                dependency-guard success.
                 When status is PR_OPEN the prUrl field contains the GitHub pull request link. Honour
                 the nextPollSeconds hint in the response as the suggested wait before polling again.
             </mcp:description>
@@ -300,7 +306,7 @@
                 Re-launch a Java 17 upgrade for the SAME application using a previous job's stored
                 inputs, re-assessed against the CURRENT compatibility matrix. Use this after the matrix
                 was republished to cover a connector that was previously un-pinned, or to retry a
-                MUNIT_FAILED / FAILED_* / CLOSED job without re-typing coordinates. Mints a NEW jobId
+                MUNIT_FAILED / DEP_GUARD_FAILED / FAILED_* / CLOSED job without re-typing coordinates. Mints a NEW jobId
                 (poll it with get_job_status) and opens a fresh pull request. The previous job's lock
                 is released automatically before the relaunch.
             </mcp:description>

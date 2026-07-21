@@ -381,6 +381,9 @@ output application/json
 						<ee:set-variable variableName="stage" ><![CDATA[payload.stage default 'deploy']]></ee:set-variable>
 						<ee:set-variable variableName="deployUrl" ><![CDATA[payload.deployUrl default null]]></ee:set-variable>
 						<ee:set-variable variableName="cdError" ><![CDATA[payload.error default null]]></ee:set-variable>
+						<!-- dependency-guard: summarized violations array (captured here, before os:retrieve
+						     overwrites payload with the job record). Empty for other stages. -->
+						<ee:set-variable variableName="cdReport" ><![CDATA[payload.report default []]]></ee:set-variable>
 					</ee:variables>
 				</ee:transform>
 				<os:retrieve key="#[vars.jobId]"
@@ -413,15 +416,18 @@ output application/json
                 <!-- â”€â”€ Step 5: Idempotency / terminal guard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                      If the job is already in a terminal state, return 200 and skip re-processing.
                      â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
-				<!-- ── Step 5: Stage discriminator (test | deploy) ───────────────────────────────
-				     ONE endpoint serves two CI/CD stages, keyed off payload.stage (default "deploy"):
-				       · stage=test   → MUnit CI result. failure parks the job in MUNIT_FAILED
-				                        (Slack + Jira notified, retained 30d); success resumes a parked job.
-				       · stage=deploy → deployment result — the existing finalize logic below.
+				<!-- ── Step 5: Stage discriminator (test | dependency-guard | deploy) ─────────────
+				     ONE endpoint serves three CI/CD stages, keyed off payload.stage (default "deploy"):
+				       · stage=test             → MUnit CI result. failure parks the job in MUNIT_FAILED
+				                                  (Slack + Jira, retained 30d); success resumes a parked job.
+				       · stage=dependency-guard → Java-17 dependency gate result (full tree, incl. transitives).
+				                                  failure parks the job in DEP_GUARD_FAILED with a summarized
+				                                  violations report (Slack + Jira, retained 30d); success resumes.
+				       · stage=deploy           → deployment result — the existing finalize logic below.
 				     ──────────────────────────────────────────────────────────────────────────── -->
 				<choice doc:name="CHOICE cd stage?"
 				        doc:id="c1d2e3f4-000a-000a-000a-000000000001"
-				        doc:description="Route MUnit (test) callbacks to the park/resume handler; deploy callbacks to finalize">
+				        doc:description="Route MUnit (test) and dependency-guard callbacks to their park/resume handlers; deploy callbacks to finalize">
 
 				    <when expression="#[vars.stage == 'test']"
 				          doc:name="stage=test (MUnit CI result)"
@@ -678,6 +684,204 @@ output application/json
 				                <set-variable variableName="httpStatus" value="400"
 				                              doc:name="PV SET httpStatus 400" doc:id="c1d2e3f4-000a-000a-000a-00000000002c" />
 				                <ee:transform doc:name="DW 400 Unknown MUnit Result" doc:id="c1d2e3f4-000a-000a-000a-00000000002d">
+				                    <ee:message><ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{ error: "invalid result (expected success|failure)", correlationId: correlationId }]]></ee:set-payload></ee:message>
+				                </ee:transform>
+				            </otherwise>
+
+				        </choice>
+
+				    </when>
+
+				    <!-- ── stage=dependency-guard (Java-17 dependency gate, incl. transitives) ────────
+				         The CI dependency guard resolves the FULL Maven tree and validates every Mule
+				         extension against the Java-17 floors BEFORE build/deploy:
+				           · failure → park the job in DEP_GUARD_FAILED (retained 30d, resumable), store
+				                       the summarized violations report, Slack + Jira notify.
+				           · success → resume a job parked in DEP_GUARD_FAILED back to PR_OPEN.
+				         Mirrors the stage=test park/resume contract; the lock is NOT released on failure
+				         (the app is still mid-upgrade). ───────────────────────────────────────────────── -->
+				    <when expression="#[vars.stage == 'dependency-guard']"
+				          doc:name="stage=dependency-guard (Java 17 dep gate)"
+				          doc:id="c1d2e3f4-000c-000c-000c-000000000001">
+
+				        <choice doc:name="CHOICE dep-guard result?"
+				                doc:id="c1d2e3f4-000c-000c-000c-000000000002"
+				                doc:description="Guard failure → park DEP_GUARD_FAILED; success → resume if parked">
+
+				            <!-- ── dep-guard FAILURE → park in DEP_GUARD_FAILED (idempotent) ───────── -->
+				            <when expression="#[vars.cdResult == 'failure']"
+				                  doc:name="dep-guard failure"
+				                  doc:id="c1d2e3f4-000c-000c-000c-000000000003">
+				                <choice doc:name="CHOICE parkable?"
+				                        doc:id="c1d2e3f4-000c-000c-000c-000000000004"
+				                        doc:description="Ignore when already parked or already in a terminal state">
+				                    <when expression="#[['DEP_GUARD_FAILED','MUNIT_FAILED','DEPLOYED','FAILED_DEPLOY','FAILED_CI','FAILED_ASSESS','FAILED_COMMIT','FAILED_INTERRUPTED'] contains (vars.curStatus default '')]"
+				                          doc:name="already parked/terminal — idempotent"
+				                          doc:id="c1d2e3f4-000c-000c-000c-000000000005">
+				                        <logger level="INFO" doc:name="LOG INFO dep-guard failure idempotent"
+				                                doc:id="c1d2e3f4-000c-000c-000c-000000000006"
+				                                message="#[output application/java --- 'dep-guard failure ignored (already ' ++ (vars.curStatus default '?') ++ ')']" />
+				                        <ee:transform doc:name="DW 200 dep-guard idempotent" doc:id="c1d2e3f4-000c-000c-000c-000000000007">
+				                            <ee:message><ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{ acknowledged: true, idempotent: true, jobId: vars.jobId, status: vars.curStatus }]]></ee:set-payload></ee:message>
+				                        </ee:transform>
+				                    </when>
+				                    <otherwise doc:name="park in DEP_GUARD_FAILED"
+				                               doc:id="c1d2e3f4-000c-000c-000c-000000000008">
+				                        <!-- Persist DEP_GUARD_FAILED + the summarized violations report. jobStore TTL
+				                             (osv2.jobTtlSeconds=30d) is refreshed on store, so the parked job is retained
+				                             ~30 days. The single-flight lock is intentionally NOT released. -->
+				                        <ee:transform doc:name="DW Update Job to DEP_GUARD_FAILED" doc:id="c1d2e3f4-000c-000c-000c-000000000009">
+				                            <ee:message><ee:set-payload><![CDATA[%dw 2.0
+output application/json
+import mergeWith from dw::core::Objects
+import nowUtc from dwl::dates
+---
+vars.jobRec mergeWith {
+    status:    "DEP_GUARD_FAILED",
+    error:     (vars.cdError default "Java 17 dependency violations found in CI"),
+    depGuard:  { report: (vars.cdReport default []), at: nowUtc() },
+    updatedAt: nowUtc()
+}]]></ee:set-payload></ee:message>
+				                        </ee:transform>
+				                        <os:store key="#[vars.jobId]" objectStore="jobStore"
+				                                  doc:name="OS Store DEP_GUARD_FAILED" doc:id="c1d2e3f4-000c-000c-000c-00000000000a">
+				                            <os:value>#[payload]</os:value>
+				                        </os:store>
+
+				                        <!-- Slack + Jira (non-fatal, payload-preserving via pf-notify-event) -->
+				                        <ee:transform doc:name="DW Build DEP_GUARD_FAILED notification vars" doc:id="c1d2e3f4-000c-000c-000c-00000000000b">
+				                            <ee:message /><ee:variables>
+				                                <ee:set-variable variableName="eventSlackText"><![CDATA[%dw 2.0
+output text/plain
+var rpt = (vars.cdReport default [])
+var lines = rpt map ((v) -> "• " ++ ((v.groupId default "?") as String) ++ ":" ++ ((v.artifactId default "?") as String)
+                            ++ " resolved " ++ ((v.resolvedVersion default "?") as String)
+                            ++ " < required " ++ ((v.requiredVersion default "?") as String))
+---
+":no_entry: *Java 17 dependency guard FAILED* - " ++ (vars.appName default "unknown")
+++ "\nJob " ++ (vars.jobId default "?") ++ " is paused (DEP_GUARD_FAILED)."
+++ (if (!isEmpty(lines)) ("\nJava 17-incompatible dependencies were resolved (incl. transitives):\n" ++ (lines joinBy "\n")) else "")
+++ "\nFix the connector pins/versions; the upgrade resumes automatically when CI reports a dependency-guard success."
+++ (if (vars.jiraTicketId != null) ("\nJira: <" ++ (p('jira.baseUrl') default '') ++ "/browse/" ++ (vars.jiraTicketId as String) ++ "|" ++ (vars.jiraTicketId as String) ++ ">") else "")
+++ (if (vars.prUrl != null) ("\n" ++ (vars.prUrl as String)) else "")]]></ee:set-variable>
+				                                <ee:set-variable variableName="jiraCommentText"><![CDATA[%dw 2.0
+output text/plain
+var rpt = (vars.cdReport default [])
+var lines = rpt map ((v) -> ((v.groupId default "?") as String) ++ ":" ++ ((v.artifactId default "?") as String)
+                            ++ " (" ++ ((v.resolvedVersion default "?") as String) ++ " < " ++ ((v.requiredVersion default "?") as String) ++ ")")
+---
+"Java 17 dependency guard FAILED in CI for " ++ (vars.appName as String) ++ " (job " ++ (vars.jobId as String)
+++ "). The upgrade is paused (DEP_GUARD_FAILED)."
+++ (if (!isEmpty(lines)) (" Incompatible dependencies: " ++ (lines joinBy "; ") ++ ".") else "")
+++ " Fix the connector pins/versions; CI resumes the job on the next successful dependency-guard run."]]></ee:set-variable>
+				                                <ee:set-variable variableName="jiraCommentUrl"><![CDATA[vars.prUrl default null]]></ee:set-variable>
+				                            </ee:variables>
+				                        </ee:transform>
+				                        <flow-ref name="pf-notify-event" doc:name="pf-notify-event (dep-guard failed)"
+				                                  doc:id="c1d2e3f4-000c-000c-000c-00000000000c" />
+
+				                        <logger level="WARN" doc:name="LOG WARN Job DEP_GUARD_FAILED"
+				                                doc:id="c1d2e3f4-000c-000c-000c-00000000000d"
+				                                message="#[output application/java --- 'job DEP_GUARD_FAILED | ' ++ (sizeOf(vars.cdReport default []) as String) ++ ' violation(s) | awaiting dependency fix']" />
+
+				                        <ee:transform doc:name="DW 200 DEP_GUARD_FAILED Ack" doc:id="c1d2e3f4-000c-000c-000c-00000000000e">
+				                            <ee:message><ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{ acknowledged: true, jobId: vars.jobId, status: "DEP_GUARD_FAILED", violations: sizeOf(vars.cdReport default []) }]]></ee:set-payload></ee:message>
+				                        </ee:transform>
+				                    </otherwise>
+				                </choice>
+				            </when>
+
+				            <!-- ── dep-guard SUCCESS → resume a parked job (else no-op) ───────────── -->
+				            <when expression="#[vars.cdResult == 'success']"
+				                  doc:name="dep-guard success"
+				                  doc:id="c1d2e3f4-000c-000c-000c-00000000000f">
+				                <choice doc:name="CHOICE was parked (dep-guard)?"
+				                        doc:id="c1d2e3f4-000c-000c-000c-000000000010"
+				                        doc:description="Resume only when the job is currently parked in DEP_GUARD_FAILED">
+				                    <when expression="#[vars.curStatus == 'DEP_GUARD_FAILED']"
+				                          doc:name="parked — resume to PR_OPEN"
+				                          doc:id="c1d2e3f4-000c-000c-000c-000000000011">
+				                        <ee:transform doc:name="DW Resume Job to PR_OPEN (dep-guard)" doc:id="c1d2e3f4-000c-000c-000c-000000000012">
+				                            <ee:message><ee:set-payload><![CDATA[%dw 2.0
+output application/json
+import mergeWith from dw::core::Objects
+import nowUtc from dwl::dates
+---
+vars.jobRec mergeWith {
+    status:    "PR_OPEN",
+    error:     null,
+    depGuard:  { result: "passed", at: nowUtc() },
+    updatedAt: nowUtc()
+}]]></ee:set-payload></ee:message>
+				                        </ee:transform>
+				                        <os:store key="#[vars.jobId]" objectStore="jobStore"
+				                                  doc:name="OS Store resumed PR_OPEN (dep-guard)" doc:id="c1d2e3f4-000c-000c-000c-000000000013">
+				                            <os:value>#[payload]</os:value>
+				                        </os:store>
+
+				                        <ee:transform doc:name="DW Build dep-guard-resumed notification vars" doc:id="c1d2e3f4-000c-000c-000c-000000000014">
+				                            <ee:message /><ee:variables>
+				                                <ee:set-variable variableName="eventSlackText"><![CDATA[%dw 2.0
+output text/plain
+---
+":white_check_mark: *Java 17 dependency guard passing again* - " ++ (vars.appName default "unknown")
+++ "\nJob " ++ (vars.jobId default "?") ++ " resumed (PR_OPEN); ready to merge/deploy."
+++ (if (vars.prUrl != null) ("\n" ++ (vars.prUrl as String)) else "")]]></ee:set-variable>
+				                                <ee:set-variable variableName="jiraCommentText"><![CDATA[%dw 2.0
+output text/plain
+---
+"The Java 17 dependency guard is passing again for " ++ (vars.appName as String) ++ " (job " ++ (vars.jobId as String)
+++ "). The upgrade has resumed (PR_OPEN) and is ready to merge/deploy."]]></ee:set-variable>
+				                                <ee:set-variable variableName="jiraCommentUrl"><![CDATA[vars.prUrl default null]]></ee:set-variable>
+				                            </ee:variables>
+				                        </ee:transform>
+				                        <flow-ref name="pf-notify-event" doc:name="pf-notify-event (dep-guard resumed)"
+				                                  doc:id="c1d2e3f4-000c-000c-000c-000000000015" />
+
+				                        <logger level="INFO" doc:name="LOG INFO Job resumed (dep-guard)"
+				                                doc:id="c1d2e3f4-000c-000c-000c-000000000016"
+				                                message="#[output application/java --- 'job resumed | DEP_GUARD_FAILED->PR_OPEN (dependency guard green)']" />
+
+				                        <ee:transform doc:name="DW 200 resumed Ack (dep-guard)" doc:id="c1d2e3f4-000c-000c-000c-000000000017">
+				                            <ee:message><ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{ acknowledged: true, resumed: true, jobId: vars.jobId, status: "PR_OPEN" }]]></ee:set-payload></ee:message>
+				                        </ee:transform>
+				                    </when>
+				                    <otherwise doc:name="not parked (dep-guard) — note only"
+				                               doc:id="c1d2e3f4-000c-000c-000c-000000000018">
+				                        <logger level="INFO" doc:name="LOG INFO dep-guard success noted"
+				                                doc:id="c1d2e3f4-000c-000c-000c-000000000019"
+				                                message="#[output application/java --- 'dep-guard success noted (job not parked, status=' ++ (vars.curStatus default '?') ++ ')']" />
+				                        <ee:transform doc:name="DW 200 dep-guard success noted" doc:id="c1d2e3f4-000c-000c-000c-00000000001a">
+				                            <ee:message><ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{ acknowledged: true, jobId: vars.jobId, status: vars.curStatus, note: "dependency-guard success noted" }]]></ee:set-payload></ee:message>
+				                        </ee:transform>
+				                    </otherwise>
+				                </choice>
+				            </when>
+
+				            <!-- ── unknown dep-guard result → 400 ────────────────────────────────── -->
+				            <otherwise doc:name="unknown dep-guard result — reject"
+				                       doc:id="c1d2e3f4-000c-000c-000c-00000000001b">
+				                <logger level="WARN" doc:name="LOG WARN Unknown dep-guard result"
+				                        doc:id="c1d2e3f4-000c-000c-000c-00000000001c"
+				                        message="#[output application/java --- 'unknown stage=dependency-guard result=' ++ vars.cdResult]" />
+				                <set-variable variableName="httpStatus" value="400"
+				                              doc:name="PV SET httpStatus 400" doc:id="c1d2e3f4-000c-000c-000c-00000000001d" />
+				                <ee:transform doc:name="DW 400 Unknown dep-guard Result" doc:id="c1d2e3f4-000c-000c-000c-00000000001e">
 				                    <ee:message><ee:set-payload><![CDATA[%dw 2.0
 output application/json
 ---

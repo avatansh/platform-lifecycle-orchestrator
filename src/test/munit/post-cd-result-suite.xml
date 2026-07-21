@@ -660,4 +660,172 @@
         </munit:validation>
     </munit:test>
 
+    <!-- ==========================================================================
+         Test 12: stage=dependency-guard + failure + job PR_OPEN -> parks DEP_GUARD_FAILED
+         ========================================================================== -->
+    <munit:test name="post-cd-result-depguard-failure-parks-DEP_GUARD_FAILED"
+                doc:id="cd-test-0012"
+                description="A dependency-guard failure parks a live job in DEP_GUARD_FAILED with the violations report and notifies Slack">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="Mock OS retrieve job record (PR_OPEN)" processor="os:retrieve">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="#['OS Retrieve Job Record']" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[{ jobId: 'job-dg-012', status: 'PR_OPEN', appName: 'my-app', prUrl: 'https://gh/pr/12' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="Mock OS store" processor="os:store">
+                <munit-tools:then-return><munit-tools:payload value="#[null]" /></munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="Mock HTTP (Slack)" processor="http:request">
+                <munit-tools:then-return><munit-tools:payload value="#[{ ok: true }]" mediaType="application/json" /></munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <munit:set-event doc:name="event (stage=dependency-guard failure)">
+                <munit:payload value='#[{ jobId: "job-dg-012", result: "failure", stage: "dependency-guard", error: "2 Java 17 dependency violations", report: [ { groupId: "org.mule.connectors", artifactId: "mule-objectstore-connector", resolvedVersion: "1.2.0", requiredVersion: "1.2.2", reason: "below Java 17 minimum" }, { groupId: "org.mule.connectors", artifactId: "mule-sockets-connector", resolvedVersion: "1.2.0", requiredVersion: "1.2.4", reason: "below Java 17 minimum" } ] }]' />
+                <munit:attributes value="#[{ headers: { 'x-cd-token': 'test-webhook-secret-value-12345!' } }]" />
+            </munit:set-event>
+            <flow-ref name="mf-impl-post-cd-result" doc:name="invoke cd-result" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="status = DEP_GUARD_FAILED" expression="#[payload.status]" is="#[MunitTools::equalTo('DEP_GUARD_FAILED')]" />
+            <munit-tools:assert-that doc:name="acknowledged true" expression="#[payload.acknowledged]" is="#[MunitTools::equalTo(true)]" />
+            <munit-tools:assert-that doc:name="violations = 2" expression="#[payload.violations]" is="#[MunitTools::equalTo(2)]" />
+            <munit-tools:verify-call doc:name="verify OS store DEP_GUARD_FAILED" processor="os:store">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="#['OS Store DEP_GUARD_FAILED']" />
+                </munit-tools:with-attributes>
+            </munit-tools:verify-call>
+        </munit:validation>
+    </munit:test>
+
+    <!-- ==========================================================================
+         Test 13: stage=dependency-guard + failure + job already DEP_GUARD_FAILED -> idempotent
+         ========================================================================== -->
+    <munit:test name="post-cd-result-depguard-failure-idempotent"
+                doc:id="cd-test-0013"
+                description="A repeat dependency-guard failure for an already-parked job is idempotent (no re-store)">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="Mock OS retrieve job record (DEP_GUARD_FAILED)" processor="os:retrieve">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="#['OS Retrieve Job Record']" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[{ jobId: 'job-dg-013', status: 'DEP_GUARD_FAILED', appName: 'my-app' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <munit:set-event doc:name="event (stage=dependency-guard failure idempotent)">
+                <munit:payload value='#[{ jobId: "job-dg-013", result: "failure", stage: "dependency-guard" }]' />
+                <munit:attributes value="#[{ headers: { 'x-cd-token': 'test-webhook-secret-value-12345!' } }]" />
+            </munit:set-event>
+            <flow-ref name="mf-impl-post-cd-result" doc:name="invoke cd-result" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="idempotent true" expression="#[payload.idempotent]" is="#[MunitTools::equalTo(true)]" />
+            <munit-tools:verify-call doc:name="OS store NOT called" processor="os:store" times="0" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- ==========================================================================
+         Test 14: stage=dependency-guard + success + job DEP_GUARD_FAILED -> resumes PR_OPEN
+         ========================================================================== -->
+    <munit:test name="post-cd-result-depguard-success-resumes-PR_OPEN"
+                doc:id="cd-test-0014"
+                description="A dependency-guard success for a parked job resumes it to PR_OPEN and notifies Slack">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="Mock OS retrieve job record (DEP_GUARD_FAILED)" processor="os:retrieve">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="#['OS Retrieve Job Record']" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[{ jobId: 'job-dg-014', status: 'DEP_GUARD_FAILED', appName: 'my-app', prUrl: 'https://gh/pr/14' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="Mock OS store" processor="os:store">
+                <munit-tools:then-return><munit-tools:payload value="#[null]" /></munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="Mock HTTP (Slack)" processor="http:request">
+                <munit-tools:then-return><munit-tools:payload value="#[{ ok: true }]" mediaType="application/json" /></munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <munit:set-event doc:name="event (stage=dependency-guard success resume)">
+                <munit:payload value='#[{ jobId: "job-dg-014", result: "success", stage: "dependency-guard" }]' />
+                <munit:attributes value="#[{ headers: { 'x-cd-token': 'test-webhook-secret-value-12345!' } }]" />
+            </munit:set-event>
+            <flow-ref name="mf-impl-post-cd-result" doc:name="invoke cd-result" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="resumed true" expression="#[payload.resumed]" is="#[MunitTools::equalTo(true)]" />
+            <munit-tools:assert-that doc:name="status PR_OPEN" expression="#[payload.status]" is="#[MunitTools::equalTo('PR_OPEN')]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- ==========================================================================
+         Test 15: stage=dependency-guard + success + job NOT parked -> note only
+         ========================================================================== -->
+    <munit:test name="post-cd-result-depguard-success-not-parked-note-only"
+                doc:id="cd-test-0015"
+                description="A dependency-guard success for a non-parked job is acknowledged as a note without changing state">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="Mock OS retrieve job record (COMMITTED)" processor="os:retrieve">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="#['OS Retrieve Job Record']" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[{ jobId: 'job-dg-015', status: 'COMMITTED', appName: 'my-app' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <munit:set-event doc:name="event (stage=dependency-guard success not parked)">
+                <munit:payload value='#[{ jobId: "job-dg-015", result: "success", stage: "dependency-guard" }]' />
+                <munit:attributes value="#[{ headers: { 'x-cd-token': 'test-webhook-secret-value-12345!' } }]" />
+            </munit:set-event>
+            <flow-ref name="mf-impl-post-cd-result" doc:name="invoke cd-result" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="note present" expression="#[payload.note]" is="#[MunitTools::containsString('dependency-guard success noted')]" />
+            <munit-tools:verify-call doc:name="OS store NOT called" processor="os:store" times="0" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- ==========================================================================
+         Test 16: stage=dependency-guard + unknown result -> 400
+         ========================================================================== -->
+    <munit:test name="post-cd-result-depguard-unknown-result-returns-400"
+                doc:id="cd-test-0016"
+                description="An unrecognised dependency-guard result value returns 400">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="Mock OS retrieve job record (PR_OPEN)" processor="os:retrieve">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="#['OS Retrieve Job Record']" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[{ jobId: 'job-dg-016', status: 'PR_OPEN', appName: 'my-app' }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <munit:set-event doc:name="event (stage=dependency-guard unknown)">
+                <munit:payload value='#[{ jobId: "job-dg-016", result: "maybe", stage: "dependency-guard" }]' />
+                <munit:attributes value="#[{ headers: { 'x-cd-token': 'test-webhook-secret-value-12345!' } }]" />
+            </munit:set-event>
+            <flow-ref name="mf-impl-post-cd-result" doc:name="invoke cd-result" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="httpStatus 400" expression="#[vars.httpStatus]" is="#[MunitTools::equalTo('400')]" />
+            <munit-tools:assert-that doc:name="error present" expression="#[payload.error]" is="#[MunitTools::containsString('invalid result')]" />
+        </munit:validation>
+    </munit:test>
+
 </mule>

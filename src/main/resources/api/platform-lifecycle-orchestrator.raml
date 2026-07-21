@@ -136,6 +136,35 @@ types:
         required: false
         description: Flag/reason indicating why this edit is needed (e.g. the gating rule that triggered it)
 
+  DependencyViolation:
+    type: object
+    description: |
+      A single Java-17 dependency-guard finding, reported by the CI guard which resolves
+      the FULL Maven dependency tree (direct + transitive) and validates every Mule
+      extension against its Java-17 minimum. Surfaced on the job (see JobStatus.report)
+      so callers/agents can show exactly which connector to pin.
+    properties:
+      groupId:
+        type: string
+        description: Extension groupId (e.g. org.mule.connectors).
+      artifactId:
+        type: string
+        description: Extension artifactId (e.g. mule-objectstore-connector).
+      resolvedVersion:
+        type: string
+        required: false
+        description: The version Maven actually resolved in the tree (may be transitive).
+      requiredVersion:
+        type: string
+        required: false
+        description: |
+          The Java-17 minimum (floor) the extension must meet, or "unknown" for a Mule
+          extension not present in the guard's floors set (reported as a warning).
+      reason:
+        type: string
+        required: false
+        description: Why this was flagged (e.g. "below Java 17 minimum").
+
   AssessmentResult:
     type: object
     properties:
@@ -158,13 +187,19 @@ types:
         type: string
       status:
         type: string
-        enum: [PROCESSING, ASSESSING, COMMITTING, COMMITTED, PR_OPEN, MUNIT_FAILED, DEPLOYING, DEPLOYED, ROLLED_BACK, CLOSED, FAILED_ASSESS, FAILED_COMMIT, FAILED_CI, FAILED_DEPLOY, FAILED_INTERRUPTED]
+        enum: [PROCESSING, ASSESSING, COMMITTING, COMMITTED, PR_OPEN, MUNIT_FAILED, DEP_GUARD_FAILED, DEPLOYING, DEPLOYED, ROLLED_BACK, CLOSED, FAILED_ASSESS, FAILED_COMMIT, FAILED_CI, FAILED_DEPLOY, FAILED_INTERRUPTED]
         description: |
           Job lifecycle state. Most values are terminal or auto-advancing. MUNIT_FAILED is
           a NON-terminal, human-needed PAUSE: the app's MUnit suite failed in CI. The job
           waits (retained for 30 days) until a human fixes the tests and CI reports a test
           success (via POST /webhook/cd-result with stage=test, result=success), which
           resumes it. While MUNIT_FAILED, nextPollSeconds is large or omitted.
+          DEP_GUARD_FAILED is a similar NON-terminal PAUSE: the CI Java-17 dependency guard
+          resolved the full dependency tree and found a Mule extension (often a transitive,
+          e.g. an old mule-objectstore-connector bundled by another connector) below its
+          Java-17 minimum. The offending dependencies are listed in `report`. The job waits
+          (retained 30 days) until the connector(s) are pinned and CI reports a
+          dependency-guard success (stage=dependency-guard, result=success), which resumes it.
           CLOSED is a terminal state set when the upgrade PR is closed WITHOUT merging
           (the app's lock is released so it can be re-run or reapplied).
       message:
@@ -191,6 +226,13 @@ types:
       error:
         type: string
         required: false
+      report:
+        type: DependencyViolation[]
+        required: false
+        description: |
+          Java-17 dependency-guard violations. Present only when the guard ran and found
+          offending dependencies (typically alongside status DEP_GUARD_FAILED). Lists each
+          Mule extension that is below its Java-17 minimum so the caller knows what to pin.
 
   CoordinateOverrides:
     type: object
@@ -227,12 +269,16 @@ types:
   CdResultRequest:
     type: object
     description: |
-      CD/CI callback that updates a job. ONE endpoint serves two pipeline stages,
+      CD/CI callback that updates a job. ONE endpoint serves three pipeline stages,
       distinguished by `stage`:
         - stage=deploy (default): deployment result from the CD pipeline
           (success -> DEPLOYED, failure -> FAILED_DEPLOY + rollback).
         - stage=test: MUnit (CI test) result. A failure parks the job in MUNIT_FAILED
           (Slack + Jira notified); a later success resumes the parked job.
+        - stage=dependency-guard: Java-17 dependency-gate result (full dependency tree,
+          incl. transitives). A failure parks the job in DEP_GUARD_FAILED with the
+          summarized `report` of offending dependencies (Slack + Jira notified); a later
+          success resumes the parked job.
       Authenticated via the X-CD-Signature-256 HMAC header (X-CD-Token accepted as a
       transitional fallback).
     properties:
@@ -244,11 +290,12 @@ types:
       stage:
         type: string
         required: false
-        enum: [test, deploy]
+        enum: [test, dependency-guard, deploy]
         description: |
           Which pipeline stage this callback reports. Defaults to `deploy` when omitted,
           keeping existing CD callers backward-compatible. Use `test` to report the
-          MUnit/CI outcome.
+          MUnit/CI outcome, or `dependency-guard` to report the Java-17 dependency-gate
+          outcome.
       deployUrl:
         type: string
         required: false
@@ -257,6 +304,14 @@ types:
         type: string
         required: false
         description: Human-readable failure detail (present on result=failure).
+      report:
+        type: DependencyViolation[]
+        required: false
+        description: |
+          Summarized Java-17 dependency-guard violations (present on
+          stage=dependency-guard, result=failure). Each entry names a Mule extension that
+          resolved below its Java-17 minimum, so the orchestrator can persist and surface
+          it on GET /jobs/{jobId}.
 
   AssessRequest:
     type: CoordinateOverrides
@@ -472,8 +527,8 @@ types:
           environment, jiraTicketId, resolved coordinates), re-assessed against the CURRENT
           compatibility matrix. Primary use: after the matrix was republished to cover a
           connector that was previously left un-pinned, or to retry a MUNIT_FAILED /
-          FAILED_* / CLOSED job without re-supplying coordinates. Releases this job's app
-          lock and mints a NEW jobId for the relaunched run.
+          DEP_GUARD_FAILED / FAILED_* / CLOSED job without re-supplying coordinates. Releases
+          this job's app lock and mints a NEW jobId for the relaunched run.
         responses:
           200:
             description: The app was already in the desired state; nothing to reapply.
