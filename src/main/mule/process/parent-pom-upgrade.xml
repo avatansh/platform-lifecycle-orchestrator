@@ -57,19 +57,23 @@ http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/cu
 output application/java
 import drop from dw::core::Arrays
 ---
-if ((vars.owner default '') != '' and (vars.repo default '') != '')
-    { owner: (vars.owner as String), repo: (vars.repo as String), urlBranch: null, urlPomPath: null }
-else do {
+// ALWAYS parse repoUrl (when present) for owner/repo/branch/pomPath, THEN let explicit
+// owner/repo from the request override only the owner/repo. This is deliberate: the Agentforce
+// LLM often passes BOTH a /tree/<branch>/<dir> repoUrl AND owner+repo it parsed itself; the old
+// short-circuit ("if owner+repo -> ignore repoUrl") discarded the URL's branch + sub-path, so the
+// root pom.xml on the default branch was read (NO_CHANGE). Parsing the URL unconditionally keeps
+// branch + pomPath intact regardless of which fields the caller sends.
+do {
     // Normalise: drop .git suffix, query/fragment, trailing slashes, then the scheme.
     var clean   = (((vars.repoUrl default '') replace /\.git\/?$/ with "") replace /[?#].*$/ with "") replace /\/+$/ with ""
     var noProto = clean replace /^[A-Za-z]+:\/\// with ""
-    var segs0   = (noProto splitBy "/") filter ((s) -> s != "")
+    var segs0   = if (isEmpty(noProto)) [] else ((noProto splitBy "/") filter ((s) -> s != ""))
     // If the first segment looks like a host (contains a dot, e.g. github.com), drop it.
     // NOTE: use `drop` (not the range selector segs0[1 to -1]) — the range form is ambiguous and
     // was silently collapsing the tail (…/tree/<branch>/<dir>), leaving only owner/repo.
-    var segs    = if ((segs0[0] default '') contains ".") (segs0 drop 1) else segs0
-    var owner   = segs[0] default ''
-    var repo    = segs[1] default ''
+    var segs      = if ((segs0[0] default '') contains ".") (segs0 drop 1) else segs0
+    var urlOwner  = segs[0] default null
+    var urlRepo   = segs[1] default null
     // A GitHub web URL may embed the branch + sub-path: /<owner>/<repo>/tree|blob/<branch>/<sub-path...>
     var marker    = segs[2] default ''
     var isTree    = marker == "tree" or marker == "blob"
@@ -83,7 +87,12 @@ else do {
         if (isEmpty(restStr)) null
         else if (lastSeg contains ".") restStr
         else (restStr ++ "/pom.xml")
-    --- { owner: owner, repo: repo, urlBranch: urlBranch, urlPomPath: urlPomPath }
+    --- {
+        owner:      (if ((vars.owner default '') != '') (vars.owner as String) else urlOwner),
+        repo:       (if ((vars.repo  default '') != '') (vars.repo  as String) else urlRepo),
+        urlBranch:  urlBranch,
+        urlPomPath: urlPomPath
+    }
 }]]></ee:set-variable>
                 <ee:set-variable variableName="pomPath"><![CDATA[%dw 2.0
 output application/java
