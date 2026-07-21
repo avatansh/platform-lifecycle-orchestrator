@@ -305,4 +305,74 @@ var pom = &quot;&lt;project xmlns='http://maven.apache.org/POM/4.0.0'&gt;&lt;mod
         </munit:validation>
     </munit:test>
 
+    <!-- repoUrl TREE-URL parsing: a GitHub /tree/<branch>/<subdir> link must resolve
+         branch=develop and pomPath=bom/pom.xml (the exact case failing in CH2.0). No
+         owner/repo/branch/pomPath vars are set — everything must come from repoUrl. -->
+    <munit:test name="parentpom-repourl-tree-parsing" doc:id="ppp-test-0005"
+                description="pf-upgrade-parent-pom parses a /tree/develop/bom repoUrl into branch=develop, pomPath=bom/pom.xml">
+        <munit:behavior>
+            <munit-tools:mock-when doc:name="mock http fallback (slack/jira)" processor="http:request">
+                <munit-tools:then-return><munit-tools:payload mediaType="application/java" value="#[{}]" /></munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock GET HEAD commit (develop)" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/avatansh/mule-apps/commits/develop" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{ sha: 'PSHA' }]" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="headCommit" value="#[{ sha: 'PSHA' }]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock GET parent pom at bom/pom.xml" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/repos/avatansh/mule-apps/contents/bom/pom.xml" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java"
+                        value="#[%dw 2.0
+import toBase64 from dw::core::Binaries
+output application/java
+var pom = &quot;&lt;project xmlns='http://maven.apache.org/POM/4.0.0'&gt;&lt;modelVersion&gt;4.0.0&lt;/modelVersion&gt;&lt;groupId&gt;c&lt;/groupId&gt;&lt;artifactId&gt;parent&lt;/artifactId&gt;&lt;version&gt;1&lt;/version&gt;&lt;packaging&gt;pom&lt;/packaging&gt;&lt;/project&gt;&quot;
+---
+{ content: toBase64(pom as Binary), encoding: 'base64' }]" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="pomResp" value="#[%dw 2.0
+import toBase64 from dw::core::Binaries
+output application/java
+var pom = &quot;&lt;project xmlns='http://maven.apache.org/POM/4.0.0'&gt;&lt;modelVersion&gt;4.0.0&lt;/modelVersion&gt;&lt;groupId&gt;c&lt;/groupId&gt;&lt;artifactId&gt;parent&lt;/artifactId&gt;&lt;version&gt;1&lt;/version&gt;&lt;packaging&gt;pom&lt;/packaging&gt;&lt;/project&gt;&quot;
+---
+{ content: toBase64(pom as Binary), encoding: 'base64' }]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock Jira create issue" processor="http:request">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="/rest/api/3/issue" attributeName="path" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload mediaType="application/java" value="#[{ key: 'J1U-P' }]" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="createdIssue" value="#[{ key: 'J1U-P' }]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock OS retrieve" processor="os:retrieve">
+                <munit-tools:then-return><munit-tools:payload mediaType="application/java" value="#[{}]" /></munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when doc:name="mock OS store" processor="os:store">
+                <munit-tools:then-return><munit-tools:payload mediaType="application/java" value="#[null]" /></munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        <munit:execution>
+            <set-variable variableName="repoUrl" value="https://github.com/avatansh/mule-apps/tree/develop/bom" doc:name="PV repoUrl (tree)" />
+            <flow-ref name="pf-upgrade-parent-pom" doc:name="invoke pf-upgrade-parent-pom" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that doc:name="pomPath resolved to bom/pom.xml" expression="#[payload.pomPath]" is="#[MunitTools::equalTo('bom/pom.xml')]" />
+            <munit-tools:assert-that doc:name="appName is repo" expression="#[payload.appName]" is="#[MunitTools::equalTo('mule-apps')]" />
+        </munit:validation>
+    </munit:test>
+
 </mule>

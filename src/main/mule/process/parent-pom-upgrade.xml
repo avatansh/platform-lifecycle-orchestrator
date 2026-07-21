@@ -94,12 +94,13 @@ do {
         urlPomPath: urlPomPath
     }
 }]]></ee:set-variable>
-                <ee:set-variable variableName="pomPath"><![CDATA[%dw 2.0
-output application/java
----
-(vars.pomPath default (vars.repoCoords.urlPomPath default 'pom.xml')) as String]]></ee:set-variable>
             </ee:variables>
         </ee:transform>
+        <!-- Resolve pomPath in a SEPARATE step: sibling ee:set-variable expressions in one
+             Transform Message all evaluate against the INPUT state, so vars.repoCoords is still
+             null there. Computing it here (after the transform committed repoCoords) is what
+             makes the URL-embedded sub-path (bom/pom.xml) actually win over the 'pom.xml' default. -->
+        <set-variable variableName="pomPath" value="#[output application/java --- (vars.pomPath default (vars.repoCoords.urlPomPath default 'pom.xml')) as String]" doc:name="PV SET pomPath (after repoCoords)" doc:id="b1c2d3e4-0009-0009-0009-000000000016" />
         <choice doc:name="CHOICE owner/repo resolved?" doc:id="b1c2d3e4-0009-0009-0009-000000000015">
             <when expression="#[(vars.repoCoords.owner default '') == '' or (vars.repoCoords.repo default '') == '']">
                 <logger level="ERROR" doc:name="LOG ERROR repo unresolved" doc:id="b1c2d3e4-0009-0009-0009-000000000016" message="#[output application/java --- 'parent-pom: could not resolve owner/repo | repoUrl=' ++ (vars.repoUrl default '?')]" />
@@ -115,11 +116,11 @@ output application/java
         <!-- Resolve base branch: explicit vars.branch, else a branch parsed from the URL, else the repo's default branch. -->
         <choice doc:name="CHOICE branch supplied?" doc:id="b1c2d3e4-0009-0009-0009-000000000019">
             <when expression="#[(vars.branch default '') != '' or (vars.repoCoords.urlBranch default '') != '']">
-                <set-variable variableName="defaultBranch" value="#[(if ((vars.branch default '') != '') vars.branch else vars.repoCoords.urlBranch) as String]" doc:name="PV SET defaultBranch (explicit/url)" doc:id="b1c2d3e4-0009-0009-0009-00000000001a" />
+                <set-variable variableName="defaultBranch" value="#[output application/java --- (if ((vars.branch default '') != '') vars.branch else vars.repoCoords.urlBranch) as String]" doc:name="PV SET defaultBranch (explicit/url)" doc:id="b1c2d3e4-0009-0009-0009-00000000001a" />
             </when>
             <otherwise>
                 <http:request doc:name="GET repo (default_branch)" doc:id="b1c2d3e4-0009-0009-0009-00000000001b" config-ref="GitHub_Request" path="#['/repos/' ++ vars.repoCoords.owner ++ '/' ++ vars.repoCoords.repo]" outputMimeType="application/json" target="repoInfo" />
-                <set-variable variableName="defaultBranch" value="#[(vars.repoInfo.default_branch default 'main') as String]" doc:name="PV SET defaultBranch (repo)" doc:id="b1c2d3e4-0009-0009-0009-00000000001c" />
+                <set-variable variableName="defaultBranch" value="#[output application/java --- (vars.repoInfo.default_branch default 'main') as String]" doc:name="PV SET defaultBranch (repo)" doc:id="b1c2d3e4-0009-0009-0009-00000000001c" />
             </otherwise>
         </choice>
 
